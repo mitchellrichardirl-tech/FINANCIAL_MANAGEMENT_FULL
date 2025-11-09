@@ -1,0 +1,6 @@
+{
+  "name": "OCR Project",
+  "image": "mcr.microsoft.com/devcontainers/python:3.11-bullseye",
+  "postCreateCommand": "bash .devcontainer/postCreate.sh",
+  "remoteUser": "vscode"
+}
