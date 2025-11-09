@@ -79,10 +79,12 @@ class ImageLoader:
     @staticmethod
     def _load_pdf(path: Path) -> List[np.ndarray]:
         """Load all pages from a PDF as images."""
+        logger.info(f"Loading PDF: {path.name}")
         try:
             images = []
             pil_images = pdf2image.convert_from_path(path)
             
+            logger.info(f"Number of pages in PDF: {len(pil_images)}")
             for i, pil_image in enumerate(pil_images):
                 image = np.array(pil_image)
                 images.append(image)
