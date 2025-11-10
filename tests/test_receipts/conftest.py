@@ -1,6 +1,7 @@
 # Add to conftest.py
 import pytest
 from unittest.mock import Mock, patch
+
 from src.models.receipt import Receipt
 from src.models.processing_config import ProcessingConfig
 
@@ -16,16 +17,22 @@ def mock_processing_config_instance():
     config = Mock(spec=ProcessingConfig)
     return config
 
-# # Register Receipt class for proper mocking
-# @pytest.fixture(autouse=True)
-# def setup_receipt_mock():
-#     """Setup Receipt class for mocking."""
-#     with patch('src.receipts.receipt_loader.Receipt') as mock:
-#         # Make Receipt callable return a mock instance
-#         mock_instance = Mock()
-#         mock.return_value = mock_instance
-#         mock_instance.source_file = None
-#         mock_instance.page_number = None
-#         mock_instance.original_image = None
-#         mock_instance.processed_image = None
-#         yield
+# Disable logging for receipt extractor tests as well
+@pytest.fixture(autouse=True)
+def disable_receipt_extractor_logging():
+    import logging
+    logging.disable(logging.CRITICAL)
+    yield
+    logging.disable(logging.NOTSET)
+
+# Register custom markers
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "integration: mark test as an integration test"
+    )
+    config.addinivalue_line(
+        "markers", "slow: mark test as slow running"
+    )
+    config.addinivalue_line(
+        "markers", "unit: mark test as a unit test"
+    )

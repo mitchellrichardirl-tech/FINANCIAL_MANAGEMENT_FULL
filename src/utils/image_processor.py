@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from email.mime import image
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict
 import logging
 import numpy as np
 import cv2
@@ -57,19 +57,25 @@ class ImageProcessor:
                 image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         return image
 
-    def process(self, methods: Optional[list[str]|str] = None) -> np.ndarray:
-        """Process the image using specified methods."""
+    def process(self, methods: Optional[list[str]|str] = None) -> Dict[str, np.ndarray]:
+        """Process the image using specified methods.
+        
+        Each method is applied independently to the base grayscale image.
+        
+        Args:
+            methods: List of method names or single method name to apply.
+                    If None, applies all available methods.
+        
+        Returns:
+            Dictionary with method names as keys and processed images as values.
+        """
         if isinstance(methods, str):
             methods = [methods]
         elif methods is None:
-            methods = [
-                "denoise",
-                "correct_skew",
-                "apply_clahe",
-                "apply_bilateral_threshold",
-                "apply_morphological"
-            ]
-
+            methods = list(self.available_methods.keys())
+        
+        processed_images = {}
+        
         for method in methods:
             if method not in self.available_methods:
                 logger.warning(f"Method {method} is not recognized. Skipping.")
@@ -78,18 +84,19 @@ class ImageProcessor:
             if callable(process_method):
                 logger.info(f"Applying {method}...")
                 try:
-                    self.gray_image = process_method()
+                    # Apply each method to a copy of the original grayscale image
+                    processed_images[method] = process_method(self.gray_image.copy())
                 except Exception as e:
                     logger.error(f"Error applying {method}: {e}")
             else:
                 logger.warning(f"Method {method} not found in ImageProcessor.")
-        return self.gray_image
+        
+        return processed_images
 
-    def _denoise(self) -> np.ndarray:
+    def _denoise(self, image: np.ndarray) -> np.ndarray:
         """Apply advanced denoising."""
-
         # Denoise
-        pil_image = Image.fromarray(self.gray_image)
+        pil_image = Image.fromarray(image)
         pil_image = pil_image.filter(
             ImageFilter.MedianFilter(
                 size=self.config.denoise_filter_size
@@ -102,62 +109,59 @@ class ImageProcessor:
         enhancer = ImageEnhance.Sharpness(pil_image)
         pil_image = enhancer.enhance(self.config.sharpness_factor)
 
-        self.gray_image = np.array(pil_image)
+        return np.array(pil_image)
 
-        return self.gray_image
-
-    def _correct_skew(self) -> np.ndarray:
+    def _correct_skew(self, image: np.ndarray) -> np.ndarray:
         """Detect and correct skew using a more robust method."""
-        coords = np.column_stack(np.where(self.gray_image > 0))
+        coords = np.column_stack(np.where(image > 0))
         
         # Check if we have enough points for minAreaRect
         if len(coords) < 5:  # minAreaRect needs at least 5 points
             logger.warning("Not enough points for skew correction")
-            return self.gray_image
+            return image
         
         angle = cv2.minAreaRect(coords)[-1]
 
         if angle < -45:
             angle = 90 + angle
 
-        (h, w) = self.gray_image.shape[:2]
+        (h, w) = image.shape[:2]
         center = (w // 2, h // 2)
         rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
-        self.gray_image = cv2.warpAffine(
-            self.gray_image, rotation_matrix, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE
+        rotated_image = cv2.warpAffine(
+            image, rotation_matrix, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE
         )
         logger.info(f"Corrected skew by {angle:.2f} degrees")
-        return self.gray_image
+        return rotated_image
     
-    def _apply_clahe(self) -> np.ndarray:
+    def _apply_clahe(self, image: np.ndarray) -> np.ndarray:
         """Apply Contrast Limited Adaptive Histogram Equalization."""
         clahe = cv2.createCLAHE(
             clipLimit=self.config.clahe_clip_limit,
             tileGridSize=self.config.clahe_tile_size
         )
-        self.gray_image = clahe.apply(self.gray_image)
-        return self.gray_image
+        return clahe.apply(image)
     
-    def _apply_bilateral_threshold(self) -> np.ndarray:
+    def _apply_bilateral_threshold(self, image: np.ndarray) -> np.ndarray:
         """Apply bilateral filter followed by adaptive threshold."""
         bilateral = cv2.bilateralFilter(
-            self.gray_image, 
+            image, 
             self.config.bilateral_d,
             self.config.bilateral_sigma_color,
             self.config.bilateral_sigma_space
         )
-        self.gray_image = cv2.adaptiveThreshold(
+        thresholded = cv2.adaptiveThreshold(
             bilateral, 255, 
             cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
             cv2.THRESH_BINARY, 11, 2
         )
-        return self.gray_image
+        return thresholded
 
-    def _apply_morphological(self) -> np.ndarray:
+    def _apply_morphological(self, image: np.ndarray) -> np.ndarray:
         """Apply morphological operations."""
         # First apply bilateral filter
         bilateral = cv2.bilateralFilter(
-            self.gray_image, 
+            image, 
             self.config.bilateral_d,
             self.config.bilateral_sigma_color,
             self.config.bilateral_sigma_space
@@ -168,6 +172,6 @@ class ImageProcessor:
         morph = cv2.morphologyEx(bilateral, cv2.MORPH_CLOSE, kernel)
         
         # Otsu's threshold
-        _, self.gray_image = cv2.threshold(morph, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        _, thresholded = cv2.threshold(morph, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-        return self.gray_image
+        return thresholded

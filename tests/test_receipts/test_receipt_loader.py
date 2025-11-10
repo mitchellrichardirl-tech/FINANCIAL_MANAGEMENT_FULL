@@ -105,7 +105,7 @@ class TestReceiptLoader:
             assert receipt.source_file == Path("test.pdf")
             assert receipt.page_number == i
             assert np.array_equal(receipt.original_image, sample_images[i])
-            assert np.array_equal(receipt.processed_image, sample_processed_images[i])
+            assert np.array_equal(receipt.processed_images, sample_processed_images[i])
     
     @patch('src.receipts.receipt_loader.ImageProcessor')
     @patch('src.receipts.receipt_loader.ImageLoader')
