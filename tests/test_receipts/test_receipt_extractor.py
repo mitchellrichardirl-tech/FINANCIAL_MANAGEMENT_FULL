@@ -439,7 +439,7 @@ class TestProcessImageVariant:
         assert result["date"] is not None
         assert result["confidence"] == 3
         assert result["method"] == "denoise"
-        assert len(result["text"]) > 0
+        assert len(result["extracted_text"]) > 0
     
     @patch.object(ReceiptExtractor, 'extract_text_with_ocr')
     def test_process_image_variant_partial_data(self, mock_ocr, extractor, sample_image):
@@ -479,7 +479,7 @@ class TestProcessImageVariant:
         assert result["amount"] is None
         assert result["date"] is None
         assert result["confidence"] == 0
-        assert result["text"] == ""
+        assert result["extracted_text"] == ""
     
     @patch.object(ReceiptExtractor, 'extract_text_with_ocr')
     def test_process_image_variant_date_isoformat(self, mock_ocr, extractor, sample_image):
@@ -509,7 +509,7 @@ class TestProcessReceipt:
             "date": "2024-01-15T00:00:00",
             "confidence": 3,
             "method": "denoise",
-            "text": "WALMART\nTotal: $25.99"
+            "extracted_text": "WALMART\nTotal: $25.99"
         }
         
         result = extractor.process_receipt(mock_receipt)
@@ -531,9 +531,9 @@ class TestProcessReceipt:
         
         # Return different confidence levels
         mock_process.side_effect = [
-            {"vendor": None, "amount": None, "date": None, "confidence": 0, "method": "denoise"},
-            {"vendor": "WALMART", "amount": 25.99, "date": "2024-01-15T00:00:00", "confidence": 3, "method": "clahe"},
-            {"vendor": "WAL", "amount": 25.99, "date": None, "confidence": 2, "method": "morphological"}
+            {"vendor": None, "amount": None, "date": None, "confidence": 0, "method": "denoise", "extracted_text": ""},
+            {"vendor": "WALMART", "amount": 25.99, "date": "2024-01-15T00:00:00", "confidence": 3, "method": "clahe", "extracted_text": "WALMART\nTotal: $25.99"},
+            {"vendor": "WAL", "amount": 25.99, "date": None, "confidence": 2, "method": "morphological", "extracted_text": "WAL\nTotal: $25.99"}
         ]
         
         result = extractor.process_receipt(mock_receipt)
@@ -554,9 +554,9 @@ class TestProcessReceipt:
         }
         
         mock_process.side_effect = [
-            {"vendor": "W", "amount": None, "date": None, "confidence": 1, "method": "method1"},
-            {"vendor": "WALMART", "amount": 25.99, "date": None, "confidence": 2, "method": "method2"},
-            {"vendor": "WAL", "amount": 20.00, "date": "2024-01-15T00:00:00", "confidence": 2, "method": "method3"}
+            {"vendor": "W", "amount": None, "date": None, "confidence": 1, "method": "method1", "extracted_text": "W\nTotal: $0.00"},
+            {"vendor": "WALMART", "amount": 25.99, "date": None, "confidence": 2, "method": "method2", "extracted_text": "WALMART\nTotal: $25.99"},
+            {"vendor": "WAL", "amount": 20.00, "date": "2024-01-15T00:00:00", "confidence": 2, "method": "method3", "extracted_text": "WAL\nTotal: $20.00"}
         ]
         
         result = extractor.process_receipt(mock_receipt)
@@ -592,7 +592,7 @@ class TestProcessReceipt:
             "date": None,
             "confidence": 2,
             "method": "test",
-            "text": "text"
+            "extracted_text": "text"
         }
         
         result = extractor.process_receipt(mock_receipt)
@@ -691,6 +691,7 @@ class TestIntegration:
         receipt.date = None
         receipt.confidence = 0
         receipt.selected_method = None
+        receipt.extracted_text = None
         
         # Process
         result = extractor.process_receipt(receipt)

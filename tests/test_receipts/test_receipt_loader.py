@@ -72,7 +72,7 @@ class TestReceiptLoader:
         assert isinstance(results, list)
         assert len(results) == 1
         assert isinstance(results[0], Receipt)
-        assert results[0].source_file == Path("test.jpg")
+        assert results[0].original_filename == Path("test.jpg")
         assert results[0].page_number == 0
         assert np.array_equal(results[0].original_image, sample_images[0])
     
@@ -102,7 +102,7 @@ class TestReceiptLoader:
         
         for i, receipt in enumerate(results):
             assert isinstance(receipt, Receipt)
-            assert receipt.source_file == Path("test.pdf")
+            assert receipt.original_filename == Path("test.pdf")
             assert receipt.page_number == i
             assert np.array_equal(receipt.original_image, sample_images[i])
             assert np.array_equal(receipt.processed_images, sample_processed_images[i])
@@ -157,7 +157,7 @@ class TestReceiptLoader:
         
         # Assertions
         assert len(results) == 1
-        assert results[0].source_file == file_path
+        assert results[0].original_filename == file_path
     
     @patch('src.receipts.receipt_loader.ImageProcessor')
     @patch('src.receipts.receipt_loader.ImageLoader')
@@ -223,7 +223,7 @@ class TestReceiptLoader:
         # Assertions
         assert isinstance(results, list)
         assert len(results) == 1
-        assert results[0].source_file == Path("test.jpg")
+        assert results[0].original_filename == Path("test.jpg")
     
     @patch('src.receipts.receipt_loader.ImageProcessor')
     @patch('src.receipts.receipt_loader.ImageLoader')
@@ -275,10 +275,10 @@ class TestReceiptLoader:
         assert len(results) == 4  # Total pages across all files
         
         # Check source files
-        assert results[0].source_file == Path("file1.jpg")
-        assert results[1].source_file == Path("file2.pdf")
-        assert results[2].source_file == Path("file2.pdf")
-        assert results[3].source_file == Path("file3.png")
+        assert results[0].original_filename == Path("file1.jpg")
+        assert results[1].original_filename == Path("file2.pdf")
+        assert results[2].original_filename == Path("file2.pdf")
+        assert results[3].original_filename == Path("file3.png")
     
     @patch('src.receipts.receipt_loader.ImageProcessor')
     @patch('src.receipts.receipt_loader.ImageLoader')
@@ -329,8 +329,8 @@ class TestReceiptLoader:
         
         # Should have results from successful files only
         assert len(results) == 2
-        assert results[0].source_file == Path("file1.jpg")
-        assert results[1].source_file == Path("file3.jpg")
+        assert results[0].original_filename == Path("file1.jpg")
+        assert results[1].original_filename == Path("file3.jpg")
     
     @patch('src.receipts.receipt_loader.ImageLoader')
     def test_process_files_empty_list(self, mock_image_loader_class):

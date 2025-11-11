@@ -41,7 +41,7 @@ class ReceiptLoader:
                 processed_imgs = processor.process()
                 logger.info(f"Processed image {i+1} of {n_images} from {file_path}")
                 yield Receipt(
-                    source_file=file_path,
+                    original_filename=file_path,
                     page_number=i,
                     original_image=img,
                     processed_images=processed_imgs
@@ -85,6 +85,6 @@ if __name__ == "__main__":
     receipt_loader = ReceiptLoader()
     processed_images = receipt_loader.process_files(test_receipt_paths, yield_pages=True)
     for rcpt in processed_images:
-        logger.info(f"Receipt from {rcpt.source_file}, page {rcpt.page_number}, "
+        logger.info(f"Receipt from {rcpt.original_filename}, page {rcpt.page_number}, "
                     f"original shape: {rcpt.original_image.shape}, "
                     f"processed shape: {rcpt.processed_images.shape}")

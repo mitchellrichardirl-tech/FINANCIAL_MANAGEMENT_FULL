@@ -6,13 +6,15 @@ from pathlib import Path
 
 @dataclass
 class Receipt:
-    source_file: Path
+    original_filename: Path
     page_number: int
     original_image: np.ndarray
     processed_images: Dict[str, np.ndarray]
-    extracted_texts: Dict[str, str] | None = None
+    extracted_text: str | None = None
     selected_method: str | None = None
     confidence: float | None = None
     vendor: str | None = None
     date: datetime | None = None
     amount: float | None = None
+    stored_filename: str | None = None
+    file_path: Path | None = None

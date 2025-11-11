@@ -197,7 +197,7 @@ class ReceiptExtractor:
                 "date": date.isoformat() if date else None,
                 "confidence": confidence,
                 "method": variant,
-                "text": text,
+                "extracted_text": text,
             }
         return {
             "vendor": None,
@@ -205,7 +205,7 @@ class ReceiptExtractor:
             "date": None,
             "confidence": 0,
             "method": variant,
-            "text": "",
+            "extracted_text": "",
         }
 
     def process_receipt(self, receipt: Receipt) -> Receipt:
@@ -227,7 +227,8 @@ class ReceiptExtractor:
             "amount": None, 
             "date": None, 
             "confidence": 0,
-            "method": None
+            "method": None,
+            "extracted_text": None
         }
 
         for variant, proc_img in receipt.processed_images.items():
@@ -247,6 +248,7 @@ class ReceiptExtractor:
             if best_result["date"]
             else None
         )
+        receipt.extracted_text = best_result["extracted_text"]
         receipt.selected_method = best_result["method"]
         receipt.confidence = best_result["confidence"]
         return receipt
