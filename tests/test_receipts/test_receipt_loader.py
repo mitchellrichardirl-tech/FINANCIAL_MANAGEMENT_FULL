@@ -218,7 +218,7 @@ class TestReceiptLoader:
         
         # Create loader and process file
         loader = ReceiptLoader()
-        results = loader.process_files("test.jpg", yield_pages=False)
+        results = loader.process_files("test.jpg", yield_pages=True)
         
         # Assertions
         assert isinstance(results, list)
@@ -241,7 +241,7 @@ class TestReceiptLoader:
         
         # Create loader and process file
         loader = ReceiptLoader()
-        results = loader.process_files(Path("test.jpg"), yield_pages=False)
+        results = loader.process_files(Path("test.jpg"), yield_pages=True)
         
         # Assertions
         assert isinstance(results, list)
@@ -268,7 +268,7 @@ class TestReceiptLoader:
         # Create loader and process files
         loader = ReceiptLoader()
         file_paths = ["file1.jpg", "file2.pdf", "file3.png"]
-        results = loader.process_files(file_paths, yield_pages=False)
+        results = loader.process_files(file_paths, yield_pages=True)
         
         # Assertions
         assert isinstance(results, list)
@@ -296,7 +296,7 @@ class TestReceiptLoader:
         
         # Create loader and process files
         loader = ReceiptLoader()
-        results = loader.process_files(["file1.jpg", "file2.jpg"], yield_pages=True)
+        results = loader.process_files(["file1.jpg", "file2.jpg"], yield_pages=False)
         
         # Assertions
         from collections.abc import Iterator
@@ -325,7 +325,7 @@ class TestReceiptLoader:
         # Create loader and process files
         loader = ReceiptLoader()
         file_paths = ["file1.jpg", "missing.pdf", "file3.jpg"]
-        results = loader.process_files(file_paths, yield_pages=False)
+        results = loader.process_files(file_paths, yield_pages=True)
         
         # Should have results from successful files only
         assert len(results) == 2
@@ -336,7 +336,7 @@ class TestReceiptLoader:
     def test_process_files_empty_list(self, mock_image_loader_class):
         """Test process_files with empty file list."""
         loader = ReceiptLoader()
-        results = loader.process_files([], yield_pages=False)
+        results = loader.process_files([], yield_pages=True)
         
         assert isinstance(results, list)
         assert len(results) == 0

@@ -8,8 +8,8 @@ from pathlib import Path
 class Receipt:
     original_filename: Path
     page_number: int
-    original_image: np.ndarray
-    processed_images: Dict[str, np.ndarray]
+    original_image: np.ndarray | None = None
+    processed_images: Dict[str, np.ndarray] | None = None
     extracted_text: str | None = None
     selected_method: str | None = None
     confidence: float | None = None

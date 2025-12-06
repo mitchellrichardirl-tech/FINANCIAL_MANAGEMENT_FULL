@@ -59,7 +59,7 @@ class ReceiptLoader:
             file_paths = [file_paths]
         n_files = len(file_paths)
         logger.info(f"Processing {n_files} receipt file(s)")
-        if yield_pages:
+        if not yield_pages:
             return self._process_files_lazy(file_paths, n_files)
         return list(self._process_files_lazy(file_paths, n_files))
     
