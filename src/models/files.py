@@ -128,6 +128,7 @@ class ImportResult:
     columns_requested: Optional[List[Any]]
     column_mapping: Optional[Dict[str, str]]
     data: List[Dict[str, Any]]
+    upload_id: Optional[int] = None
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     imported_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())

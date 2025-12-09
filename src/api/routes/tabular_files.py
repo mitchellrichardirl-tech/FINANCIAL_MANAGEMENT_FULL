@@ -1,8 +1,7 @@
+from datetime import datetime
+
 from flask import Blueprint, request, jsonify
 from werkzeug.utils import secure_filename
-import tempfile
-import os
-from pathlib import Path
 import logging
 
 from src.api.routes.health import status
@@ -229,6 +228,7 @@ def import_file():
                 columns=result.columns_imported,
                 rows=result.data
             )
+            result.upload_id = upload_result["upload_id"]
             logger.info(
                 f'Upload record created with ID: {upload_result["upload_id"]}, '
                 f'Rows: {upload_result["rows_inserted"]}')
@@ -333,3 +333,120 @@ def check_tabular():
     finally:
         if temp_path:
             cleanup_temp_file(temp_path)
+
+@bp.route('', methods=['GET'])
+def get_uploads():
+    """
+    Get all uploads with optional filters.
+    
+    Query Parameters:
+        - limit: Maximum number of results (default: 50)
+        - offset: Pagination offset (default: 0)
+        - file_type: Filter by file type
+        - filename: Filter by filename (partial match)
+        - start_date: Filter uploads from this date (YYYY-MM-DD)
+        - end_date: Filter uploads until this date (YYYY-MM-DD)
+        
+    Returns:
+        List of upload objects as JSON
+    """
+    try:
+        # Parse query parameters
+        limit = request.args.get('limit', 50, type=int)
+        offset = request.args.get('offset', 0, type=int)
+        file_type = request.args.get('file_type')
+        filename = request.args.get('filename')
+        
+        # Parse dates
+        start_date = None
+        end_date = None
+        
+        if request.args.get('start_date'):
+            try:
+                from datetime import datetime
+                start_date = datetime.fromisoformat(request.args.get('start_date'))
+            except ValueError:
+                return error_response('Invalid start_date format. Use YYYY-MM-DD', status_code=400)
+        
+        if request.args.get('end_date'):
+            try:
+                from datetime import datetime
+                end_date = datetime.fromisoformat(request.args.get('end_date'))
+            except ValueError:
+                return error_response('Invalid end_date format. Use YYYY-MM-DD', status_code=400)
+        
+        upload_repo = UploadRepository()
+        uploads = upload_repo.get_all_uploads(
+            limit=limit,
+            offset=offset,
+            file_type=file_type,
+            filename=filename,
+            start_date=start_date,
+            end_date=end_date
+        )
+        
+        return success_response(data=uploads)
+        
+    except DatabaseError as e:
+        return error_response(f'Database error: {str(e)}', status_code=500)
+    except Exception as e:
+        logger.error(f'Failed to get uploads: {e}')
+        return error_response(f'Failed to get uploads: {str(e)}', status_code=500)
+
+
+@bp.route('/<int:upload_id>', methods=['GET'])
+def get_upload(upload_id: int):
+    """
+    Get a single upload by ID.
+    
+    Path Parameters:
+        - upload_id: The upload ID
+        
+    Returns:
+        Upload object as JSON or 404 if not found
+    """
+    try:
+        upload_repo = UploadRepository()
+        upload = upload_repo.get_upload_by_id(upload_id)
+        
+        if upload is None:
+            return error_response(f'Upload {upload_id} not found', status_code=404)
+        
+        return success_response(data=upload)
+        
+    except DatabaseError as e:
+        return error_response(f'Database error: {str(e)}', status_code=500)
+    except Exception as e:
+        logger.error(f'Failed to get upload {upload_id}: {e}')
+        return error_response(f'Failed to get upload: {str(e)}', status_code=500)
+
+
+@bp.route('/<int:upload_id>', methods=['DELETE'])
+def delete_upload(upload_id: int):
+    """
+    Delete an upload and all associated data.
+    
+    Path Parameters:
+        - upload_id: The upload ID to delete
+        
+    Returns:
+        Success message or 404 if not found
+    """
+    try:
+        upload_repo = UploadRepository()
+        deleted = upload_repo.delete_upload(upload_id)
+        
+        if not deleted:
+            return error_response(f'Upload {upload_id} not found', status_code=404)
+        
+        return success_response(
+            data={'deleted_upload_id': upload_id},
+            message=f'Upload {upload_id} deleted successfully',
+            status_code=200
+        )
+        
+    except DatabaseError as e:
+        return error_response(f'Database error: {str(e)}', status_code=500)
+    except Exception as e:
+        logger.error(f'Failed to delete upload {upload_id}: {e}')
+        return error_response(f'Failed to delete upload: {str(e)}', status_code=500)

@@ -196,11 +196,7 @@ class SchemaManager:
             
             conn.commit()
             logger.info("✓ Receipts table ready")
-       
-    def _create_accounts_table(self):
-        """Create bank accounts table"""
-        pass
-      
+           
     def _create_uploads_table(self):
         """Create uploads table for tracking file uploads"""
         logger.info("Creating uploads table if not exists...")

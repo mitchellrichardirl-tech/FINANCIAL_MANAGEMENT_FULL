@@ -762,6 +762,111 @@ def process_receipt():
     finally:
         cleanup_temp_file(temp_path)
 
+@bp.route('/receipts/cancel', methods=['POST'])
+def cancel_receipt():
+    """
+    Cancel receipt upload and delete temporary file.
+    
+    This endpoint is used when a user abandons the upload process after
+    the preview/processing step but before confirmation.
+    
+    Expected JSON:
+        - temp_filename: Name of the temporary file to delete (required)
+        - stored_filename: (optional) Name of any stored file to clean up
+        
+    Returns: Success message
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return error_response('Request body is required', status_code=400)
+        
+        temp_filename = data.get('temp_filename')
+        stored_filename = data.get('stored_filename')
+        
+        if not temp_filename and not stored_filename:
+            return error_response(
+                'At least one of temp_filename or stored_filename is required',
+                status_code=400
+            )
+        
+        files_deleted = []
+        files_not_found = []
+        
+        # Clean up temporary file
+        if temp_filename:
+            # Security: prevent directory traversal attacks
+            if '..' in temp_filename or '/' in temp_filename or '\\' in temp_filename:
+                return error_response('Invalid temp_filename', status_code=400)
+            
+            # Check common temp locations
+            temp_locations = [
+                Path(tempfile.gettempdir()) / temp_filename,
+                Path('/tmp') / temp_filename if os.name != 'nt' else None,
+            ]
+            
+            deleted = False
+            for temp_path in filter(None, temp_locations):
+                if temp_path.exists():
+                    try:
+                        temp_path.unlink()
+                        files_deleted.append(str(temp_path))
+                        deleted = True
+                        logger.info(f'Deleted temp file: {temp_path}')
+                        break
+                    except Exception as e:
+                        logger.warning(f'Failed to delete temp file {temp_path}: {e}')
+            
+            if not deleted:
+                files_not_found.append(temp_filename)
+        
+        # Clean up stored file (if upload was partially completed)
+        if stored_filename:
+            # Security: prevent directory traversal
+            if '..' in stored_filename or '/' in stored_filename or '\\' in stored_filename:
+                return error_response('Invalid stored_filename', status_code=400)
+            
+            upload_folder = get_upload_folder()
+            stored_path = upload_folder / stored_filename
+            
+            if stored_path.exists():
+                try:
+                    stored_path.unlink()
+                    files_deleted.append(str(stored_path))
+                    logger.info(f'Deleted stored file: {stored_path}')
+                except Exception as e:
+                    logger.warning(f'Failed to delete stored file {stored_path}: {e}')
+            else:
+                files_not_found.append(stored_filename)
+        
+        # Build response message
+        message_parts = []
+        if files_deleted:
+            message_parts.append(f"Deleted {len(files_deleted)} file(s)")
+        if files_not_found:
+            message_parts.append(f"{len(files_not_found)} file(s) not found or already removed")
+        
+        if not message_parts:
+            message = "No files to clean up"
+        else:
+            message = "Upload cancelled. " + "; ".join(message_parts)
+        
+        return success_response(
+            data={
+                'files_deleted': len(files_deleted),
+                'files_not_found': len(files_not_found),
+                'details': {
+                    'deleted': files_deleted,
+                    'not_found': files_not_found
+                }
+            },
+            message=message
+        )
+        
+    except Exception as e:
+        logger.error(f'Failed to cancel receipt upload: {e}', exc_info=True)
+        return error_response(f'Failed to cancel upload: {str(e)}', status_code=500)
 
 # 9. Confirm and save receipt
 @bp.route('/receipts/confirm', methods=['POST'])
@@ -860,7 +965,6 @@ def confirm_receipt():
     except Exception as e:
         logger.error(f"Unexpected error in confirm_receipt: {e}", exc_info=True)
         return error_response(f'Internal server error: {str(e)}', status_code=500)
-
 
 # 10. Get receipt statistics (bonus endpoint)
 @bp.route('/receipts/stats', methods=['GET'])

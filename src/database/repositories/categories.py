@@ -78,7 +78,7 @@ class CategoryRepository:
         try:
             row = self.br.select_query(
                 "SELECT * FROM categories WHERE id = ?",
-                params=str(category_id)
+                params=[str(category_id)]
                 )
             return dict(row) if row else None
         except Exception as e:
@@ -176,6 +176,121 @@ class CategoryRepository:
         except Exception as e:
             logger.error(f"Failed to get sub-category {sub_category_id}: {e}")
             raise DatabaseError(f"Failed to get sub-category: {e}") from e
+
+    def get_all_categories(self) -> List[Dict[str, Any]]:
+        """Get all categories"""
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM categories ORDER BY category")
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Failed to get all categories: {e}")
+            raise DatabaseError(f"Failed to get categories: {e}") from e
+
+    def delete_category(self, category_id: int) -> bool:
+        """
+        Delete a category by ID.
+        Returns True if deleted, False if not found.
+        Raises DatabaseError if category has associated sub-categories.
+        """
+        try:
+            with self.db.transaction() as conn:
+                cursor = conn.cursor()
+                
+                # Check for associated sub-categories
+                cursor.execute(
+                    "SELECT COUNT(*) as count FROM sub_categories WHERE category_id = ?",
+                    (category_id,)
+                )
+                count = cursor.fetchone()['count']
+                
+                if count > 0:
+                    raise DatabaseError(
+                        f"Cannot delete category {category_id}: "
+                        f"has {count} associated sub-category(ies)"
+                    )
+                
+                cursor.execute("DELETE FROM categories WHERE id = ?", (category_id,))
+                
+                if cursor.rowcount == 0:
+                    return False
+                
+                logger.info(f"Deleted category {category_id}")
+                return True
+        except DatabaseError:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to delete category {category_id}: {e}")
+            raise DatabaseError(f"Failed to delete category: {e}") from e
+        
+    def get_all_sub_categories(self) -> List[Dict[str, Any]]:
+        """Get all sub-categories with their category info"""
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT sc.*, c.category as category_name
+                    FROM sub_categories sc
+                    JOIN categories c ON sc.category_id = c.id
+                    ORDER BY c.category, sc.sub_category
+                ''')
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Failed to get all sub-categories: {e}")
+            raise DatabaseError(f"Failed to get sub-categories: {e}") from e
+
+    def get_sub_categories_by_category(self, category_id: int) -> List[Dict[str, Any]]:
+        """Get all sub-categories for a specific category"""
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT * FROM sub_categories WHERE category_id = ? ORDER BY sub_category",
+                    (category_id,)
+                )
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Failed to get sub-categories for category {category_id}: {e}")
+            raise DatabaseError(f"Failed to get sub-categories: {e}") from e
+
+    def delete_sub_category(self, sub_category_id: int) -> bool:
+        """
+        Delete a sub-category by ID.
+        Returns True if deleted, False if not found.
+        Raises DatabaseError if sub-category has associated types.
+        """
+        try:
+            with self.db.transaction() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute(
+                    "SELECT COUNT(*) as count FROM types WHERE sub_category_id = ?",
+                    (sub_category_id,)
+                )
+                count = cursor.fetchone()['count']
+                
+                if count > 0:
+                    raise DatabaseError(
+                        f"Cannot delete sub-category {sub_category_id}: "
+                        f"has {count} associated type(s)"
+                    )
+                
+                cursor.execute("DELETE FROM sub_categories WHERE id = ?", (sub_category_id,))
+                
+                if cursor.rowcount == 0:
+                    return False
+                
+                logger.info(f"Deleted sub-category {sub_category_id}")
+                return True
+        except DatabaseError:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to delete sub-category {sub_category_id}: {e}")
+            raise DatabaseError(f"Failed to delete sub-category: {e}") from e
     
     # ========== Types ==========
     
@@ -268,6 +383,75 @@ class CategoryRepository:
         except Exception as e:
             logger.error(f"Failed to get type {type_id}: {e}")
             raise DatabaseError(f"Failed to get type: {e}") from e
+        
+    def get_all_types(self) -> List[Dict[str, Any]]:
+        """Get all types with their hierarchy info"""
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT t.*, sc.sub_category as sub_category_name, 
+                        c.id as category_id, c.category as category_name
+                    FROM types t
+                    JOIN sub_categories sc ON t.sub_category_id = sc.id
+                    JOIN categories c ON sc.category_id = c.id
+                    ORDER BY c.category, sc.sub_category, t.type
+                ''')
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Failed to get all types: {e}")
+            raise DatabaseError(f"Failed to get types: {e}") from e
+
+    def get_types_by_sub_category(self, sub_category_id: int) -> List[Dict[str, Any]]:
+        """Get all types for a specific sub-category"""
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT * FROM types WHERE sub_category_id = ? ORDER BY type",
+                    (sub_category_id,)
+                )
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Failed to get types for sub-category {sub_category_id}: {e}")
+            raise DatabaseError(f"Failed to get types: {e}") from e
+
+    def delete_type(self, type_id: int) -> bool:
+        """
+        Delete a type by ID.
+        Returns True if deleted, False if not found.
+        Raises DatabaseError if type has associated parties.
+        """
+        try:
+            with self.db.transaction() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute(
+                    "SELECT COUNT(*) as count FROM parties WHERE type_id = ?",
+                    (type_id,)
+                )
+                count = cursor.fetchone()['count']
+                
+                if count > 0:
+                    raise DatabaseError(
+                        f"Cannot delete type {type_id}: "
+                        f"has {count} associated party(ies)"
+                    )
+                
+                cursor.execute("DELETE FROM types WHERE id = ?", (type_id,))
+                
+                if cursor.rowcount == 0:
+                    return False
+                
+                logger.info(f"Deleted type {type_id}")
+                return True
+        except DatabaseError:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to delete type {type_id}: {e}")
+            raise DatabaseError(f"Failed to delete type: {e}") from e
     
     # ========== Parties ==========
     
@@ -388,6 +572,101 @@ class CategoryRepository:
         except Exception as e:
             logger.error(f"Failed to get party {party_id}: {e}")
             raise DatabaseError(f"Failed to get party: {e}") from e
+        
+    def get_all_parties_with_transaction_counts(self) -> List[Dict[str, Any]]:
+        """Get all parties with their transaction counts and hierarchy info"""
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT p.*, 
+                        t.type as type_name,
+                        sc.id as sub_category_id,
+                        sc.sub_category as sub_category_name,
+                        c.id as category_id,
+                        c.category as category_name,
+                        COUNT(tr.id) as transaction_count
+                    FROM parties p
+                    JOIN types t ON p.type_id = t.id
+                    JOIN sub_categories sc ON t.sub_category_id = sc.id
+                    JOIN categories c ON sc.category_id = c.id
+                    LEFT JOIN transactions tr ON tr.party_id = p.id
+                    GROUP BY p.id
+                    ORDER BY p.name
+                ''')
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Failed to get all parties with counts: {e}")
+            raise DatabaseError(f"Failed to get parties: {e}") from e
+
+    def get_parties_by_type(self, type_id: int) -> List[Dict[str, Any]]:
+        """Get all parties for a specific type"""
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT * FROM parties WHERE type_id = ? ORDER BY name",
+                    (type_id,)
+                )
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Failed to get parties for type {type_id}: {e}")
+            raise DatabaseError(f"Failed to get parties: {e}") from e
+
+    def delete_party(self, party_id: int) -> bool:
+        """
+        Delete a party by ID.
+        Returns True if deleted, False if not found.
+        Raises DatabaseError if party has associated transactions.
+        """
+        try:
+            with self.db.transaction() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute(
+                    "SELECT COUNT(*) as count FROM transactions WHERE party_id = ?",
+                    (party_id,)
+                )
+                count = cursor.fetchone()['count']
+                
+                if count > 0:
+                    raise DatabaseError(
+                        f"Cannot delete party {party_id}: "
+                        f"has {count} associated transaction(s)"
+                    )
+                
+                cursor.execute("DELETE FROM parties WHERE id = ?", (party_id,))
+                
+                if cursor.rowcount == 0:
+                    return False
+                
+                logger.info(f"Deleted party {party_id}")
+                return True
+        except DatabaseError:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to delete party {party_id}: {e}")
+            raise DatabaseError(f"Failed to delete party: {e}") from e
+
+    def get_transactions_by_party(self, party_id: int) -> List[Dict[str, Any]]:
+        """Get all transactions for a specific party"""
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT t.*, a.account_name
+                    FROM transactions t
+                    LEFT JOIN accounts a ON t.account_id = a.id
+                    WHERE t.party_id = ?
+                    ORDER BY t.transaction_date DESC
+                ''', (party_id,))
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Failed to get transactions for party {party_id}: {e}")
+            raise DatabaseError(f"Failed to get transactions: {e}") from e
     
     # ========== Hierarchy ==========
     

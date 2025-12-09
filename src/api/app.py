@@ -6,7 +6,15 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 
 from .middleware.error_handlers import register_error_handlers
-from .routes import health, receipts, tabular_files
+from src.api.routes import (
+    health,
+    receipts,
+    tabular_files,
+    accounts,
+    categories,
+    transactions,
+)
+from src.api.scheduler import init_scheduler
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +78,9 @@ def create_app(config=None):
     app.register_blueprint(health.bp, url_prefix="/api")
     app.register_blueprint(receipts.bp, url_prefix="/api")
     app.register_blueprint(tabular_files.bp, url_prefix="/api/tabular")
+    app.register_blueprint(accounts.bp, url_prefix='/api/accounts')
+    app.register_blueprint(categories.bp, url_prefix='/api')
+    app.register_blueprint(transactions.bp, url_prefix='/api/transactions')
 
     # Register error handlers
     register_error_handlers(app)
@@ -77,6 +88,11 @@ def create_app(config=None):
     # Create upload folder
     os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
 
+    if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.debug:
+        # Initialize background scheduler
+        init_scheduler(app)
+        logger.info("Background scheduler initialized")
+    
     logger.info("Flask application created successfully")
 
     return app
