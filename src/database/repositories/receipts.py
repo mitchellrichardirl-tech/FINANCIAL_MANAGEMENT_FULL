@@ -145,7 +145,7 @@ class ReceiptRepository:
     
     def update(
         self,
-        receipt_id: int,
+        id: int,
         vendor: Optional[str] = _UNSET,  # type: ignore
         amount: Optional[float] = _UNSET,  # type: ignore
         date: Optional[datetime] = _UNSET,  # type: ignore
@@ -153,6 +153,7 @@ class ReceiptRepository:
         raw_text: Optional[str] = _UNSET  # type: ignore
     ) -> Optional[Dict[str, Any]]:
         """Update receipt data"""
+        logger.debug(f'Updating receipt {id}')
         try:
             with self.db.transaction() as conn:
                 cursor = conn.cursor()
@@ -185,37 +186,36 @@ class ReceiptRepository:
                     params.append(raw_text)
                 
                 if not updates:
-                    return self.get_by_id(receipt_id)
+                    return self.get_by_id(id)
                 
-                params.append(receipt_id)
+                params.append(id)
                 
                 query = f"UPDATE receipts SET {', '.join(updates)} WHERE id = ?"
                 cursor.execute(query, params)
                 
                 if cursor.rowcount == 0:
-                    logger.warning(f"Receipt {receipt_id} not found for update")
+                    logger.warning(f"Receipt {id} not found for update")
                     return None
-            
-            return self.get_by_id(receipt_id)
+                logger.debug(f'Updated receipt {id}')
+            return self.get_by_id(id)
                 
         except Exception as e:
-            logger.error(f"Failed to update receipt {receipt_id}: {e}")
+            logger.error(f"Failed to update receipt {id}: {e}")
             raise DatabaseError(f"Failed to update receipt: {e}") from e
     
-    def delete(self, receipt_id: int) -> bool:
+    def delete(self, receipt_id: int) -> Optional[Dict[str, Any]]:
         """Delete a receipt"""
         try:
             with self.db.transaction() as conn:
                 cursor = conn.cursor()
+                receipt_to_delete = self.get_by_id(receipt_id)
                 cursor.execute('DELETE FROM receipts WHERE id = ?', (receipt_id,))
                 deleted = cursor.rowcount > 0
                 
                 if deleted:
                     logger.info(f"Deleted receipt {receipt_id}")
-                else:
-                    logger.warning(f"Receipt {receipt_id} not found for deletion")
-                
-                return deleted
+                    return receipt_to_delete
+                raise DatabaseError(f"Receipt {receipt_id} not found for deletion")
                 
         except Exception as e:
             logger.error(f"Failed to delete receipt {receipt_id}: {e}")

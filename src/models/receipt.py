@@ -1,6 +1,6 @@
 import numpy as np
-from dataclasses import dataclass
-from typing import Dict
+from dataclasses import dataclass, asdict
+from typing import Dict, Any
 from datetime import datetime
 from pathlib import Path
 
@@ -18,3 +18,6 @@ class Receipt:
     amount: float | None = None
     stored_filename: str | None = None
     file_path: Path | None = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)

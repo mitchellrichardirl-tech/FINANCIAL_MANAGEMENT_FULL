@@ -1,13 +1,15 @@
-from flask import Blueprint, request, jsonify, current_app as app, send_file
+from flask import Blueprint, Response, request, jsonify, current_app as app, send_file
+import json
 from datetime import datetime
-from werkzeug.utils import secure_filename
-from typing import Dict, Union
+from typing import Dict, List, Optional, Tuple
 import logging
 import os
 import tempfile
-import uuid
 import shutil
 from pathlib import Path
+
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import multiprocessing
 
 from src.database.repositories.receipts import ReceiptRepository
 from src.database.connection import DatabaseError
@@ -17,11 +19,14 @@ from src.models.receipt import Receipt
 from src.receipts.receipt_extractor import ReceiptExtractor
 from src.receipts.receipt_loader import ReceiptLoader
 
-from src.api.utils.file_handling import save_upload_file, cleanup_temp_file
+from src.api.utils.file_handling import FileHandler, TempFileManager
 from src.api.utils.response_helpers import success_response, error_response
+from src.api.utils.sse import SSEEventBuilder, ProgressInfo, create_sse_response, create_error_sse_response
+from src.api.utils.route_helpers import handle_exceptions
+from src.api.formatters.receipt_formatter import ReceiptFormatter
+from src.api.services.receipt_processor import ReceiptStreamProcessor, receipt_worker, ProcessingResult
 
 bp = Blueprint('receipts', __name__)
-
 logger = logging.getLogger(__name__)
 
 # Initialize services
@@ -34,68 +39,229 @@ receipt_extractor = ReceiptExtractor()
 # Helper Functions
 # =============================================================================
 
-def allowed_file(filename: Union[Path, str, None]) -> bool:
-    """Check if file extension is allowed."""
-    if filename is None:
-        return False
-    if isinstance(filename, Path):
-        filename = filename.name
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
+def process_receipt_images(file_path: str) -> Optional[Receipt]:
+    """
+    Load and process receipt image(s), returning the best result.
+    
+    For multi-page documents, returns the page with highest confidence.
+    """
+    receipts = list(receipt_loader.process_files(file_path, yield_pages=True))
+    
+    if not receipts:
+        return None
+    
+    if len(receipts) > 1:
+        processed_receipts = [receipt_extractor.process_receipt(r) for r in receipts]
+        return max(processed_receipts, key=lambda r: r.confidence)
+    else:
+        return receipt_extractor.process_receipt(receipts[0])
 
 
-def get_upload_folder() -> Path:
-    """Get the upload folder path, creating it if necessary."""
-    upload_folder = Path(app.config.get('UPLOAD_FOLDER', 'data/uploads/receipts'))
-    upload_folder.mkdir(parents=True, exist_ok=True)
-    return upload_folder
+def apply_form_overrides(receipt: Receipt, form) -> Tuple[Receipt, Optional[str]]:
+    """
+    Apply form data overrides to a receipt.
+    
+    Returns (receipt, error_message) - error_message is None if successful.
+    """
+    if form.get('vendor'):
+        receipt.vendor = form['vendor']
+    
+    if form.get('amount'):
+        try:
+            receipt.amount = float(form['amount'])
+        except ValueError:
+            return receipt, 'Invalid amount format'
+    
+    if form.get('date'):
+        try:
+            receipt.date = datetime.fromisoformat(form['date'])
+        except ValueError:
+            return receipt, 'Invalid date format. Use YYYY-MM-DD'
+    
+    return receipt, None
 
 
-def generate_stored_filename(original_filename: str) -> str:
-    """Generate a unique stored filename."""
-    ext = Path(original_filename).suffix.lower()
-    unique_id = uuid.uuid4().hex[:12]
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    return f"receipt_{timestamp}_{unique_id}{ext}"
+def validate_receipt_filters(args) -> Tuple[Optional[Dict], Optional[str]]:
+    """
+    Parse and validate receipt filter parameters from request args.
+    
+    Returns (filters_dict, error_message) - error_message is None if valid.
+    """
+    filters = {}
+    
+    # Vendor filter
+    vendor = args.get('vendor', type=str)
+    if vendor:
+        filters['vendor'] = vendor
+    
+    # Confidence filter
+    min_confidence = args.get('min_confidence', type=int)
+    if min_confidence is not None:
+        if min_confidence < 0 or min_confidence > 3:
+            return None, 'Confidence must be between 0 and 3'
+        filters['min_confidence'] = min_confidence
+    
+    # Pagination
+    limit = args.get('limit', default=50, type=int)
+    offset = args.get('offset', default=0, type=int)
+    
+    if limit < 1:
+        return None, 'Limit must be at least 1'
+    if limit > 500:
+        return None, 'Limit cannot exceed 500'
+    if offset < 0:
+        return None, 'Offset must be non-negative'
+    
+    filters['limit'] = limit
+    filters['offset'] = offset
+    
+    # Date filters
+    start_date_str = args.get('start_date', type=str)
+    end_date_str = args.get('end_date', type=str)
+    
+    if start_date_str:
+        try:
+            filters['start_date'] = datetime.fromisoformat(start_date_str)
+        except ValueError:
+            return None, 'Invalid start_date format. Use YYYY-MM-DD'
+    
+    if end_date_str:
+        try:
+            filters['end_date'] = datetime.fromisoformat(end_date_str)
+        except ValueError:
+            return None, 'Invalid end_date format. Use YYYY-MM-DD'
+    
+    if filters.get('start_date') and filters.get('end_date'):
+        if filters['start_date'] > filters['end_date']:
+            return None, 'start_date cannot be after end_date'
+    
+    return filters, None
 
 
-def format_receipt_summary(receipt: Dict) -> Dict:
-    """Format receipt for list views (minimal data)."""
-    return {
-        'id': receipt['id'],
-        'original_filename': receipt['original_filename'],
-        'vendor': receipt['vendor'],
-        'amount': receipt['amount'],
-        'date': receipt['date'].isoformat() if isinstance(receipt.get('date'), datetime) else receipt.get('date'),
-        'confidence': receipt['confidence'],
-        'created_at': receipt['created_at'],
-    }
-
-
-def format_receipt_detail(receipt: Dict) -> Dict:
-    """Format receipt for detail views (full data)."""
-    return {
-        'id': receipt['id'],
-        'original_filename': receipt['original_filename'],
-        'stored_filename': receipt['stored_filename'],
-        'vendor': receipt['vendor'],
-        'amount': receipt['amount'],
-        'date': receipt['date'].isoformat() if isinstance(receipt.get('date'), datetime) else receipt.get('date'),
-        'confidence': receipt['confidence'],
-        'selected_method': receipt['selected_method'],
-        'raw_text': receipt.get('raw_text'),  # Include in detail view
-        'metadata': receipt.get('metadata', {}),  # Include in detail view
-        'created_at': receipt['created_at'],
-        'updated_at': receipt['updated_at'],
-    }
+def validate_receipt_update(data: Dict) -> Tuple[Optional[Dict], Optional[str]]:
+    """
+    Validate and extract receipt update fields from request data.
+    
+    Returns (update_kwargs, error_message) - error_message is None if valid.
+    """
+    update_kwargs = {}
+    
+    if 'vendor' in data:
+        update_kwargs['vendor'] = data['vendor']
+    
+    if 'amount' in data:
+        if data['amount'] is not None:
+            try:
+                update_kwargs['amount'] = float(data['amount'])
+            except (ValueError, TypeError):
+                return None, 'Invalid amount format'
+        else:
+            update_kwargs['amount'] = None
+    
+    if 'date' in data:
+        if data['date'] is not None:
+            try:
+                update_kwargs['date'] = datetime.fromisoformat(data['date'])
+            except ValueError:
+                return None, 'Invalid date format. Use YYYY-MM-DD'
+        else:
+            update_kwargs['date'] = None
+    
+    if 'confidence' in data:
+        confidence = data['confidence']
+        if confidence is not None:
+            if not isinstance(confidence, int) or confidence < 0 or confidence > 3:
+                return None, 'Confidence must be an integer between 0 and 3'
+        update_kwargs['confidence'] = confidence
+    
+    if 'raw_text' in data:
+        update_kwargs['raw_text'] = data['raw_text']
+    
+    return update_kwargs, None
 
 
 # =============================================================================
-# Endpoints
+# Streaming Upload Endpoint
 # =============================================================================
 
-# 1. Upload receipt image
+@bp.route('/receipts/upload-stream', methods=['POST'])
+def upload_receipts_stream():
+    """Upload and process multiple receipt images with streaming responses."""
+    temp_files = []
+    
+    try:
+        file_handler = FileHandler.from_app_config(prefix="receipt")
+        files = request.files.getlist('files')
+        
+        # Validate we have files
+        if not files or (len(files) == 1 and files[0].filename == ''):
+            return create_error_sse_response("No files provided")
+        
+        # Save files to temp locations - cleanup happens in generator
+        for file in files:
+            validation = file_handler.validate_file(file)
+            if not validation.is_valid:
+                logger.warning(f"Skipping invalid file: {validation.error}")
+                continue
+            
+            # Create temp file
+            fd, temp_path = tempfile.mkstemp(suffix=validation.extension)
+            try:
+                with os.fdopen(fd, 'wb') as f:
+                    file.save(f)
+                temp_files.append((validation.secured_filename, temp_path))
+                logger.info(f"Saved {validation.secured_filename} to temp: {temp_path}")
+            except Exception as e:
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+                logger.error(f"Failed to save {file.filename}: {e}")
+        
+        if not temp_files:
+            return create_error_sse_response("No valid files to process")
+        
+        form_data = request.form.to_dict() if request.form else None
+        
+        processor = ReceiptStreamProcessor(
+            upload_folder=file_handler.ensure_upload_folder(),
+            allowed_extensions=file_handler.allowed_extensions
+        )
+        
+        def cleanup_and_stream():
+            """Generator wrapper that ensures cleanup after streaming completes."""
+            try:
+                yield from processor.process_files(temp_files, form_data)
+            finally:
+                for _, temp_path in temp_files:
+                    if os.path.exists(temp_path):
+                        try:
+                            os.unlink(temp_path)
+                            logger.info(f"Cleaned up temp file: {temp_path}")
+                        except Exception as e:
+                            logger.error(f"Failed to cleanup {temp_path}: {e}")
+        
+        return create_sse_response(
+            cleanup_and_stream(),
+            headers={"Access-Control-Allow-Origin": "*"}
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in upload_receipts_stream: {e}", exc_info=True)
+        # Cleanup on error before streaming starts
+        for _, temp_path in temp_files:
+            if os.path.exists(temp_path):
+                try:
+                    os.unlink(temp_path)
+                except:
+                    pass
+        return create_error_sse_response("Internal server error", str(e))
+
+
+# =============================================================================
+# Single Upload Endpoint
+# =============================================================================
+
 @bp.route('/receipts/upload', methods=['POST'])
+@handle_exceptions(log_prefix="upload_receipt")
 def upload_receipt():
     """
     Upload a receipt image file, process it, and save to database.
@@ -108,82 +274,42 @@ def upload_receipt():
     
     Returns: receipt_id and extracted data
     """
-    temp_path = None
+    file_handler = FileHandler.from_app_config(prefix="receipt")
     stored_path = None
     
-    try:
-        # Validate file presence
-        if 'file' not in request.files:
-            return error_response('No file provided', status_code=400)
+    # Validate file presence
+    if 'file' not in request.files:
+        return error_response('No file provided', status_code=400)
+    
+    file = request.files['file']
+    validation = file_handler.validate_file(file)
+    
+    if not validation.is_valid:
+        return error_response(validation.error, status_code=400)
+    
+    with TempFileManager() as temp_manager:
+        # Save to temp location for processing
+        temp_path = temp_manager.save_file_to_temp(file, suffix=validation.extension)
         
-        file = request.files['file']
-        
-        if file.filename == '':
-            return error_response('No file selected', status_code=400)
-        
-        if not allowed_file(file.filename):
-            allowed = ', '.join(app.config['ALLOWED_EXTENSIONS'])
-            return error_response(
-                f'Invalid file type. Allowed types: {allowed}',
-                status_code=400
-            )
-        
-        # Secure and generate filenames
-        original_filename = secure_filename(file.filename)
-        stored_filename = generate_stored_filename(original_filename)
-        
-        # Save to temp location first for processing
-        file_extension = Path(original_filename).suffix
-        with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_file:
-            temp_path = temp_file.name
-            file.save(temp_path)
-        
-        logger.info(f"Processing uploaded receipt: {original_filename}")
+        logger.info(f"Processing uploaded receipt: {validation.secured_filename}")
         
         # Load and process the image
-        receipts = receipt_loader.process_files(temp_path, yield_pages=True)
+        receipt = process_receipt_images(str(temp_path))
         
-        if not receipts:
-            return error_response(
-                'Unable to process the uploaded image',
-                status_code=422
-            )
-        
-        # Process first receipt (or best from multi-page)
-        receipt = receipts[0]
-        if len(receipts) > 1:
-            # For multi-page, find best confidence
-            processed_receipts = [receipt_extractor.process_receipt(r) for r in receipts]
-            receipt = max(processed_receipts, key=lambda r: r.confidence)
-        else:
-            receipt = receipt_extractor.process_receipt(receipt)
+        if receipt is None:
+            return error_response('Unable to process the uploaded image', status_code=422)
         
         # Apply any manual overrides from form data
-        if request.form.get('vendor'):
-            receipt.vendor = request.form['vendor']
-        
-        if request.form.get('amount'):
-            try:
-                receipt.amount = float(request.form['amount'])
-            except ValueError:
-                return error_response('Invalid amount format', status_code=400)
-        
-        if request.form.get('date'):
-            try:
-                receipt.date = datetime.fromisoformat(request.form['date'])
-            except ValueError:
-                return error_response(
-                    'Invalid date format. Use YYYY-MM-DD',
-                    status_code=400
-                )
+        receipt, override_error = apply_form_overrides(receipt, request.form)
+        if override_error:
+            return error_response(override_error, status_code=400)
         
         # Move file to permanent storage
-        upload_folder = get_upload_folder()
-        stored_path = upload_folder / stored_filename
-        shutil.copy2(temp_path, stored_path)
+        stored_filename = file_handler.generate_stored_filename(validation.secured_filename)
+        stored_path = file_handler.move_to_permanent(temp_path, stored_filename)
         
         # Update receipt with file info
-        receipt.original_filename = original_filename
+        receipt.original_filename = validation.secured_filename
         receipt.stored_filename = stored_filename
         receipt.file_path = stored_path
         
@@ -191,44 +317,29 @@ def upload_receipt():
         receipt_id = receipt_repository.save(receipt)
         
         if receipt_id is None:
-            # Cleanup stored file if save failed
-            if stored_path and stored_path.exists():
-                stored_path.unlink()
+            file_handler.delete_file(stored_path)
             return error_response('Failed to save receipt', status_code=500)
         
         # Fetch the saved receipt for response
         saved_receipt = receipt_repository.get_by_id(receipt_id)
         
-        logger.info(f"Successfully uploaded and saved receipt {receipt_id}: {original_filename}")
+        logger.info(f"Successfully uploaded and saved receipt {receipt_id}: {validation.secured_filename}")
         
         return success_response(
             {
-                'receipt': format_receipt_summary(saved_receipt),
+                'receipt': ReceiptFormatter.summary(saved_receipt),
                 'message': 'Receipt uploaded and processed successfully'
             },
             status_code=201
         )
-        
-    except DatabaseError as e:
-        logger.error(f"Database error in upload_receipt: {e}")
-        # Cleanup stored file on error
-        if stored_path and Path(stored_path).exists():
-            Path(stored_path).unlink()
-        return error_response(f'Database error: {str(e)}', status_code=500)
-    
-    except Exception as e:
-        logger.error(f"Unexpected error in upload_receipt: {e}", exc_info=True)
-        # Cleanup stored file on error
-        if stored_path and Path(stored_path).exists():
-            Path(stored_path).unlink()
-        return error_response('Internal server error', status_code=500)
-    
-    finally:
-        cleanup_temp_file(temp_path)
 
 
-# 2. Get list of receipts with optional filters
+# =============================================================================
+# CRUD Endpoints
+# =============================================================================
+
 @bp.route('/receipts', methods=['GET'])
+@handle_exceptions(log_prefix="get_receipts")
 def get_receipts():
     """
     Get list of receipts with optional filters and pagination.
@@ -243,117 +354,65 @@ def get_receipts():
     
     Returns: List of receipts with pagination info
     """
-    try:
-        # Parse query parameters
-        vendor = request.args.get('vendor', type=str)
-        min_confidence = request.args.get('min_confidence', type=int)
-        limit = request.args.get('limit', default=50, type=int)
-        offset = request.args.get('offset', default=0, type=int)
-        start_date_str = request.args.get('start_date', type=str)
-        end_date_str = request.args.get('end_date', type=str)
-        
-        # Validate parameters
-        if limit < 1:
-            return error_response('Limit must be at least 1', status_code=400)
-        if limit > 500:
-            return error_response('Limit cannot exceed 500', status_code=400)
-        if offset < 0:
-            return error_response('Offset must be non-negative', status_code=400)
-        if min_confidence is not None and (min_confidence < 0 or min_confidence > 3):
-            return error_response('Confidence must be between 0 and 3', status_code=400)
-        
-        # Parse dates
-        start_date = None
-        end_date = None
-        
-        if start_date_str:
-            try:
-                start_date = datetime.fromisoformat(start_date_str)
-            except ValueError:
-                return error_response('Invalid start_date format. Use YYYY-MM-DD', status_code=400)
-        
-        if end_date_str:
-            try:
-                end_date = datetime.fromisoformat(end_date_str)
-            except ValueError:
-                return error_response('Invalid end_date format. Use YYYY-MM-DD', status_code=400)
-        
-        if start_date and end_date and start_date > end_date:
-            return error_response('start_date cannot be after end_date', status_code=400)
-        
-        # Get receipts
-        receipts = receipt_repository.get_all(
-            limit=limit,
-            offset=offset,
-            vendor=vendor,
-            min_confidence=min_confidence,
-            start_date=start_date,
-            end_date=end_date
-        )
-        
-        # Format response
-        formatted_receipts = [format_receipt_summary(r) for r in receipts]
-        
-        response = {
-            'receipts': formatted_receipts,
-            'pagination': {
-                'limit': limit,
-                'offset': offset,
-                'count': len(formatted_receipts),
-                'has_more': len(formatted_receipts) == limit
-            },
-            'filters': {
-                'vendor': vendor,
-                'min_confidence': min_confidence,
-                'start_date': start_date_str,
-                'end_date': end_date_str
-            }
-        }
-        
-        logger.info(f"Retrieved {len(formatted_receipts)} receipts")
-        return jsonify(response), 200
-        
-    except DatabaseError as e:
-        logger.error(f"Database error in get_receipts: {e}")
-        return error_response(f'Database error: {str(e)}', status_code=500)
+    # Validate and parse filters
+    filters, error = validate_receipt_filters(request.args)
+    if error:
+        return error_response(error, status_code=400)
     
-    except Exception as e:
-        logger.error(f"Unexpected error in get_receipts: {e}", exc_info=True)
-        return error_response('Internal server error', status_code=500)
+    # Extract pagination from filters
+    limit = filters.pop('limit')
+    offset = filters.pop('offset')
+    
+    # Get receipts
+    receipts = receipt_repository.get_all(
+        limit=limit,
+        offset=offset,
+        **filters
+    )
+    
+    # Format response
+    formatted_receipts = ReceiptFormatter.summary_list(receipts)
+    
+    response = {
+        'receipts': formatted_receipts,
+        'pagination': {
+            'limit': limit,
+            'offset': offset,
+            'count': len(formatted_receipts),
+            'has_more': len(formatted_receipts) == limit
+        },
+        'filters': {
+            'vendor': filters.get('vendor'),
+            'min_confidence': filters.get('min_confidence'),
+            'start_date': request.args.get('start_date'),
+            'end_date': request.args.get('end_date')
+        }
+    }
+    
+    logger.info(f"Retrieved {len(formatted_receipts)} receipts")
+    return jsonify(response), 200
 
 
-# 3. Get specific receipt
 @bp.route('/receipts/<int:receipt_id>', methods=['GET'])
+@handle_exceptions(log_prefix="get_receipt")
 def get_receipt(receipt_id: int):
     """
     Get a specific receipt by ID.
     
     Returns: Receipt details
     """
-    try:
-        receipt = receipt_repository.get_by_id(receipt_id)
-        
-        if receipt is None:
-            return error_response(
-                f'Receipt {receipt_id} not found',
-                status_code=404
-            )
-        
-        return success_response({
-            'receipt': format_receipt_detail(receipt)
-        })
-        
-    except DatabaseError as e:
-        logger.error(f"Database error in get_receipt: {e}")
-        return error_response(f'Database error: {str(e)}', status_code=500)
+    receipt = receipt_repository.get_by_id(receipt_id)
     
-    except Exception as e:
-        logger.error(f"Unexpected error in get_receipt: {e}", exc_info=True)
-        return error_response('Internal server error', status_code=500)
+    if receipt is None:
+        return error_response(f'Receipt {receipt_id} not found', status_code=404)
+    
+    return success_response({
+        'receipt': ReceiptFormatter.detail(receipt)
+    })
 
 
-# 4. Update specific receipt
 @bp.route('/receipts/<int:receipt_id>', methods=['PUT'])
+@handle_exceptions(log_prefix="update_receipt")
 def update_receipt(receipt_id: int):
     """
     Update receipt attributes.
@@ -366,198 +425,126 @@ def update_receipt(receipt_id: int):
     
     Returns: Updated receipt
     """
-    try:
-        # Check if receipt exists
-        existing = receipt_repository.get_by_id(receipt_id)
-        if existing is None:
-            return error_response(
-                f'Receipt {receipt_id} not found',
-                status_code=404
-            )
-        
-        # Parse request data
-        data = request.get_json(silent=True)
-        
-        if data is None:
-            return error_response('Request body must be JSON', status_code=400)
-        
-        # Build update kwargs
-        update_kwargs = {}
-        
-        if 'vendor' in data:
-            update_kwargs['vendor'] = data['vendor']
-        
-        if 'amount' in data:
-            try:
-                update_kwargs['amount'] = float(data['amount']) if data['amount'] is not None else None
-            except (ValueError, TypeError):
-                return error_response('Invalid amount format', status_code=400)
-        
-        if 'date' in data:
-            if data['date'] is None:
-                update_kwargs['date'] = None
-            else:
-                try:
-                    update_kwargs['date'] = datetime.fromisoformat(data['date'])
-                except ValueError:
-                    return error_response('Invalid date format. Use YYYY-MM-DD', status_code=400)
-        
-        if 'confidence' in data:
-            confidence = data['confidence']
-            if confidence is not None:
-                if not isinstance(confidence, int) or confidence < 0 or confidence > 3:
-                    return error_response('Confidence must be an integer between 0 and 3', status_code=400)
-            update_kwargs['confidence'] = confidence
-        
-        if 'raw_text' in data:
-            update_kwargs['raw_text'] = data['raw_text']
-        
-        # Perform update
-        if not update_kwargs:
-            return error_response('No valid fields to update', status_code=400)
-        
-        updated_receipt = receipt_repository.update(receipt_id, **update_kwargs)
-        
-        if updated_receipt is None:
-            return error_response(
-                f'Receipt {receipt_id} not found',
-                status_code=404
-            )
-        
-        logger.info(f"Updated receipt {receipt_id}: {list(update_kwargs.keys())}")
-        
-        return success_response({
-            'receipt': format_receipt_summary(updated_receipt),
-            'message': 'Receipt updated successfully'
-        })
-        
-    except DatabaseError as e:
-        logger.error(f"Database error in update_receipt: {e}")
-        return error_response(f'Database error: {str(e)}', status_code=500)
+    # Check if receipt exists
+    existing = receipt_repository.get_by_id(receipt_id)
+    if existing is None:
+        return error_response(f'Receipt {receipt_id} not found', status_code=404)
     
-    except Exception as e:
-        logger.error(f"Unexpected error in update_receipt: {e}", exc_info=True)
-        return error_response('Internal server error', status_code=500)
+    # Parse request data
+    data = request.get_json(silent=True)
+    if data is None:
+        return error_response('Request body must be JSON', status_code=400)
+    
+    # Validate update fields
+    update_kwargs, error = validate_receipt_update(data)
+    if error:
+        return error_response(error, status_code=400)
+    
+    if not update_kwargs:
+        return error_response('No valid fields to update', status_code=400)
+    
+    # Perform update
+    updated_receipt = receipt_repository.update(receipt_id, **update_kwargs)
+    
+    if updated_receipt is None:
+        return error_response(f'Receipt {receipt_id} not found', status_code=404)
+    
+    logger.info(f"Updated receipt {receipt_id}: {list(update_kwargs.keys())}")
+    
+    return success_response({
+        'receipt': ReceiptFormatter.summary(updated_receipt),
+        'message': 'Receipt updated successfully'
+    })
 
 
-# 5. Delete specific receipt
 @bp.route('/receipts/<int:receipt_id>', methods=['DELETE'])
+@handle_exceptions(log_prefix="delete_receipt")
 def delete_receipt(receipt_id: int):
     """
     Delete a specific receipt and its associated image file.
     
     Returns: Success status
     """
-    try:
-        # Get receipt to find file path
-        receipt = receipt_repository.get_by_id(receipt_id)
-        
-        if receipt is None:
-            return error_response(
-                f'Receipt {receipt_id} not found',
-                status_code=404
-            )
-        
-        # Delete from database
-        deleted = receipt_repository.delete(receipt_id)
-        
-        if not deleted:
-            return error_response(
-                f'Failed to delete receipt {receipt_id}',
-                status_code=500
-            )
-        
-        # Delete associated file
-        file_path = receipt.get('file_path')
-        if file_path:
-            try:
-                path = Path(file_path)
-                if path.exists():
-                    path.unlink()
-                    logger.info(f"Deleted receipt file: {file_path}")
-            except Exception as e:
-                # Log but don't fail - the database record is already deleted
-                logger.warning(f"Failed to delete receipt file {file_path}: {e}")
-        
-        logger.info(f"Deleted receipt {receipt_id}")
-        
-        return success_response({
-            'message': f'Receipt {receipt_id} deleted successfully',
-            'deleted_id': receipt_id
-        })
-        
-    except DatabaseError as e:
-        logger.error(f"Database error in delete_receipt: {e}")
-        return error_response(f'Database error: {str(e)}', status_code=500)
+    file_handler = FileHandler.from_app_config()
     
-    except Exception as e:
-        logger.error(f"Unexpected error in delete_receipt: {e}", exc_info=True)
-        return error_response('Internal server error', status_code=500)
+    # Get receipt to find file path
+    receipt = receipt_repository.get_by_id(receipt_id)
+    
+    if receipt is None:
+        return error_response(f'Receipt {receipt_id} not found', status_code=404)
+    
+    # Delete from database
+    deleted = receipt_repository.delete(receipt_id)
+    
+    if not deleted:
+        return error_response(f'Failed to delete receipt {receipt_id}', status_code=500)
+    
+    # Delete associated file
+    file_path = receipt.get('file_path')
+    if file_path:
+        if file_handler.delete_file(file_path):
+            logger.info(f"Deleted receipt file: {file_path}")
+        else:
+            logger.warning(f"Could not delete receipt file: {file_path}")
+    
+    logger.info(f"Deleted receipt {receipt_id}")
+    
+    return success_response({
+        'message': f'Receipt {receipt_id} deleted successfully',
+        'deleted_id': receipt_id
+    })
 
 
-# 6. Get receipt image file
+# =============================================================================
+# Image Endpoint
+# =============================================================================
+
 @bp.route('/receipts/<int:receipt_id>/image', methods=['GET'])
+@handle_exceptions(log_prefix="get_receipt_image")
 def get_receipt_image(receipt_id: int):
     """
     Get the image file for a specific receipt.
     
     Returns: Image file
     """
-    try:
-        receipt = receipt_repository.get_by_id(receipt_id)
-        
-        if receipt is None:
-            return error_response(
-                f'Receipt {receipt_id} not found',
-                status_code=404
-            )
-        
-        file_path = receipt.get('file_path')
-        
-        if not file_path:
-            return error_response(
-                f'No image file associated with receipt {receipt_id}',
-                status_code=404
-            )
-        
-        path = Path(file_path)
-        
-        if not path.exists():
-            logger.error(f"Receipt image file not found: {file_path}")
-            return error_response(
-                f'Image file not found for receipt {receipt_id}',
-                status_code=404
-            )
-        
-        # Determine MIME type
-        extension = path.suffix.lower()
-        mime_types = {
-            '.jpg': 'image/jpeg',
-            '.jpeg': 'image/jpeg',
-            '.png': 'image/png',
-            '.gif': 'image/gif',
-            '.pdf': 'application/pdf',
-        }
-        mimetype = mime_types.get(extension, 'application/octet-stream')
-        
-        return send_file(
-            path,
-            mimetype=mimetype,
-            as_attachment=False,
-            download_name=receipt.get('original_filename', path.name)
-        )
-        
-    except DatabaseError as e:
-        logger.error(f"Database error in get_receipt_image: {e}")
-        return error_response(f'Database error: {str(e)}', status_code=500)
+    file_handler = FileHandler.from_app_config()
     
-    except Exception as e:
-        logger.error(f"Unexpected error in get_receipt_image: {e}", exc_info=True)
-        return error_response('Internal server error', status_code=500)
+    receipt = receipt_repository.get_by_id(receipt_id)
+    
+    if receipt is None:
+        return error_response(f'Receipt {receipt_id} not found', status_code=404)
+    
+    file_path = receipt.get('file_path')
+    
+    if not file_path:
+        return error_response(
+            f'No image file associated with receipt {receipt_id}',
+            status_code=404
+        )
+    
+    path = Path(file_path)
+    
+    if not path.exists():
+        logger.error(f"Receipt image file not found: {file_path}")
+        return error_response(
+            f'Image file not found for receipt {receipt_id}',
+            status_code=404
+        )
+    
+    return send_file(
+        path,
+        mimetype=file_handler.get_mime_type(path),
+        as_attachment=False,
+        download_name=receipt.get('original_filename', path.name)
+    )
 
 
-# 7. Reprocess receipt (rerun OCR)
+# =============================================================================
+# Processing Endpoints
+# =============================================================================
+
 @bp.route('/receipts/<int:receipt_id>/reprocess', methods=['POST'])
+@handle_exceptions(log_prefix="reprocess_receipt")
 def reprocess_receipt(receipt_id: int):
     """
     Rerun OCR processing on an existing receipt.
@@ -567,107 +554,84 @@ def reprocess_receipt(receipt_id: int):
     
     Returns: Updated receipt data
     """
-    try:
-        # Get existing receipt
-        receipt = receipt_repository.get_by_id(receipt_id)
-        
-        if receipt is None:
-            return error_response(
-                f'Receipt {receipt_id} not found',
-                status_code=404
-            )
-        
-        file_path = receipt.get('file_path')
-        
-        if not file_path:
-            return error_response(
-                f'No image file associated with receipt {receipt_id}',
-                status_code=400
-            )
-        
-        path = Path(file_path)
-        
-        if not path.exists():
-            return error_response(
-                f'Image file not found for receipt {receipt_id}',
-                status_code=404
-            )
-        
-        # Check for options
-        data = request.get_json(silent=True) or {}
-        keep_overrides = data.get('keep_overrides', False)
-        
-        # Store original values if keeping overrides
-        original_vendor = receipt.get('vendor') if keep_overrides else None
-        original_amount = receipt.get('amount') if keep_overrides else None
-        original_date = receipt.get('date') if keep_overrides else None
-        
-        logger.info(f"Reprocessing receipt {receipt_id}: {path}")
-        
-        # Reload and reprocess the image
-        receipts = list(receipt_loader.process_files(str(path), yield_pages=True))
-        
-        if not receipts:
-            return error_response(
-                'Unable to reprocess the image',
-                status_code=422
-            )
-        
-        # Process (handle multi-page)
-        processed = receipts[0]
-        if len(receipts) > 1:
-            processed_all = [receipt_extractor.process_receipt(r) for r in receipts]
-            processed = max(processed_all, key=lambda r: r.confidence)
-        else:
-            processed = receipt_extractor.process_receipt(processed)
-        
-        # Build update data
-        update_kwargs = {
-            'confidence': processed.confidence,
-            'raw_text': processed.extracted_text,
-        }
-        
-        # Apply new values or keep overrides
-        if keep_overrides:
-            if original_vendor is None:
-                update_kwargs['vendor'] = processed.vendor
-            if original_amount is None:
-                update_kwargs['amount'] = processed.amount
-            if original_date is None:
-                update_kwargs['date'] = processed.date
-        else:
-            update_kwargs['vendor'] = processed.vendor
-            update_kwargs['amount'] = processed.amount
-            update_kwargs['date'] = processed.date
-        
-        # Update in database
-        updated_receipt = receipt_repository.update(receipt_id, **update_kwargs)
-        
-        logger.info(f"Reprocessed receipt {receipt_id}: confidence={processed.confidence}")
-        
-        return success_response({
-            'receipt': format_receipt_summary(updated_receipt),
-            'message': 'Receipt reprocessed successfully',
-            'reprocessing': {
-                'kept_overrides': keep_overrides,
-                'new_confidence': processed.confidence,
-                'extracted_vendor': processed.vendor,
-                'extracted_amount': processed.amount,
-                'extracted_date': processed.date.isoformat() if processed.date else None
-            }
-        })
-        
-    except DatabaseError as e:
-        logger.error(f"Database error in reprocess_receipt: {e}")
-        return error_response(f'Database error: {str(e)}', status_code=500)
+    # Get existing receipt
+    receipt = receipt_repository.get_by_id(receipt_id)
     
-    except Exception as e:
-        logger.error(f"Unexpected error in reprocess_receipt: {e}", exc_info=True)
-        return error_response('Internal server error', status_code=500)
+    if receipt is None:
+        return error_response(f'Receipt {receipt_id} not found', status_code=404)
+    
+    file_path = receipt.get('file_path')
+    
+    if not file_path:
+        return error_response(
+            f'No image file associated with receipt {receipt_id}',
+            status_code=400
+        )
+    
+    path = Path(file_path)
+    
+    if not path.exists():
+        return error_response(
+            f'Image file not found for receipt {receipt_id}',
+            status_code=404
+        )
+    
+    # Check for options
+    data = request.get_json(silent=True) or {}
+    keep_overrides = data.get('keep_overrides', False)
+    
+    # Store original values if keeping overrides
+    original_vendor = receipt.get('vendor') if keep_overrides else None
+    original_amount = receipt.get('amount') if keep_overrides else None
+    original_date = receipt.get('date') if keep_overrides else None
+    
+    logger.info(f"Reprocessing receipt {receipt_id}: {path}")
+    
+    # Reload and reprocess the image
+    processed = process_receipt_images(str(path))
+    
+    if processed is None:
+        return error_response('Unable to reprocess the image', status_code=422)
+    
+    # Build update data
+    update_kwargs = {
+        'confidence': processed.confidence,
+        'raw_text': processed.extracted_text,
+    }
+    
+    # Apply new values or keep overrides
+    if keep_overrides:
+        if original_vendor is None:
+            update_kwargs['vendor'] = processed.vendor
+        if original_amount is None:
+            update_kwargs['amount'] = processed.amount
+        if original_date is None:
+            update_kwargs['date'] = processed.date
+    else:
+        update_kwargs['vendor'] = processed.vendor
+        update_kwargs['amount'] = processed.amount
+        update_kwargs['date'] = processed.date
+    
+    # Update in database
+    updated_receipt = receipt_repository.update(receipt_id, **update_kwargs)
+    
+    logger.info(f"Reprocessed receipt {receipt_id}: confidence={processed.confidence}")
+    
+    return success_response({
+        'receipt': ReceiptFormatter.summary(updated_receipt),
+        'message': 'Receipt reprocessed successfully',
+        'reprocessing': {
+            'kept_overrides': keep_overrides,
+            'new_confidence': processed.confidence,
+            'extracted_vendor': processed.vendor,
+            'extracted_amount': processed.amount,
+            'extracted_date': processed.date.isoformat() if processed.date else None
+        }
+    })
 
 
-# 8. Process receipt without saving
 @bp.route('/receipts/process', methods=['POST'])
+@handle_exceptions(log_prefix="process_receipt")
 def process_receipt():
     """
     Run OCR on receipt image without saving to database.
@@ -676,208 +640,129 @@ def process_receipt():
     
     Returns: Extracted data (vendor, amount, date, confidence, etc.)
     """
-    temp_path = None
+    file_handler = FileHandler.from_app_config(prefix="receipt")
     
-    try:
-        if 'file' not in request.files:
-            return error_response('No file provided', status_code=400)
+    if 'file' not in request.files:
+        return error_response('No file provided', status_code=400)
+    
+    file = request.files['file']
+    validation = file_handler.validate_file(file)
+    
+    if not validation.is_valid:
+        return error_response(validation.error, status_code=400)
+    
+    with TempFileManager() as temp_manager:
+        temp_path = temp_manager.save_file_to_temp(file, suffix=validation.extension)
         
-        file = request.files['file']
-        
-        if file.filename == '':
-            return error_response('No file selected', status_code=400)
-        
-        if not allowed_file(file.filename):
-            allowed = ', '.join(app.config['ALLOWED_EXTENSIONS'])
-            return error_response(
-                f'Invalid file type. Allowed types: {allowed}',
-                status_code=400
-            )
-        
-        original_filename = secure_filename(file.filename)
-        
-        # Save temporarily
-        file_extension = Path(original_filename).suffix
-        with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_file:
-            temp_path = temp_file.name
-            file.save(temp_path)
-        
-        logger.info(f"Processing receipt image: {original_filename}")
+        logger.info(f"Processing receipt image: {validation.secured_filename}")
         
         # Load and process
-        receipts = list(receipt_loader.process_files(temp_path, yield_pages=True))
+        receipts = list(receipt_loader.process_files(str(temp_path), yield_pages=True))
         
         if not receipts:
-            return error_response(
-                'Unable to process the uploaded image',
-                status_code=422
-            )
+            return error_response('Unable to process the uploaded image', status_code=422)
         
         # Process each page
         results = []
         for receipt in receipts:
             processed = receipt_extractor.process_receipt(receipt)
-            results.append({
-                'vendor': processed.vendor,
-                'amount': processed.amount,
-                'date': processed.date.isoformat() if processed.date else None,
-                'confidence': processed.confidence,
-                'selected_method': processed.selected_method,
-                'raw_text': processed.extracted_text,
-            })
+            results.append(ReceiptFormatter.extracted_data(processed))
         
         # Build response
         if len(results) == 1:
             response = {
                 'success': True,
-                'original_filename': original_filename,
+                'original_filename': validation.secured_filename,
                 'extracted_data': results[0],
                 'page_count': 1
             }
         else:
-            best_result = max(results, key=lambda x: x['confidence'])
+            best_idx = max(range(len(results)), key=lambda i: results[i].get('confidence') or 0)
             response = {
                 'success': True,
-                'original_filename': original_filename,
-                'extracted_data': best_result,
+                'original_filename': validation.secured_filename,
+                'extracted_data': results[best_idx],
                 'all_pages': results,
                 'page_count': len(results),
-                'best_page_index': results.index(best_result)
+                'best_page_index': best_idx
             }
         
-        logger.info(f"Processed {original_filename}: vendor={response['extracted_data']['vendor']}, "
-                   f"amount={response['extracted_data']['amount']}")
+        logger.info(f"Processed {validation.secured_filename}: "
+                   f"vendor={response['extracted_data'].get('vendor')}, "
+                   f"amount={response['extracted_data'].get('amount')}")
         
         return jsonify(response), 200
-    except FileNotFoundError as e:
-        logger.error(f"File not found in process_receipt: {e}")
-        return error_response('File processing failed due to file not found error', status_code=400)
-    except ValueError as e:
-        logger.error(f"Value error in process_receipt: {e}")
-        return error_response(f'Processing failed: {str(e)}', status_code=422)        
-    except Exception as e:
-        logger.error(f"Unexpected error in process_receipt: {e}", exc_info=True)
-        return error_response(f'Internal server error: {str(e)}', status_code=500)
-    
-    finally:
-        cleanup_temp_file(temp_path)
 
-@bp.route('/receipts/cancel', methods=['POST'])
-def cancel_receipt():
+
+# =============================================================================
+# Cancel/Confirm Endpoints
+# =============================================================================
+
+@bp.route('/receipts/<int:receipt_id>/cancel', methods=['POST'])
+@handle_exceptions(log_prefix="cancel_receipt")
+def cancel_receipt(receipt_id: int):
     """
     Cancel receipt upload and delete temporary file.
     
     This endpoint is used when a user abandons the upload process after
     the preview/processing step but before confirmation.
-    
-    Expected JSON:
-        - temp_filename: Name of the temporary file to delete (required)
-        - stored_filename: (optional) Name of any stored file to clean up
         
     Returns: Success message
     """
-    try:
-        data = request.get_json()
+    file_handler = FileHandler.from_app_config()
+    
+    receipt = receipt_repository.delete(receipt_id)
+
+    if not receipt:
+        return error_response(
+            message=f'No receipt found with ID {receipt_id}',
+            status_code=400
+        )
+
+    receipt_deleted = True
+    file_deleted = False
+    stored_filename = receipt.get('stored_filename')
+    file_deletion_message = None
         
-        if not data:
-            return error_response('Request body is required', status_code=400)
-        
-        temp_filename = data.get('temp_filename')
-        stored_filename = data.get('stored_filename')
-        
-        if not temp_filename and not stored_filename:
-            return error_response(
-                'At least one of temp_filename or stored_filename is required',
-                status_code=400
+    # Clean up stored file (if upload was partially completed)
+    if stored_filename:
+        # Security: prevent directory traversal
+        if not file_handler.is_safe_filename(stored_filename):
+            file_deletion_message = (
+                f'For receipt {receipt_id} invalid stored_filename {stored_filename}. '
+                f'File not deleted'
             )
-        
-        files_deleted = []
-        files_not_found = []
-        
-        # Clean up temporary file
-        if temp_filename:
-            # Security: prevent directory traversal attacks
-            if '..' in temp_filename or '/' in temp_filename or '\\' in temp_filename:
-                return error_response('Invalid temp_filename', status_code=400)
-            
-            # Check common temp locations
-            temp_locations = [
-                Path(tempfile.gettempdir()) / temp_filename,
-                Path('/tmp') / temp_filename if os.name != 'nt' else None,
-            ]
-            
-            deleted = False
-            for temp_path in filter(None, temp_locations):
-                if temp_path.exists():
-                    try:
-                        temp_path.unlink()
-                        files_deleted.append(str(temp_path))
-                        deleted = True
-                        logger.info(f'Deleted temp file: {temp_path}')
-                        break
-                    except Exception as e:
-                        logger.warning(f'Failed to delete temp file {temp_path}: {e}')
-            
-            if not deleted:
-                files_not_found.append(temp_filename)
-        
-        # Clean up stored file (if upload was partially completed)
-        if stored_filename:
-            # Security: prevent directory traversal
-            if '..' in stored_filename or '/' in stored_filename or '\\' in stored_filename:
-                return error_response('Invalid stored_filename', status_code=400)
-            
-            upload_folder = get_upload_folder()
+        else:
+            upload_folder = file_handler.ensure_upload_folder()
             stored_path = upload_folder / stored_filename
             
-            if stored_path.exists():
-                try:
-                    stored_path.unlink()
-                    files_deleted.append(str(stored_path))
-                    logger.info(f'Deleted stored file: {stored_path}')
-                except Exception as e:
-                    logger.warning(f'Failed to delete stored file {stored_path}: {e}')
+            if file_handler.delete_file(stored_path):
+                file_deletion_message = f'For receipt {receipt_id} deleted stored file: {stored_path}'
+                file_deleted = True
             else:
-                files_not_found.append(stored_filename)
-        
-        # Build response message
-        message_parts = []
-        if files_deleted:
-            message_parts.append(f"Deleted {len(files_deleted)} file(s)")
-        if files_not_found:
-            message_parts.append(f"{len(files_not_found)} file(s) not found or already removed")
-        
-        if not message_parts:
-            message = "No files to clean up"
-        else:
-            message = "Upload cancelled. " + "; ".join(message_parts)
-        
-        return success_response(
-            data={
-                'files_deleted': len(files_deleted),
-                'files_not_found': len(files_not_found),
-                'details': {
-                    'deleted': files_deleted,
-                    'not_found': files_not_found
-                }
-            },
-            message=message
-        )
-        
-    except Exception as e:
-        logger.error(f'Failed to cancel receipt upload: {e}', exc_info=True)
-        return error_response(f'Failed to cancel upload: {str(e)}', status_code=500)
+                file_deletion_message = f"For receipt {receipt_id} failed to find path {stored_path}"
+    else:
+        file_deletion_message = f'No stored file associated with receipt {receipt_id}'
+    
+    return success_response(
+        data={
+            'deleted_receipt': receipt,
+            'receipt_deleted': receipt_deleted,
+            'file_deleted': file_deleted,
+        },
+        message=file_deletion_message
+    )
 
-# 9. Confirm and save receipt
+
 @bp.route('/receipts/confirm', methods=['POST'])
+@handle_exceptions(log_prefix="confirm_receipt")
 def confirm_receipt():
     """
     Save receipt data to database (typically after processing/preview).
     
     Expected JSON:
+        - id: Receipt ID to confirm
         - original_filename: Original file name
-        - stored_filename: (optional) Generated storage name
-        - file_path: (optional) Path to stored file
         - vendor: Vendor name
         - amount: Receipt amount
         - date: Receipt date (YYYY-MM-DD)
@@ -887,116 +772,108 @@ def confirm_receipt():
     
     Returns: Saved receipt with receipt_id
     """
-    try:
-        data = request.get_json()
-        
-        if data is None:
-            return error_response('Request body must be JSON', status_code=400)
-        
-        # Validate required fields
-        required_fields = ['original_filename', 'vendor']
-        missing = [f for f in required_fields if f not in data or data[f] is None]
-        
-        if missing:
-            return error_response(
-                f'Missing required fields: {", ".join(missing)}',
-                status_code=400
-            )
-        
-        # Parse and validate data
-        try:
-            amount = float(data['amount']) if data.get('amount') is not None else None
-        except (ValueError, TypeError):
-            return error_response('Invalid amount format', status_code=400)
-        
-        receipt_date = None
-        if data.get('date'):
-            try:
-                receipt_date = datetime.fromisoformat(data['date'])
-            except ValueError:
-                return error_response('Invalid date format. Use YYYY-MM-DD', status_code=400)
-        
-        confidence = data.get('confidence', 0)
-        if not isinstance(confidence, int) or confidence < 0 or confidence > 3:
-            return error_response('Confidence must be an integer between 0 and 3', status_code=400)
-        
-        # Generate stored filename if not provided
-        stored_filename = data.get('stored_filename')
-        if not stored_filename:
-            stored_filename = generate_stored_filename(data['original_filename'])
-        
-        # Create Receipt model
-        receipt = Receipt(
-            original_filename=data['original_filename'],
-            stored_filename=stored_filename,
-            file_path=data.get('file_path'),
-            vendor=data['vendor'],
-            amount=amount,
-            date=receipt_date,
-            confidence=confidence,
-            selected_method=data.get('selected_method', 'manual'),
-            extracted_text=data.get('raw_text'),
-            page_number=data.get('page_number', 1)
-        )
-        
-        # Save to database
-        receipt_id = receipt_repository.save(receipt)
-        
-        if receipt_id is None:
-            return error_response('Failed to save receipt', status_code=500)
-        
-        # Fetch saved receipt
-        saved_receipt = receipt_repository.get_by_id(receipt_id)
-        
-        logger.info(f"Confirmed and saved receipt {receipt_id}: {data['original_filename']}")
-        
-        return success_response(
-            {
-                'receipt': format_receipt_summary(saved_receipt),
-                'message': 'Receipt saved successfully'
-            },
-            status_code=201
-        )
-        
-    except DatabaseError as e:
-        logger.error(f"Database error in confirm_receipt: {e}")
-        return error_response(f'Database error: {str(e)}', status_code=500)
+    file_handler = FileHandler.from_app_config()
     
-    except Exception as e:
-        logger.error(f"Unexpected error in confirm_receipt: {e}", exc_info=True)
-        return error_response(f'Internal server error: {str(e)}', status_code=500)
+    data = request.get_json()
+    
+    if data is None:
+        return error_response('Request body must be JSON', status_code=400)
+    
+    # Validate required fields
+    required_fields = ['original_filename', 'vendor']
+    missing = [f for f in required_fields if f not in data or data[f] is None]
+    
+    if missing:
+        return error_response(
+            f'Missing required fields: {", ".join(missing)}',
+            status_code=400
+        )
+    
+    # Parse and validate amount
+    try:
+        amount = float(data['amount']) if data.get('amount') is not None else None
+    except (ValueError, TypeError):
+        return error_response('Invalid amount format', status_code=400)
+    
+    # Parse and validate date
+    receipt_date = None
+    if data.get('date'):
+        try:
+            receipt_date = datetime.fromisoformat(data['date'])
+        except ValueError:
+            return error_response('Invalid date format. Use YYYY-MM-DD', status_code=400)
+    
+    # Validate confidence
+    confidence = data.get('confidence', 0)
+    if not isinstance(confidence, int) or confidence < 0 or confidence > 3:
+        return error_response('Confidence must be an integer between 0 and 3', status_code=400)
+    
+    # Get file path from existing receipt
+    file_path = data.get('file_path')
+    if not file_path:
+        existing_receipt = receipt_repository.get_by_id(data.get('id'))
+        if not existing_receipt:
+            return error_response(f'Receipt {data.get("id")} not found', status_code=400)
+        file_path = existing_receipt.get('file_path')
+    
+    if not file_path or not Path(file_path).exists():
+        return error_response(f'File not found at {file_path}', status_code=400)
+    
+    # Generate stored filename if not provided
+    stored_filename = data.get('stored_filename')
+    if not stored_filename:
+        stored_filename = file_handler.generate_stored_filename(data['original_filename'])
+    
+    # Update in database
+    saved_receipt = receipt_repository.update(
+        id=data['id'],
+        vendor=data['vendor'],
+        amount=amount,
+        date=receipt_date,
+        confidence=int(confidence),
+        raw_text=data.get('raw_text')
+    )
+    
+    if saved_receipt is None:
+        return error_response('Failed to save receipt', status_code=500)
+    
+    logger.info(f"Confirmed and saved receipt {data['id']}: {data['original_filename']}")
+    
+    return success_response(
+        {
+            'receipt': ReceiptFormatter.summary(saved_receipt),
+            'message': 'Receipt saved successfully'
+        },
+        status_code=201
+    )
 
-# 10. Get receipt statistics (bonus endpoint)
+
+# =============================================================================
+# Statistics Endpoint
+# =============================================================================
+
 @bp.route('/receipts/stats', methods=['GET'])
+@handle_exceptions(log_prefix="get_receipt_stats")
 def get_receipt_stats():
     """
     Get receipt statistics.
     
     Returns: Aggregated statistics about receipts
     """
-    try:
-        stats = receipt_repository.get_stats()
-        
-        return success_response({
-            'statistics': {
-                'total_receipts': stats.get('total_receipts', 0),
-                'total_amount': stats.get('total_amount'),
-                'average_amount': stats.get('avg_amount'),
-                'average_confidence': stats.get('avg_confidence'),
-                'unique_vendors': stats.get('unique_vendors', 0),
-                'high_confidence_count': stats.get('high_confidence_count', 0),
-                'date_range': {
-                    'earliest': stats.get('earliest_date'),
-                    'latest': stats.get('latest_date')
-                },
-                'top_vendors': stats.get('top_vendors', [])
-            }
-        })
-        
-    except DatabaseError as e:
-        logger.error(f"Database error in get_receipt_stats: {e}")
-        return error_response(f'Database error: {str(e)}', status_code=500)
+    stats = receipt_repository.get_stats()
     
-    except Exception as e:
-        logger.error(f"Unexpected error in get_receipt_stats: {e}", exc_info=True)
-        return error_response('Internal server error', status_code=500)
+    return success_response({
+        'statistics': {
+            'total_receipts': stats.get('total_receipts', 0),
+            'total_amount': stats.get('total_amount'),
+            'average_amount': stats.get('avg_amount'),
+            'average_confidence': stats.get('avg_confidence'),
+            'unique_vendors': stats.get('unique_vendors', 0),
+            'high_confidence_count': stats.get('high_confidence_count', 0),
+            'date_range': {
+                'earliest': stats.get('earliest_date'),
+                'latest': stats.get('latest_date')
+            },
+            'top_vendors': stats.get('top_vendors', [])
+        }
+    })

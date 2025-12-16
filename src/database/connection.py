@@ -18,7 +18,11 @@ class ConnectionManager:
     """Manages SQLite database connections and configuration."""
     
     def __init__(self, db_path: Union[Path, str] = "data.db"):
-        self.db_path = Path(db_path)
+        try:
+            self.db_path = current_app.config['DATABASE_PATH']
+        except Exception as e:
+            logger.info(f"No database path found in app config so using default database location: {db_path}")
+            self.db_path = Path(db_path)
         self._ensure_directory_exists()
         logger.info(f"Database initialized at {self.db_path}")
     
@@ -114,7 +118,7 @@ def init_app(app, create_tables=True):
         create_tables: Whether to create tables (default True)
     """
     db_path = app.config.get('DATABASE_PATH', 'data/app.db')
-    
+    logger.debug(f"Initializing app in connection - db path is {db_path}")
     # Initialize the global manager
     manager = init(db_path)
     

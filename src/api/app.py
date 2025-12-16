@@ -6,14 +6,7 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 
 from .middleware.error_handlers import register_error_handlers
-from src.api.routes import (
-    health,
-    receipts,
-    tabular_files,
-    accounts,
-    categories,
-    transactions,
-)
+
 from src.api.scheduler import init_scheduler
 
 logger = logging.getLogger(__name__)
@@ -36,7 +29,7 @@ def create_app(config=None):
     app.config.update(
         # File upload settings
         MAX_CONTENT_LENGTH=50 * 1024 * 1024,  # 50MB max file size
-        UPLOAD_FOLDER=os.getenv("UPLOAD_FOLDER", "/tmp/uploads"),
+        UPLOAD_FOLDER=os.getenv("UPLOAD_FOLDER", str(Path(BASE_DIR, "data", "uploads"))),
         ALLOWED_EXTENSIONS={
             "png",
             "jpg",
@@ -49,7 +42,7 @@ def create_app(config=None):
             "txt",
         },
         # Database settings
-        DATABASE_PATH=os.getenv("DATABASE_PATH", str(Path(BASE_DIR, "data", "app.db"))),
+        DATABASE_PATH=os.getenv("DATABASE_PATH", str(Path(BASE_DIR, "data", "financial_data.db"))),
         # JSON settings
         JSON_SORT_KEYS=False,
     )
@@ -74,6 +67,15 @@ def create_app(config=None):
     _init_database(app)
     logger.info(f"Database path: {app.config['DATABASE_PATH']}")
 
+    from src.api.routes import (
+        health,
+        receipts,
+        tabular_files,
+        accounts,
+        categories,
+        transactions,
+    )
+    
     # Register blueprints
     app.register_blueprint(health.bp, url_prefix="/api")
     app.register_blueprint(receipts.bp, url_prefix="/api")

@@ -596,11 +596,13 @@ class TransactionRepository:
                     ORDER BY t.transaction_date DESC, t.id DESC
                     LIMIT ?
                 '''
-                
+                logger.debug(f"Executing find_matching_transactions with query: {query[:100]}")
+                logger.debug(f"Executing find_matching_transactions with params: {params + [limit]}")
                 params.append(limit)
                 cursor.execute(query, params)
                 
                 rows = cursor.fetchall()
+                logger.debug(f"Found {len(rows)} matching transactions")
                 return [dict(row) for row in rows]
                 
         except ValueError as e:
