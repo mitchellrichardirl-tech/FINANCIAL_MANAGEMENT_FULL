@@ -5,11 +5,7 @@ from typing import Dict, List, Optional, Tuple
 import logging
 import os
 import tempfile
-import shutil
 from pathlib import Path
-
-from concurrent.futures import ProcessPoolExecutor, as_completed
-import multiprocessing
 
 from src.database.repositories.receipts import ReceiptRepository
 from src.database.connection import DatabaseError
@@ -22,7 +18,12 @@ from src.receipts.receipt_loader import ReceiptLoader
 from src.api.utils.file_handling import FileHandler, TempFileManager
 from src.api.utils.response_helpers import success_response, error_response
 from src.api.utils.sse import SSEEventBuilder, ProgressInfo, create_sse_response, create_error_sse_response
-from src.api.utils.route_helpers import handle_exceptions
+from src.api.utils.route_helpers import handle_exceptions, require_json, handle_database_errors
+from src.api.utils.validators import (
+    RequestValidator, parse_date, parse_float, parse_int,
+    validate_pagination, validate_date_range_filters,
+    add_string_filters, require_at_least_one
+)
 from src.api.formatters.receipt_formatter import ReceiptFormatter
 from src.api.services.receipt_processor import ReceiptStreamProcessor, receipt_worker, ProcessingResult
 
@@ -87,55 +88,35 @@ def validate_receipt_filters(args) -> Tuple[Optional[Dict], Optional[str]]:
     
     Returns (filters_dict, error_message) - error_message is None if valid.
     """
-    filters = {}
+    # Validate pagination
+    is_valid, pagination, error = validate_pagination(args)
+    if not is_valid:
+        return None, error
+    
+    # Validate date range
+    is_valid, date_filters, error = validate_date_range_filters(args)
+    if not is_valid:
+        return None, error
+    
+    validator = RequestValidator(args)
+    validator.validated.update(date_filters)
     
     # Vendor filter
-    vendor = args.get('vendor', type=str)
-    if vendor:
-        filters['vendor'] = vendor
+    add_string_filters(validator.validated, args, ['vendor'])
     
     # Confidence filter
-    min_confidence = args.get('min_confidence', type=int)
-    if min_confidence is not None:
-        if min_confidence < 0 or min_confidence > 3:
-            return None, 'Confidence must be between 0 and 3'
-        filters['min_confidence'] = min_confidence
+    validator.validate_field('min_confidence',
+        validator.field('min_confidence').optional().transform(parse_int).in_range(0, 3))
     
-    # Pagination
-    limit = args.get('limit', default=50, type=int)
-    offset = args.get('offset', default=0, type=int)
-    
-    if limit < 1:
-        return None, 'Limit must be at least 1'
-    if limit > 500:
-        return None, 'Limit cannot exceed 500'
-    if offset < 0:
-        return None, 'Offset must be non-negative'
-    
-    filters['limit'] = limit
-    filters['offset'] = offset
-    
-    # Date filters
-    start_date_str = args.get('start_date', type=str)
-    end_date_str = args.get('end_date', type=str)
-    
-    if start_date_str:
-        try:
-            filters['start_date'] = datetime.fromisoformat(start_date_str)
-        except ValueError:
-            return None, 'Invalid start_date format. Use YYYY-MM-DD'
-    
-    if end_date_str:
-        try:
-            filters['end_date'] = datetime.fromisoformat(end_date_str)
-        except ValueError:
-            return None, 'Invalid end_date format. Use YYYY-MM-DD'
-    
-    if filters.get('start_date') and filters.get('end_date'):
-        if filters['start_date'] > filters['end_date']:
+    # Date range validation
+    if validator.validated.get('start_date') and validator.validated.get('end_date'):
+        if validator.validated['start_date'] > validator.validated['end_date']:
             return None, 'start_date cannot be after end_date'
     
-    return filters, None
+    if not validator.is_valid():
+        return None, validator.first_error_message()
+    
+    return {**pagination, **validator.validated}, None
 
 
 def validate_receipt_update(data: Dict) -> Tuple[Optional[Dict], Optional[str]]:
@@ -144,40 +125,81 @@ def validate_receipt_update(data: Dict) -> Tuple[Optional[Dict], Optional[str]]:
     
     Returns (update_kwargs, error_message) - error_message is None if valid.
     """
-    update_kwargs = {}
+    validator = RequestValidator(data)
     
-    if 'vendor' in data:
-        update_kwargs['vendor'] = data['vendor']
+    # String fields
+    add_string_filters(validator.validated, data, ['vendor', 'raw_text'])
     
+    # Amount
     if 'amount' in data:
         if data['amount'] is not None:
-            try:
-                update_kwargs['amount'] = float(data['amount'])
-            except (ValueError, TypeError):
-                return None, 'Invalid amount format'
+            validator.validate_field('amount',
+                validator.field('amount').transform(parse_float, 'Invalid amount format'))
         else:
-            update_kwargs['amount'] = None
+            validator.validated['amount'] = None
     
+    # Date
     if 'date' in data:
         if data['date'] is not None:
-            try:
-                update_kwargs['date'] = datetime.fromisoformat(data['date'])
-            except ValueError:
-                return None, 'Invalid date format. Use YYYY-MM-DD'
+            validator.validate_field('date',
+                validator.field('date').transform(parse_date, 'Invalid date format. Use YYYY-MM-DD'))
         else:
-            update_kwargs['date'] = None
+            validator.validated['date'] = None
     
+    # Confidence
     if 'confidence' in data:
-        confidence = data['confidence']
-        if confidence is not None:
-            if not isinstance(confidence, int) or confidence < 0 or confidence > 3:
-                return None, 'Confidence must be an integer between 0 and 3'
-        update_kwargs['confidence'] = confidence
+        if data['confidence'] is not None:
+            validator.validate_field('confidence',
+                validator.field('confidence').transform(parse_int).in_range(0, 3))
+        else:
+            validator.validated['confidence'] = None
     
-    if 'raw_text' in data:
-        update_kwargs['raw_text'] = data['raw_text']
+    if not validator.is_valid():
+        return None, validator.first_error_message()
     
-    return update_kwargs, None
+    return validator.validated, None
+
+
+def validate_confirm_receipt(data: Dict) -> Tuple[Optional[Dict], Optional[str]]:
+    """Validate receipt confirmation data."""
+    # Check required fields
+    error = require_at_least_one(data, ['original_filename', 'vendor'])
+    if error:
+        return None, error
+    
+    validator = RequestValidator(data)
+    
+    # Required string fields
+    validator.validate_field('original_filename',
+        validator.field('original_filename').required().strip_string())
+    validator.validate_field('vendor',
+        validator.field('vendor').required().strip_string())
+    
+    # Optional fields
+    if 'amount' in data and data['amount'] is not None:
+        validator.validate_field('amount',
+            validator.field('amount').transform(parse_float, 'Invalid amount format'))
+    
+    if 'date' in data and data['date']:
+        validator.validate_field('date',
+            validator.field('date').transform(parse_date, 'Invalid date format. Use YYYY-MM-DD'))
+    
+    # Confidence with default
+    confidence = data.get('confidence', 0)
+    validator.validate_field('confidence',
+        validator.field('confidence').transform(parse_int).in_range(0, 3))
+    if 'confidence' not in validator.validated:
+        validator.validated['confidence'] = 0
+    
+    # Other optional fields
+    for field in ['id', 'file_path', 'stored_filename', 'raw_text']:
+        if field in data:
+            validator.validated[field] = data[field]
+    
+    if not validator.is_valid():
+        return None, validator.first_error_message()
+    
+    return validator.validated, None
 
 
 # =============================================================================
@@ -413,6 +435,7 @@ def get_receipt(receipt_id: int):
 
 @bp.route('/receipts/<int:receipt_id>', methods=['PUT'])
 @handle_exceptions(log_prefix="update_receipt")
+@require_json
 def update_receipt(receipt_id: int):
     """
     Update receipt attributes.
@@ -430,10 +453,7 @@ def update_receipt(receipt_id: int):
     if existing is None:
         return error_response(f'Receipt {receipt_id} not found', status_code=404)
     
-    # Parse request data
-    data = request.get_json(silent=True)
-    if data is None:
-        return error_response('Request body must be JSON', status_code=400)
+    data = request.get_json()
     
     # Validate update fields
     update_kwargs, error = validate_receipt_update(data)
@@ -756,6 +776,7 @@ def cancel_receipt(receipt_id: int):
 
 @bp.route('/receipts/confirm', methods=['POST'])
 @handle_exceptions(log_prefix="confirm_receipt")
+@require_json
 def confirm_receipt():
     """
     Save receipt data to database (typically after processing/preview).
@@ -773,71 +794,43 @@ def confirm_receipt():
     Returns: Saved receipt with receipt_id
     """
     file_handler = FileHandler.from_app_config()
-    
     data = request.get_json()
     
-    if data is None:
-        return error_response('Request body must be JSON', status_code=400)
-    
     # Validate required fields
-    required_fields = ['original_filename', 'vendor']
-    missing = [f for f in required_fields if f not in data or data[f] is None]
-    
-    if missing:
-        return error_response(
-            f'Missing required fields: {", ".join(missing)}',
-            status_code=400
-        )
-    
-    # Parse and validate amount
-    try:
-        amount = float(data['amount']) if data.get('amount') is not None else None
-    except (ValueError, TypeError):
-        return error_response('Invalid amount format', status_code=400)
-    
-    # Parse and validate date
-    receipt_date = None
-    if data.get('date'):
-        try:
-            receipt_date = datetime.fromisoformat(data['date'])
-        except ValueError:
-            return error_response('Invalid date format. Use YYYY-MM-DD', status_code=400)
-    
-    # Validate confidence
-    confidence = data.get('confidence', 0)
-    if not isinstance(confidence, int) or confidence < 0 or confidence > 3:
-        return error_response('Confidence must be an integer between 0 and 3', status_code=400)
+    validated_data, error = validate_confirm_receipt(data)
+    if error:
+        return error_response(error, status_code=400)
     
     # Get file path from existing receipt
-    file_path = data.get('file_path')
+    file_path = validated_data.get('file_path')
     if not file_path:
-        existing_receipt = receipt_repository.get_by_id(data.get('id'))
+        existing_receipt = receipt_repository.get_by_id(validated_data.get('id'))
         if not existing_receipt:
-            return error_response(f'Receipt {data.get("id")} not found', status_code=400)
+            return error_response(f'Receipt {validated_data.get("id")} not found', status_code=400)
         file_path = existing_receipt.get('file_path')
     
     if not file_path or not Path(file_path).exists():
         return error_response(f'File not found at {file_path}', status_code=400)
     
     # Generate stored filename if not provided
-    stored_filename = data.get('stored_filename')
+    stored_filename = validated_data.get('stored_filename')
     if not stored_filename:
-        stored_filename = file_handler.generate_stored_filename(data['original_filename'])
+        stored_filename = file_handler.generate_stored_filename(validated_data['original_filename'])
     
     # Update in database
     saved_receipt = receipt_repository.update(
-        id=data['id'],
-        vendor=data['vendor'],
-        amount=amount,
-        date=receipt_date,
-        confidence=int(confidence),
-        raw_text=data.get('raw_text')
+        id=validated_data['id'],
+        vendor=validated_data['vendor'],
+        amount=validated_data.get('amount'),
+        date=validated_data.get('date'),
+        confidence=validated_data.get('confidence', 0),
+        raw_text=validated_data.get('raw_text')
     )
     
     if saved_receipt is None:
         return error_response('Failed to save receipt', status_code=500)
     
-    logger.info(f"Confirmed and saved receipt {data['id']}: {data['original_filename']}")
+    logger.info(f"Confirmed and saved receipt {validated_data['id']}: {validated_data['original_filename']}")
     
     return success_response(
         {

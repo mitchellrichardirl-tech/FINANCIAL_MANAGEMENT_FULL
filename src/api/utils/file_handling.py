@@ -109,13 +109,15 @@ class FileHandler:
             return FileValidationResult(is_valid=False, error="No file provided")
         
         original_filename = file.filename
+        logger.debug(f"Original filename: {original_filename}")
         secured = secure_filename(original_filename)
-        
+        logger.debug(f"Secured filename: {secured}")
         if not secured:
             return FileValidationResult(is_valid=False, error="Invalid filename")
         
         extension = Path(secured).suffix.lower()
         
+        logger.debug(f"File extension: {extension}")
         if self.allowed_extensions and extension.lstrip('.') not in self.allowed_extensions:
             allowed = ', '.join(sorted(self.allowed_extensions))
             return FileValidationResult(

@@ -107,6 +107,28 @@ class FieldValidator:
                 self.errors[0].code
             )
         return ValidationResult.success(self.value)
+    
+    def as_bool(self) -> 'FieldValidator':
+        """Parse field as boolean."""
+        if self._stopped:
+            return self
+        self.value = parse_bool_from_string(self.value)
+        return self
+    
+    def strip_string(self) -> 'FieldValidator':
+        """Strip whitespace from string values."""
+        if self._stopped or self.value is None:
+            return self
+        if isinstance(self.value, str):
+            self.value = self.value.strip()
+            if not self.value:  # Empty string after strip
+                self.errors.append(ValidationError(
+                    self.field_name,
+                    f"{self.field_name} cannot be empty",
+                    "empty_string"
+                ))
+                self._stopped = True
+        return self
 
 
 class RequestValidator:
@@ -193,3 +215,120 @@ def validate_pagination(args: Dict) -> Tuple[bool, Dict, Optional[str]]:
         "limit": validator.validated.get("limit", 50),
         "offset": validator.validated.get("offset", 0)
     }, None
+
+def parse_bool_from_string(value: Any) -> Optional[bool]:
+    """Parse boolean from string representation."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() in ('true', '1', 'yes')
+    return bool(value)
+
+
+def validate_positive_int(field_name: str, value: Any) -> ValidationResult:
+    """Validate a positive integer field."""
+    validator = FieldValidator(field_name, value).optional().transform(parse_int).in_range(min_val=1)
+    return validator.get_result()
+
+
+def validate_id_filters(validator: RequestValidator, args: dict, id_fields: List[str]) -> RequestValidator:
+    """Validate multiple ID filter fields."""
+    for field in id_fields:
+        if field in args:
+            validator.validate_field(field,
+                validator.field(field).optional().transform(parse_int).in_range(min_val=1))
+    return validator
+
+
+def validate_boolean_fields(validator: RequestValidator, data: dict, field_names: List[str]) -> RequestValidator:
+    """Validate multiple boolean fields at once."""
+    for field in field_names:
+        if field in data:
+            validator.validated[field] = parse_bool_from_string(data[field])
+    return validator
+
+
+def add_string_filters(validated: dict, args: dict, field_names: List[str]) -> dict:
+    """Add string filter fields directly to validated data."""
+    for field in field_names:
+        if field in args and args[field]:
+            validated[field] = args[field]
+    return validated
+
+
+def require_at_least_one(data: dict, field_names: List[str], error_message: str = None) -> Optional[str]:
+    """Validate that at least one of the specified fields is present."""
+    if not any(data.get(field) is not None for field in field_names):
+        if error_message:
+            return error_message
+        fields = ', '.join(field_names)
+        return f'At least one of {fields} is required'
+    return None
+
+
+def validate_date_range_filters(
+    args: dict,
+    start_date_field: str = 'start_date',
+    end_date_field: str = 'end_date'
+) -> Tuple[bool, dict, Optional[str]]:
+    """Validate date range filter parameters."""
+    validator = RequestValidator(args)
+    
+    validator.validate_field(start_date_field,
+        validator.field(start_date_field).optional().transform(
+            parse_date, f'Invalid {start_date_field} format. Use YYYY-MM-DD'))
+    
+    validator.validate_field(end_date_field,
+        validator.field(end_date_field).optional().transform(
+            parse_date, f'Invalid {end_date_field} format. Use YYYY-MM-DD'))
+    
+    if not validator.is_valid():
+        return False, {}, validator.first_error_message()
+    
+    return True, validator.validated, None
+
+def apply_defaults(data: dict, defaults: dict) -> dict:
+    """Apply default values for missing keys."""
+    for key, default_value in defaults.items():
+        data.setdefault(key, default_value)
+    return data
+
+def validate_single_field(
+    field_name: str,
+    value: Any,
+    required: bool = False,
+    field_type: type = None,
+    transformer: Callable = None,
+    min_val: Optional[float] = None,
+    max_val: Optional[float] = None,
+    error_message: str = None
+) -> ValidationResult:
+    """
+    Validate a single field with common options.
+    
+    Simplifies validation for single fields without needing RequestValidator.
+    """
+    validator = FieldValidator(field_name, value)
+    
+    if required:
+        validator.required()
+    else:
+        validator.optional()
+    
+    if validator._stopped:
+        return validator.get_result()
+    
+    if field_type:
+        validator.is_type(field_type)
+    
+    if transformer:
+        validator.transform(transformer, error_message)
+    
+    if min_val is not None or max_val is not None:
+        validator.in_range(min_val, max_val)
+    
+    return validator.get_result()
+
+
