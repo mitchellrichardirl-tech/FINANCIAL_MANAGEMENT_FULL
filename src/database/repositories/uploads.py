@@ -30,7 +30,8 @@ class UploadRepository:
         file_type: str,
         row_count: int = 0,
         column_count: int = 0,
-        columns: Optional[List[str]] = None
+        columns: Optional[List[str]] = None,
+        original_filename: Optional[str] = None
     ) -> int:
         """
         Create a new upload record.
@@ -41,10 +42,13 @@ class UploadRepository:
             row_count: Number of rows in the file
             column_count: Number of columns
             columns: List of column names
+            original_filename: The original name of the uploaded file
             
         Returns:
             ID of the created upload
         """
+        if original_filename is None:
+            original_filename = filename
         try:
             with self.db.transaction() as conn:
                 cursor = conn.cursor()
@@ -53,9 +57,10 @@ class UploadRepository:
                 
                 cursor.execute('''
                     INSERT INTO uploads (
-                        filename, file_type, row_count, column_count, columns
-                    ) VALUES (?, ?, ?, ?, ?)
+                        original_filename, filename, file_type, row_count, column_count, columns
+                    ) VALUES (?, ?, ?, ?, ?, ?)
                 ''', (
+                    original_filename,
                     filename,
                     file_type,
                     row_count,
@@ -100,6 +105,7 @@ class UploadRepository:
         limit: int = 50,
         offset: int = 0,
         file_type: Optional[str] = None,
+        original_filename: Optional[str] = None,
         filename: Optional[str] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None
@@ -111,6 +117,7 @@ class UploadRepository:
             limit: Maximum number of results
             offset: Pagination offset
             file_type: Filter by file type
+            original_filename: Filter by original filename (partial match)
             filename: Filter by filename (partial match)
             start_date: Filter uploads from this date
             end_date: Filter uploads until this date
@@ -129,6 +136,10 @@ class UploadRepository:
                     conditions.append('file_type = ?')
                     params.append(file_type)
                 
+                if original_filename:
+                    conditions.append('original_filename LIKE ?')
+                    params.append(f'%{original_filename}%')
+
                 if filename:
                     conditions.append('filename LIKE ?')
                     params.append(f'%{filename}%')
@@ -161,6 +172,7 @@ class UploadRepository:
     def update_upload(
         self,
         upload_id: int,
+        original_filename: Optional[str] = None,
         filename: Optional[str] = None,
         file_type: Optional[str] = None,
         row_count: Optional[int] = None,
@@ -172,6 +184,7 @@ class UploadRepository:
         
         Args:
             upload_id: ID of upload to update
+            original_filename: New original filename
             filename: New filename
             file_type: New file type
             row_count: New row count
@@ -188,6 +201,10 @@ class UploadRepository:
                 updates = []
                 params = []
                 
+                if original_filename is not None:
+                    updates.append('original_filename = ?')
+                    params.append(original_filename)
+
                 if filename is not None:
                     updates.append('filename = ?')
                     params.append(filename)
@@ -524,7 +541,8 @@ class UploadRepository:
         file_type: str,
         columns: List[str],
         rows: List[Dict[str, Any]],
-        batch_size: int = 1000
+        batch_size: int = 1000,
+        original_filename: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Create an upload and save all its data in a single transaction.
@@ -535,10 +553,13 @@ class UploadRepository:
             columns: List of column names
             rows: List of row data dicts
             batch_size: Batch size for data insertion
+            original_filename: The original name of the uploaded file
             
         Returns:
             Dict with upload_id and rows_inserted
         """
+        if original_filename is None:
+            original_filename = filename
         try:
             with self.db.transaction() as conn:
                 cursor = conn.cursor()
@@ -547,9 +568,10 @@ class UploadRepository:
                 columns_json = json.dumps(columns)
                 cursor.execute('''
                     INSERT INTO uploads (
-                        filename, file_type, row_count, column_count, columns
-                    ) VALUES (?, ?, ?, ?, ?)
+                        original_filename, filename, file_type, row_count, column_count, columns
+                    ) VALUES (?, ?, ?, ?, ?, ?)
                 ''', (
+                    original_filename,
                     filename,
                     file_type,
                     len(rows),

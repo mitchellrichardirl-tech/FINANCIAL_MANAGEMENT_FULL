@@ -206,6 +206,7 @@ class SchemaManager:
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS uploads (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    original_filename TEXT NOT NULL,
                     filename TEXT NOT NULL,
                     file_type TEXT NOT NULL,
                     row_count INTEGER NOT NULL DEFAULT 0,
