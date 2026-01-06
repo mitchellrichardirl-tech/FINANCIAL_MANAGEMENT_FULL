@@ -102,7 +102,7 @@ def validate_upload_filters(args) -> tuple[bool, dict, str]:
 @with_uploaded_file(allowed_extensions={'csv', 'tsv', 'xls', 'xlsx'})
 @handle_tabular_errors
 @with_uploaded_file(allowed_extensions={'csv', 'tsv', 'xls', 'xlsx'})
-def validate_file(temp_path: Path, file_info: FileValidationResulttemp_path: Path, file_info: FileValidationResult):
+def validate_file(temp_path: Path, file_info: FileValidationResult):
     """
     Validate a tabular file.
     
@@ -128,26 +128,13 @@ def validate_file(temp_path: Path, file_info: FileValidationResulttemp_path: Pat
     )
 
     return success_response(result.to_dict())
-    params = TabularValidationParams.from_form(request.form)
-    
-    processor = TabularProcessor()
-    result = processor.validate(
-        temp_path,
-        min_rows=params.min_rows,
-        min_columns=params.min_columns,
-        required_columns=params.required_columns,
-        sheet_name=params.sheet_name
-    )
-
-    return success_response(result.to_dict())
-
 
 @bp.route('/preview', methods=['POST'])
 @handle_tabular_errors
 @with_uploaded_file(allowed_extensions={'csv', 'tsv', 'xls', 'xlsx'})
 @handle_tabular_errors
 @with_uploaded_file(allowed_extensions={'csv', 'tsv', 'xls', 'xlsx'})
-def preview_file(temp_path: Path, file_info: FileValidationResulttemp_path: Path, file_info: FileValidationResult):
+def preview_file(temp_path: Path, file_info: FileValidationResult):
     """
     Get a preview of tabular file contents.
     
@@ -171,23 +158,9 @@ def preview_file(temp_path: Path, file_info: FileValidationResulttemp_path: Path
     )
 
     return success_response(result.to_dict())
-    params = TabularPreviewParams.from_form(request.form)
-    
-    processor = TabularProcessor()
-    result = processor.preview(
-        temp_path,
-        num_rows=params.num_rows,
-        sheet_name=params.sheet_name,
-        include_types=params.include_types
-    )
-
-    return success_response(result.to_dict())
 
 
 @bp.route('/import', methods=['POST'])
-@handle_tabular_errors
-@with_uploaded_file(allowed_extensions={'csv', 'tsv', 'xlsx', 'xls'})
-def import_file(temp_path: Path, file_info: FileValidationResult):
 @handle_tabular_errors
 @with_uploaded_file(allowed_extensions={'csv', 'tsv', 'xlsx', 'xls'})
 def import_file(temp_path: Path, file_info: FileValidationResult):
@@ -230,8 +203,6 @@ def import_file(temp_path: Path, file_info: FileValidationResult):
 @bp.route('/sheets', methods=['POST'])
 @with_uploaded_file(allowed_extensions={'xls', 'xlsx'})
 def get_sheets(temp_path: Path, file_info: FileValidationResult):
-@with_uploaded_file(allowed_extensions={'xls', 'xlsx'})
-def get_sheets(temp_path: Path, file_info: FileValidationResult):
     """
     Get sheet names from an Excel file.
     
@@ -248,9 +219,6 @@ def get_sheets(temp_path: Path, file_info: FileValidationResult):
 
 
 @bp.route('/check', methods=['POST'])
-@handle_tabular_errors
-@with_uploaded_file(allowed_extensions={'csv', 'tsv', 'xls', 'xlsx'})
-def check_tabular(temp_path: Path, file_info: FileValidationResult):
 @handle_tabular_errors
 @with_uploaded_file(allowed_extensions={'csv', 'tsv', 'xls', 'xlsx'})
 def check_tabular(temp_path: Path, file_info: FileValidationResult):
@@ -274,25 +242,11 @@ def check_tabular(temp_path: Path, file_info: FileValidationResult):
         'file_name': file_info.secured_filename
     })
 
-
-# =============================================================================
-# Upload CRUD Endpoints
-# =============================================================================
-    processor = TabularProcessor()
-    is_tabular = processor.is_tabular(temp_path)
-    
-    return success_response({
-        'is_tabular': is_tabular,
-        'file_name': file_info.secured_filename
-    })
-
-
 # =============================================================================
 # Upload CRUD Endpoints
 # =============================================================================
 
 @bp.route('', methods=['GET'])
-@handle_exceptions(log_prefix="get_uploads")
 @handle_exceptions(log_prefix="get_uploads")
 def get_uploads():
     """
@@ -327,28 +281,8 @@ def get_uploads():
     )
     
     return paginated_response(uploads, limit, offset, data_key='uploads')
-    # Validate filters
-    is_valid, filters, error_msg = validate_upload_filters(request.args.to_dict())
-    if not is_valid:
-        return error_response(error_msg, status_code=400)
-    
-    # Extract pagination
-    limit = filters.pop('limit')
-    offset = filters.pop('offset')
-    
-    # Get uploads
-    upload_repo = UploadRepository()
-    uploads = upload_repo.get_all_uploads(
-        limit=limit,
-        offset=offset,
-        **filters
-    )
-    
-    return paginated_response(uploads, limit, offset, data_key='uploads')
-
 
 @bp.route('/<int:upload_id>', methods=['GET'])
-@handle_exceptions(log_prefix="get_upload")
 @handle_exceptions(log_prefix="get_upload")
 def get_upload(upload_id: int):
     """
@@ -367,17 +301,8 @@ def get_upload(upload_id: int):
         return error_response(f'Upload {upload_id} not found', status_code=404)
     
     return success_response(data=upload)
-    upload_repo = UploadRepository()
-    upload = upload_repo.get_upload_by_id(upload_id)
-    
-    if upload is None:
-        return error_response(f'Upload {upload_id} not found', status_code=404)
-    
-    return success_response(data=upload)
-
 
 @bp.route('/<int:upload_id>', methods=['DELETE'])
-@handle_exceptions(log_prefix="delete_upload")
 @handle_exceptions(log_prefix="delete_upload")
 def delete_upload(upload_id: int):
     """
@@ -389,16 +314,6 @@ def delete_upload(upload_id: int):
     Returns:
         Success message or 404 if not found
     """
-    upload_repo = UploadRepository()
-    deleted = upload_repo.delete_upload(upload_id)
-    
-    if not deleted:
-        return error_response(f'Upload {upload_id} not found', status_code=404)
-    
-    return success_response(
-        data={'deleted_upload_id': upload_id},
-        message=f'Upload {upload_id} deleted successfully'
-    )
     upload_repo = UploadRepository()
     deleted = upload_repo.delete_upload(upload_id)
     

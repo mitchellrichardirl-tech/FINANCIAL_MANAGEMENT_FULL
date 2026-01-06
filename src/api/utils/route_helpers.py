@@ -112,12 +112,16 @@ def with_uploaded_file(allowed_extensions: set = None):
         @wraps(f)
         def wrapper(*args, **kwargs):
             logger.debug(f"Processing uploaded file with allowed extensions: {allowed_extensions}")
+            logger.debug(", ".join([str(arg) for arg in args]))
+            logger.debug(", ".join([f"{k}={v}" for k, v in kwargs.items()]))
             file_handler = FileHandler(allowed_extensions=allowed_extensions)
             validation = file_handler.validate_file(request.files.get('file'))
             if not validation.is_valid:
                 logger.debug(f"File validation failed: {validation.error}")
                 return error_response(validation.error, status_code=400)
-            
+            if kwargs.get('temp_path'):
+                logger.debug("temp_path already provided in kwargs, skipping file save.")
+                return f(*args, **kwargs)
             with TempFileManager() as temp_manager:
                 temp_path = temp_manager.save_file_to_temp(
                     request.files['file'],
