@@ -1,90 +1,107 @@
-import numpy as np
 from typing import List, Optional, Iterator, Union
-import logging
 from pathlib import Path
 
 from src.utils.image_loader import ImageLoader
 from src.utils.image_processor import ImageProcessor
 from src.models.receipt import Receipt
 from src.models.processing_config import ProcessingConfig
+from src.utils.logging import ContextLogger
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = ContextLogger(__name__)
+
 
 class ReceiptLoader:
+    """Loads receipt images and processes them into Receipt objects."""
+
     def __init__(self, processing_config: Optional[ProcessingConfig] = None):
         self.processing_config = processing_config or ProcessingConfig()
         self.image_loader = ImageLoader()
+        logger.debug("Initialized ReceiptLoader")
 
     def process_file(
-            self,
-            file_path: Union[str, Path],
-            yield_pages: bool = False
-            ) -> Union[List[Receipt], Iterator[Receipt]]:
+        self,
+        file_path: Union[str, Path],
+        yield_pages: bool = False
+    ) -> Union[List[Receipt], Iterator[Receipt]]:
+        """Process a single receipt file."""
         file_path = Path(file_path)
-        logger.info(f"Loading receipt file: {file_path}")
 
         if yield_pages:
             return self._process_file_lazy(file_path)
         return list(self._process_file_lazy(file_path))
-    
+
     def _process_file_lazy(self, file_path: Path) -> Iterator[Receipt]:
-        logger.info(f"Loading receipt file: {file_path}")
+        """Process a single file lazily, yielding one Receipt per page."""
+        logger.info(f"Loading receipt file: {file_path.name}")
+
         images = self.image_loader.load(file_path)
         n_images = len(images)
-        logger.info(f"Loaded {n_images} image(s) from {file_path}")
+        logger.debug(f"Loaded {n_images} image(s) from {file_path.name}")
+
+        processed = 0
+        failed = 0
+
         for i, img in enumerate(images):
             try:
-                logger.info(f"Processing image {i+1} of {n_images} from {file_path}")
+                logger.debug(
+                    f"Processing image {i + 1}/{n_images}: {file_path.name}"
+                )
                 processor = ImageProcessor(img, config=self.processing_config)
                 processed_imgs = processor.process()
-                logger.info(f"Processed image {i+1} of {n_images} from {file_path}")
+                processed += 1
+
                 yield Receipt(
                     original_filename=file_path,
                     page_number=i,
                     original_image=img,
                     processed_images=processed_imgs
-                    )
+                )
             except Exception as e:
-                logger.error(f"Error processing image {i+1} of {n_images} from {file_path}: {e}")
+                failed += 1
+                logger.error(
+                    f"Failed to process image {i + 1}/{n_images} "
+                    f"from {file_path.name}: {e}"
+                )
                 continue
-        
+
+        if failed > 0:
+            logger.warning(
+                f"File {file_path.name}: {processed}/{n_images} succeeded, "
+                f"{failed} failed"
+            )
+
     def process_files(
-            self,
-            file_paths: Union[str, Path, List[Union[str, Path]]],
-            yield_pages: bool = False
-            ) -> Union[List[Receipt], Iterator[Receipt]]:
+        self,
+        file_paths: Union[str, Path, List[Union[str, Path]]],
+        yield_pages: bool = False
+    ) -> Union[List[Receipt], Iterator[Receipt]]:
+        """Process one or more receipt files."""
         if isinstance(file_paths, (str, Path)):
             file_paths = [file_paths]
+
         n_files = len(file_paths)
         logger.info(f"Processing {n_files} receipt file(s)")
-        if not yield_pages:
+
+        if yield_pages:
             return self._process_files_lazy(file_paths, n_files)
         return list(self._process_files_lazy(file_paths, n_files))
-    
+
     def _process_files_lazy(
-            self,
-            file_paths: List[Union[str, Path]],
-            n_files: int
-            ) -> Iterator[Receipt]:
+        self,
+        file_paths: List[Union[str, Path]],
+        n_files: int
+    ) -> Iterator[Receipt]:
+        """Process multiple files lazily."""
         for i, file_path in enumerate(file_paths):
             file_path = Path(file_path)
-            logger.info(f"Processing file: {file_path}; file {i+1} of {n_files}")
+            logger.debug(f"Processing file {i + 1}/{n_files}: {file_path.name}")
+
             try:
                 yield from self._process_file_lazy(file_path)
             except Exception as e:
-                logger.error(f"Skipping file {file_path}; {i+1} of {n_files} due to error: {e}")
+                logger.error(
+                    f"Skipping file {i + 1}/{n_files} ({file_path.name}): {e}"
+                )
                 continue
-        
-if __name__ == "__main__":
-    # Example usage
-    test_receipt_paths = [
-        "/workspaces/financial_management/data/250804 sebbie helmet.jpg"
-    ]
-    receipt_loader = ReceiptLoader()
-    processed_images = receipt_loader.process_files(test_receipt_paths, yield_pages=True)
-    for rcpt in processed_images:
-        logger.info(f"Receipt from {rcpt.original_filename}, page {rcpt.page_number}, "
-                    f"original shape: {rcpt.original_image.shape}, "
-                    f"processed shape: {rcpt.processed_images.shape}")
+
+        logger.debug(f"Completed processing {n_files} files")

@@ -1,9 +1,7 @@
 from pathlib import Path
-from pathlib import Path
 from datetime import datetime
 
 from flask import Blueprint, request, jsonify
-import logging
 
 from src.utils.tabular_files.processor import TabularProcessor
 from src.utils.tabular_files.exceptions import handle_tabular_errors
@@ -27,9 +25,10 @@ from src.statements.statement import Statement
 
 from src.database.repositories.uploads import UploadRepository
 from src.database.repositories.transactions import TransactionRepository
+from src.utils.logging import ContextLogger, log_route
 
 bp = Blueprint('tabular_files', __name__)
-logger = logging.getLogger(__name__)
+logger = ContextLogger(__name__)
 
 
 # =============================================================================
@@ -38,8 +37,13 @@ logger = logging.getLogger(__name__)
 
 def _process_tabular_file(temp_path: Path, params: TabularImportParams):
     """Extract and validate tabular data."""
+    logger.debug(
+        f"Importing tabular data from {temp_path.name} "
+        f"| start_row={params.start_row} | has_header={params.has_header}"
+    )
+
     processor = TabularProcessor()
-    return processor.import_data(
+    result = processor.import_data(
         temp_path,
         start_row=params.start_row,
         columns=params.columns,
@@ -51,9 +55,17 @@ def _process_tabular_file(temp_path: Path, params: TabularImportParams):
         strip_whitespace=params.strip_whitespace,
     )
 
+    logger.debug(
+        f"Imported {len(result.data)} rows, "
+        f"{len(result.columns_imported)} columns from {temp_path.name}"
+    )
+    return result
+
 
 def _create_upload_record(result, original_filename) -> int:
     """Persist upload metadata and return upload_id."""
+    logger.debug(f"Creating upload record for: {original_filename}")
+
     upload_repo = UploadRepository()
     upload_result = upload_repo.create_upload_with_data(
         original_filename=original_filename,
@@ -62,34 +74,51 @@ def _create_upload_record(result, original_filename) -> int:
         columns=result.columns_imported,
         rows=result.data
     )
-    return upload_result["upload_id"]
+
+    upload_id = upload_result["upload_id"]
+    logger.debug(f"Created upload record with id: {upload_id}")
+    return upload_id
 
 
 def _process_as_statement(result, account_id: int, upload_id: int):
     """Process imported data as a bank statement."""
+    logger.info(
+        f"Processing upload {upload_id} as statement "
+        f"for account {account_id} | {len(result.data)} rows"
+    )
+
     statement = Statement(account_id=account_id, upload_id=upload_id)
     transactions = statement.process_statement(result.data)
-    
+
     transaction_repo = TransactionRepository()
     transaction_repo.bulk_add_transactions(transactions)
+
+    logger.info(
+        f"Created {len(transactions)} transactions "
+        f"for account {account_id} from upload {upload_id}"
+    )
 
 
 def validate_upload_filters(args) -> tuple[bool, dict, str]:
     """Validate upload query filters."""
+    logger.debug(f"Validating upload filters: {list(args.keys())}")
+
     # Validate pagination
     is_valid, pagination, error = validate_pagination(args)
     if not is_valid:
+        logger.warning(f"Pagination validation failed: {error}")
         return False, {}, error
-    
+
     # Validate date range
     is_valid, date_filters, error = validate_date_range_filters(args)
     if not is_valid:
+        logger.warning(f"Date range validation failed: {error}")
         return False, {}, error
-    
+
     # String filters
     filters = {}
     add_string_filters(filters, args, ['file_type', 'filename'])
-    
+
     return True, {**pagination, **date_filters, **filters}, None
 
 
@@ -100,24 +129,17 @@ def validate_upload_filters(args) -> tuple[bool, dict, str]:
 @bp.route('/validate', methods=['POST'])
 @handle_tabular_errors
 @with_uploaded_file(allowed_extensions={'csv', 'tsv', 'xls', 'xlsx'})
-@handle_tabular_errors
-@with_uploaded_file(allowed_extensions={'csv', 'tsv', 'xls', 'xlsx'})
-def validate_file(temp_path: Path, file_info: FileValidationResulttemp_path: Path, file_info: FileValidationResult):
-    """
-    Validate a tabular file.
-    
-    Request:
-        - file: Uploaded file (multipart/form-data)
-        - min_rows: Optional minimum row requirement
-        - min_columns: Optional minimum column requirement
-        - required_columns: Optional comma-separated list of required columns
-        - sheet_name: Optional sheet name for Excel files
-        
-    Returns:
-        ValidationResult as JSON
-    """
+@log_route(logger)
+def validate_file(temp_path: Path, file_info: FileValidationResult):
+    """Validate a tabular file."""
     params = TabularValidationParams.from_form(request.form)
-    
+
+    logger.info(f"Validating file: {file_info.secured_filename}")
+    logger.debug(
+        f"Validation params: min_rows={params.min_rows}, "
+        f"min_columns={params.min_columns}, sheet={params.sheet_name}"
+    )
+
     processor = TabularProcessor()
     result = processor.validate(
         temp_path,
@@ -127,41 +149,27 @@ def validate_file(temp_path: Path, file_info: FileValidationResulttemp_path: Pat
         sheet_name=params.sheet_name
     )
 
-    return success_response(result.to_dict())
-    params = TabularValidationParams.from_form(request.form)
-    
-    processor = TabularProcessor()
-    result = processor.validate(
-        temp_path,
-        min_rows=params.min_rows,
-        min_columns=params.min_columns,
-        required_columns=params.required_columns,
-        sheet_name=params.sheet_name
+    logger.info(
+        f"Validation result for {file_info.secured_filename}: "
+        f"valid={result.is_valid}"
     )
-
     return success_response(result.to_dict())
 
 
 @bp.route('/preview', methods=['POST'])
 @handle_tabular_errors
 @with_uploaded_file(allowed_extensions={'csv', 'tsv', 'xls', 'xlsx'})
-@handle_tabular_errors
-@with_uploaded_file(allowed_extensions={'csv', 'tsv', 'xls', 'xlsx'})
-def preview_file(temp_path: Path, file_info: FileValidationResulttemp_path: Path, file_info: FileValidationResult):
-    """
-    Get a preview of tabular file contents.
-    
-    Request:
-        - file: Uploaded file
-        - num_rows: Number of rows to preview (default: 10)
-        - sheet_name: Optional sheet name for Excel files
-        - include_types: Whether to include column type detection (default: true)
-        
-    Returns:
-        PreviewResult as JSON
-    """
+@log_route(logger)
+def preview_file(temp_path: Path, file_info: FileValidationResult):
+    """Get a preview of tabular file contents."""
     params = TabularPreviewParams.from_form(request.form)
-    
+
+    logger.info(f"Previewing file: {file_info.secured_filename}")
+    logger.debug(
+        f"Preview params: num_rows={params.num_rows}, "
+        f"sheet={params.sheet_name}, include_types={params.include_types}"
+    )
+
     processor = TabularProcessor()
     result = processor.preview(
         temp_path,
@@ -170,117 +178,77 @@ def preview_file(temp_path: Path, file_info: FileValidationResulttemp_path: Path
         include_types=params.include_types
     )
 
-    return success_response(result.to_dict())
-    params = TabularPreviewParams.from_form(request.form)
-    
-    processor = TabularProcessor()
-    result = processor.preview(
-        temp_path,
-        num_rows=params.num_rows,
-        sheet_name=params.sheet_name,
-        include_types=params.include_types
+    logger.info(
+        f"Preview generated for {file_info.secured_filename}: "
+        f"{result.total_rows} total rows"
     )
-
     return success_response(result.to_dict())
 
 
 @bp.route('/import', methods=['POST'])
 @handle_tabular_errors
 @with_uploaded_file(allowed_extensions={'csv', 'tsv', 'xlsx', 'xls'})
+@log_route(logger)
 def import_file(temp_path: Path, file_info: FileValidationResult):
-@handle_tabular_errors
-@with_uploaded_file(allowed_extensions={'csv', 'tsv', 'xlsx', 'xls'})
-def import_file(temp_path: Path, file_info: FileValidationResult):
-    """
-    Import a tabular file and optionally process as statement.
-    
-    Request:
-        - file: Uploaded file
-        - start_row: Row to start import from (default: 0)
-        - has_header: Whether first row is header (default: true)
-        - columns: Comma-separated column indices to import
-        - column_names: Comma-separated custom column names
-        - sheet_name: Optional sheet name for Excel files
-        - account_id: Optional account ID to process as statement
-        
-    Returns:
-        ImportResult as JSON
-    """
+    """Import a tabular file and optionally process as statement."""
     original_filename = request.form.get('original_filename', temp_path.name)
     params = TabularImportParams.from_form(request.form)
-    
+
+    logger.info(
+        f"Importing file: {original_filename} "
+        f"| account_id={params.account_id or 'none'}"
+    )
+
     # Step 1: Import tabular data
     result = _process_tabular_file(temp_path, params)
-    
+
     # Step 2: Create upload record
-    upload_id = _create_upload_record(
-        result,
-        original_filename
-    )
+    upload_id = _create_upload_record(result, original_filename)
     result.upload_id = upload_id
     result.file_name = original_filename
 
     # Step 3: Process as statement (if account_id provided)
     if params.account_id:
         _process_as_statement(result, params.account_id, upload_id)
-    
+    else:
+        logger.debug("No account_id provided, skipping statement processing")
+
+    logger.info(
+        f"Import complete: upload_id={upload_id} | "
+        f"{len(result.data)} rows, {len(result.columns_imported)} columns"
+    )
     return success_response(result.to_dict())
 
 
 @bp.route('/sheets', methods=['POST'])
 @with_uploaded_file(allowed_extensions={'xls', 'xlsx'})
+@log_route(logger)
 def get_sheets(temp_path: Path, file_info: FileValidationResult):
-@with_uploaded_file(allowed_extensions={'xls', 'xlsx'})
-def get_sheets(temp_path: Path, file_info: FileValidationResult):
-    """
-    Get sheet names from an Excel file.
-    
-    Request:
-        - file: Uploaded Excel file
-        
-    Returns:
-        SheetInfo as JSON
-    """
+    """Get sheet names from an Excel file."""
+    logger.info(f"Getting sheet info for: {file_info.secured_filename}")
+
     processor = TabularProcessor()
     result = processor.get_sheet_info(temp_path)
-    
+
+    logger.info(
+        f"Found {len(result.sheets)} sheets in {file_info.secured_filename}"
+    )
     return success_response(result.to_dict())
 
 
 @bp.route('/check', methods=['POST'])
 @handle_tabular_errors
 @with_uploaded_file(allowed_extensions={'csv', 'tsv', 'xls', 'xlsx'})
+@log_route(logger)
 def check_tabular(temp_path: Path, file_info: FileValidationResult):
-@handle_tabular_errors
-@with_uploaded_file(allowed_extensions={'csv', 'tsv', 'xls', 'xlsx'})
-def check_tabular(temp_path: Path, file_info: FileValidationResult):
-    """
-    Quick check if a file is valid tabular data.
-    
-    Request:
-        - file: Uploaded file
-        
-    Returns:
-        {
-            "is_tabular": true/false,
-            "file_name": "filename.csv"
-        }
-    """
+    """Quick check if a file is valid tabular data."""
     processor = TabularProcessor()
     is_tabular = processor.is_tabular(temp_path)
-    
-    return success_response({
-        'is_tabular': is_tabular,
-        'file_name': file_info.secured_filename
-    })
 
-
-# =============================================================================
-# Upload CRUD Endpoints
-# =============================================================================
-    processor = TabularProcessor()
-    is_tabular = processor.is_tabular(temp_path)
-    
+    logger.info(
+        f"Tabular check for {file_info.secured_filename}: "
+        f"is_tabular={is_tabular}"
+    )
     return success_response({
         'is_tabular': is_tabular,
         'file_name': file_info.secured_filename
@@ -293,31 +261,22 @@ def check_tabular(temp_path: Path, file_info: FileValidationResult):
 
 @bp.route('', methods=['GET'])
 @handle_exceptions(log_prefix="get_uploads")
-@handle_exceptions(log_prefix="get_uploads")
+@log_route(logger)
 def get_uploads():
-    """
-    Get all uploads with optional filters.
-    
-    Query Parameters:
-        - limit: Maximum number of results (default: 50)
-        - offset: Pagination offset (default: 0)
-        - file_type: Filter by file type
-        - filename: Filter by filename (partial match)
-        - start_date: Filter uploads from this date (YYYY-MM-DD)
-        - end_date: Filter uploads until this date (YYYY-MM-DD)
-        
-    Returns:
-        List of upload objects as JSON
-    """
+    """Get all uploads with optional filters."""
     # Validate filters
     is_valid, filters, error_msg = validate_upload_filters(request.args.to_dict())
     if not is_valid:
         return error_response(error_msg, status_code=400)
-    
+
     # Extract pagination
     limit = filters.pop('limit')
     offset = filters.pop('offset')
-    
+
+    active_filters = {k: v for k, v in filters.items() if v is not None}
+    if active_filters:
+        logger.debug(f"Active filters: {active_filters}")
+
     # Get uploads
     upload_repo = UploadRepository()
     uploads = upload_repo.get_all_uploads(
@@ -325,86 +284,38 @@ def get_uploads():
         offset=offset,
         **filters
     )
-    
-    return paginated_response(uploads, limit, offset, data_key='uploads')
-    # Validate filters
-    is_valid, filters, error_msg = validate_upload_filters(request.args.to_dict())
-    if not is_valid:
-        return error_response(error_msg, status_code=400)
-    
-    # Extract pagination
-    limit = filters.pop('limit')
-    offset = filters.pop('offset')
-    
-    # Get uploads
-    upload_repo = UploadRepository()
-    uploads = upload_repo.get_all_uploads(
-        limit=limit,
-        offset=offset,
-        **filters
-    )
-    
+
+    logger.info(f"Retrieved {len(uploads)} uploads (offset={offset}, limit={limit})")
     return paginated_response(uploads, limit, offset, data_key='uploads')
 
 
 @bp.route('/<int:upload_id>', methods=['GET'])
 @handle_exceptions(log_prefix="get_upload")
-@handle_exceptions(log_prefix="get_upload")
+@log_route(logger)
 def get_upload(upload_id: int):
-    """
-    Get a single upload by ID.
-    
-    Path Parameters:
-        - upload_id: The upload ID
-        
-    Returns:
-        Upload object as JSON or 404 if not found
-    """
+    """Get a single upload by ID."""
     upload_repo = UploadRepository()
     upload = upload_repo.get_upload_by_id(upload_id)
-    
+
     if upload is None:
+        logger.warning(f"Upload {upload_id} not found")
         return error_response(f'Upload {upload_id} not found', status_code=404)
-    
-    return success_response(data=upload)
-    upload_repo = UploadRepository()
-    upload = upload_repo.get_upload_by_id(upload_id)
-    
-    if upload is None:
-        return error_response(f'Upload {upload_id} not found', status_code=404)
-    
+
     return success_response(data=upload)
 
 
 @bp.route('/<int:upload_id>', methods=['DELETE'])
 @handle_exceptions(log_prefix="delete_upload")
-@handle_exceptions(log_prefix="delete_upload")
+@log_route(logger)
 def delete_upload(upload_id: int):
-    """
-    Delete an upload and all associated data.
-    
-    Path Parameters:
-        - upload_id: The upload ID to delete
-        
-    Returns:
-        Success message or 404 if not found
-    """
+    """Delete an upload and all associated data."""
     upload_repo = UploadRepository()
     deleted = upload_repo.delete_upload(upload_id)
-    
+
     if not deleted:
+        logger.warning(f"Upload {upload_id} not found")
         return error_response(f'Upload {upload_id} not found', status_code=404)
-    
-    return success_response(
-        data={'deleted_upload_id': upload_id},
-        message=f'Upload {upload_id} deleted successfully'
-    )
-    upload_repo = UploadRepository()
-    deleted = upload_repo.delete_upload(upload_id)
-    
-    if not deleted:
-        return error_response(f'Upload {upload_id} not found', status_code=404)
-    
+
     return success_response(
         data={'deleted_upload_id': upload_id},
         message=f'Upload {upload_id} deleted successfully'

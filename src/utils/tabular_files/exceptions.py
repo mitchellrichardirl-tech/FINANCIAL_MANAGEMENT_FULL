@@ -1,10 +1,11 @@
-import logging
 from functools import wraps
 
 from src.database.connection import DatabaseError
 from src.api.utils.response_helpers import error_response
+from src.utils.logging import ContextLogger
 
-logger = logging.getLogger(__name__)
+logger = ContextLogger(__name__)
+
 
 class TabularProcessorError(Exception):
     """Base exception for tabular processor errors."""
@@ -35,20 +36,29 @@ class EmptyFileError(TabularProcessorError):
     """Raised when the file contains no data."""
     pass
 
+
 def handle_tabular_errors(f):
+    """Decorator that maps tabular processing exceptions to HTTP responses."""
     @wraps(f)
     def wrapper(*args, **kwargs):
         try:
             return f(*args, **kwargs)
         except UnsupportedFileTypeError as e:
-            return error_response(str(e), status_code=415)  # Unsupported Media Type
+            logger.warning(f"Unsupported file type in {f.__name__}: {e}")
+            return error_response(str(e), status_code=415)
         except FileNotFoundError as e:
+            logger.warning(f"File not found in {f.__name__}: {e}")
             return error_response(str(e), status_code=404)
         except TabularProcessorError as e:
-            return error_response(str(e), status_code=422)  # Unprocessable Entity
+            logger.warning(f"Processing error in {f.__name__}: {e}")
+            return error_response(str(e), status_code=422)
         except DatabaseError as e:
+            logger.error(f"Database error in {f.__name__}: {e}")
             return error_response(f'Database error: {str(e)}', status_code=500)
         except Exception as e:
-            logger.exception(f'Unexpected error in import_file')
+            logger.error(
+                f"Unexpected error in {f.__name__}: {e}",
+                exc_info=True
+            )
             return error_response('An unexpected error occurred', status_code=500)
     return wrapper
