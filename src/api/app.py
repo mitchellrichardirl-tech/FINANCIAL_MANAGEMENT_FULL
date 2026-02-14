@@ -1,15 +1,14 @@
-import logging
 import os
 from pathlib import Path
 
-from flask import Flask, jsonify
+from flask import Flask
 from flask_cors import CORS
 
 from .middleware.error_handlers import register_error_handlers
-
 from src.api.scheduler import init_scheduler
+from src.utils.logging import ContextLogger
 
-logger = logging.getLogger(__name__)
+logger = ContextLogger(__name__)
 
 
 def create_app(config=None):
@@ -24,7 +23,9 @@ def create_app(config=None):
     """
     app = Flask(__name__)
     BASE_DIR = Path(__file__).resolve().parent.parent.parent
-    logger.info(f"Base directory: {BASE_DIR}")
+
+    logger.info(f"Initializing application | base_dir={BASE_DIR}")
+
     # Default configuration
     app.config.update(
         # File upload settings
@@ -47,9 +48,16 @@ def create_app(config=None):
         JSON_SORT_KEYS=False,
     )
 
-    # Override with provided config
     if config:
+        logger.info(f"Applying config overrides: {list(config.keys())}")
         app.config.update(config)
+
+    logger.debug(
+        f"Config: upload_folder={app.config['UPLOAD_FOLDER']}, "
+        f"db_path={app.config['DATABASE_PATH']}, "
+        f"max_content_length={app.config['MAX_CONTENT_LENGTH']}, "
+        f"allowed_extensions={app.config['ALLOWED_EXTENSIONS']}"
+    )
 
     # Enable CORS
     CORS(
@@ -62,11 +70,39 @@ def create_app(config=None):
             }
         },
     )
+    logger.debug("CORS configured for /api/*")
 
     # Initialize database
     _init_database(app)
-    logger.info(f"Database path: {app.config['DATABASE_PATH']}")
 
+    # Register blueprints
+    _register_blueprints(app)
+
+    # Register error handlers
+    register_error_handlers(app)
+    logger.debug("Error handlers registered")
+
+    # Create upload folder
+    upload_folder = app.config["UPLOAD_FOLDER"]
+    created = not os.path.exists(upload_folder)
+    os.makedirs(upload_folder, exist_ok=True)
+    if created:
+        logger.info(f"Created upload folder: {upload_folder}")
+
+    # Initialize background scheduler (skip in reloader subprocess)
+    if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.debug:
+        init_scheduler(app)
+        logger.info("Background scheduler initialized")
+    else:
+        logger.debug("Skipping scheduler init (reloader parent process)")
+
+    logger.info("Application initialized successfully")
+
+    return app
+
+
+def _register_blueprints(app):
+    """Register all route blueprints."""
     from src.api.routes import (
         health,
         receipts,
@@ -75,37 +111,29 @@ def create_app(config=None):
         categories,
         transactions,
     )
-    
-    # Register blueprints
-    app.register_blueprint(health.bp, url_prefix="/api")
-    app.register_blueprint(receipts.bp, url_prefix="/api")
-    app.register_blueprint(tabular_files.bp, url_prefix="/api/tabular")
-    app.register_blueprint(accounts.bp, url_prefix='/api/accounts')
-    app.register_blueprint(categories.bp, url_prefix='/api')
-    app.register_blueprint(transactions.bp, url_prefix='/api/transactions')
 
-    # Register error handlers
-    register_error_handlers(app)
+    blueprints = [
+        (health.bp, "/api"),
+        (receipts.bp, "/api"),
+        (tabular_files.bp, "/api/tabular"),
+        (accounts.bp, "/api/accounts"),
+        (categories.bp, "/api"),
+        (transactions.bp, "/api/transactions"),
+    ]
 
-    # Create upload folder
-    os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
+    for blueprint, prefix in blueprints:
+        app.register_blueprint(blueprint, url_prefix=prefix)
+        logger.debug(f"Registered blueprint: {blueprint.name} -> {prefix}")
 
-    if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.debug:
-        # Initialize background scheduler
-        init_scheduler(app)
-        logger.info("Background scheduler initialized")
-    
-    logger.info("Flask application created successfully")
-
-    return app
+    logger.info(f"Registered {len(blueprints)} blueprints")
 
 
 def _init_database(app):
     """Initialize database for the application."""
     from src.database import connection as db
 
-    manager = db.init_app(app)
-    logger.info(f"Database manager initialized: {manager.db_path}")
+    logger.debug(f"Initializing database: {app.config['DATABASE_PATH']}")
 
-    # Optionally run migrations or create tables
-    # _run_migrations(app)
+    manager = db.init_app(app)
+
+    logger.info(f"Database initialized: {manager.db_path}")

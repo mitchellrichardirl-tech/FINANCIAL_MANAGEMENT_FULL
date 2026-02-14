@@ -1,5 +1,9 @@
 from flask import jsonify
 
+from src.utils.logging import ContextLogger
+
+logger = ContextLogger(__name__)
+
 
 def success_response(data=None, message=None, status_code=200):
     """
@@ -14,13 +18,13 @@ def success_response(data=None, message=None, status_code=200):
         Flask JSON response
     """
     response = {'success': True}
-    
+
     if data is not None:
         response['data'] = data
-    
+
     if message:
         response['message'] = message
-    
+
     return jsonify(response), status_code
 
 
@@ -40,11 +44,14 @@ def error_response(message, errors=None, status_code=400):
         'success': False,
         'error': message
     }
-    
+
     if errors:
         response['errors'] = errors
-    
+
+    logger.debug(f"Error response ({status_code}): {message}")
+
     return jsonify(response), status_code
+
 
 def paginated_response(
     items: list,
@@ -76,8 +83,9 @@ def paginated_response(
         }
     }
     response_data.update(extra_data)
-    
+
     return success_response(data=response_data)
+
 
 def search_response(
     results: list,

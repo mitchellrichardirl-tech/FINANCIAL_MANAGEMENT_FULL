@@ -1,7 +1,6 @@
 from pathlib import Path
 from typing import Optional, List, Union, Dict, Any
 import pandas as pd
-import numpy as np
 
 from src.models.files import (
     FileType,
@@ -30,6 +29,9 @@ from src.utils.tabular_files.exceptions import (
     ValidationError,
     EmptyFileError
 )
+from src.utils.logging import ContextLogger
+
+logger = ContextLogger(__name__)
 
 
 class TabularProcessor:
@@ -40,30 +42,8 @@ class TabularProcessor:
     - Validating tabular data files
     - Previewing file contents
     - Importing data with flexible column selection and naming
-    
-    Supports: CSV, TSV, TXT, XLS, XLSX, XLSM, XLSB, ODS, Parquet, JSON
-    
-    Example:
-        processor = TabularProcessor()
-        
-        # Validate a file
-        validation = processor.validate("data.csv")
-        print(validation.to_json())
-        
-        # Preview first 10 rows
-        preview = processor.preview("data.csv", num_rows=10)
-        print(preview.to_json())
-        
-        # Import with options
-        result = processor.import_data(
-            "data.csv",
-            start_row=5,
-            columns=[0, 2, 4],
-            column_names=["ID", "Name", "Value"]
-        )
-        print(result.to_json())
     """
-    
+
     def __init__(
         self,
         default_encoding: Optional[str] = None,
@@ -71,25 +51,16 @@ class TabularProcessor:
         auto_detect_types: bool = True,
         normalize_columns: bool = False
     ):
-        """
-        Initialize the TabularProcessor.
-        
-        Args:
-            default_encoding: Default encoding for text files (auto-detect if None)
-            default_delimiter: Default delimiter for text files (auto-detect if None)
-            auto_detect_types: Whether to auto-detect column data types
-            normalize_columns: Whether to normalize column names to valid identifiers
-        """
         self.default_encoding = default_encoding
         self.default_delimiter = default_delimiter
         self.auto_detect_types = auto_detect_types
         self.normalize_columns = normalize_columns
-        
+
         self.reader = FileReader(
             encoding=default_encoding,
             delimiter=default_delimiter
         )
-    
+
     def _validate_file_path(self, file_path: Union[str, Path]) -> Path:
         """Validate that file exists and return Path object."""
         path = Path(file_path)
@@ -98,31 +69,30 @@ class TabularProcessor:
         if not path.is_file():
             raise FileNotFoundError(f"Path is not a file: {path}")
         return path
-    
+
     def _get_column_info(self, df: pd.DataFrame, sample_size: int = 5) -> List[ColumnInfo]:
         """Extract column information from DataFrame."""
         columns_info = []
-        
+
         for idx, col in enumerate(df.columns):
             series = df[col]
-            
-            # Get sample values (non-null)
+
             non_null = series.dropna()
             sample_values = non_null.head(sample_size).tolist()
-            
+
             col_info = ColumnInfo(
                 name=str(col),
-                index=int(idx),  # Ensure int
+                index=int(idx),
                 data_type=infer_column_type(series) if self.auto_detect_types else "unknown",
-                nullable=bool(series.isna().any()),  # Ensure bool
+                nullable=bool(series.isna().any()),
                 sample_values=sample_values,
-                null_count=int(series.isna().sum()),  # Ensure int
-                unique_count=int(series.nunique())  # Ensure int
+                null_count=int(series.isna().sum()),
+                unique_count=int(series.nunique())
             )
             columns_info.append(col_info)
-        
+
         return columns_info
-    
+
     def validate(
         self,
         file_path: Union[str, Path],
@@ -131,25 +101,19 @@ class TabularProcessor:
         required_columns: Optional[List[str]] = None,
         sheet_name: Union[str, int] = 0
     ) -> ValidationResult:
-        """
-        Validate a file and return detailed information about its contents.
-        
-        Args:
-            file_path: Path to the file to validate
-            min_rows: Minimum required number of data rows
-            min_columns: Minimum required number of columns
-            required_columns: List of column names that must be present
-            sheet_name: Sheet name or index for Excel files
-            
-        Returns:
-            ValidationResult with validation status and file details
-        """
+        """Validate a file and return detailed information about its contents."""
         errors = []
         warnings = []
-        
+
+        logger.debug(
+            f"Validating file: {Path(file_path).name} "
+            f"| min_rows={min_rows}, min_columns={min_columns}"
+        )
+
         try:
             path = self._validate_file_path(file_path)
         except FileNotFoundError as e:
+            logger.warning(f"Validation failed — file not found: {file_path}")
             return ValidationResult(
                 is_valid=False,
                 file_path=str(file_path),
@@ -165,10 +129,10 @@ class TabularProcessor:
                 errors=[str(e)],
                 warnings=[]
             )
-        
-        # Detect file type
+
         file_type = detect_file_type(path)
         if file_type == FileType.UNKNOWN:
+            logger.warning(f"Unsupported file type: {path.suffix}")
             return ValidationResult(
                 is_valid=False,
                 file_path=str(path),
@@ -184,59 +148,72 @@ class TabularProcessor:
                 errors=[f"Unsupported file type: {path.suffix}"],
                 warnings=[]
             )
-        
-        # Get file metadata
+
         file_size = get_file_size(path)
         encoding = detect_encoding(path) if file_type in TEXT_TYPES else "N/A"
         delimiter = detect_delimiter(path, encoding) if file_type in TEXT_TYPES else None
-        
+
+        logger.debug(
+            f"File metadata: type={file_type.value}, size={file_size}, "
+            f"encoding={encoding}, delimiter={delimiter!r}"
+        )
+
         try:
-            # Read the file
             df = self.reader.read(
-                path, 
-                file_type, 
+                path,
+                file_type,
                 sheet_name=sheet_name
             )
-            
+
             row_count = len(df)
             column_count = len(df.columns)
-            
-            # Get column info
             columns_info = self._get_column_info(df)
-            
-            # Validation checks
+
             if row_count < min_rows:
                 errors.append(
                     f"File has {row_count} data rows, minimum required: {min_rows}"
                 )
-            
+
             if column_count < min_columns:
                 errors.append(
                     f"File has {column_count} columns, minimum required: {min_columns}"
                 )
-            
+
             if required_columns:
                 actual_columns = set(str(c) for c in df.columns)
                 missing = set(required_columns) - actual_columns
                 if missing:
                     errors.append(f"Missing required columns: {list(missing)}")
-            
-            # Warnings
+
             if df.columns.duplicated().any():
                 dup_cols = df.columns[df.columns.duplicated()].tolist()
                 warnings.append(f"Duplicate column names detected: {dup_cols}")
-            
+
             empty_cols = [col for col in df.columns if df[col].isna().all()]
             if empty_cols:
                 warnings.append(f"Empty columns detected: {empty_cols}")
-            
-            # Check for completely empty rows
+
             empty_rows = df.isna().all(axis=1).sum()
             if empty_rows > 0:
                 warnings.append(f"File contains {empty_rows} completely empty rows")
-            
+
+            is_valid = len(errors) == 0
+
+            if is_valid:
+                logger.debug(
+                    f"Validation passed for {path.name}: "
+                    f"{row_count} rows, {column_count} columns"
+                )
+            else:
+                logger.debug(
+                    f"Validation failed for {path.name}: {errors}"
+                )
+
+            if warnings:
+                logger.debug(f"Validation warnings for {path.name}: {warnings}")
+
             return ValidationResult(
-                is_valid=len(errors) == 0,
+                is_valid=is_valid,
                 file_path=str(path),
                 file_name=path.name,
                 file_type=file_type.value,
@@ -250,8 +227,9 @@ class TabularProcessor:
                 errors=errors,
                 warnings=warnings
             )
-            
+
         except Exception as e:
+            logger.error(f"Failed to read file for validation {path.name}: {e}")
             return ValidationResult(
                 is_valid=False,
                 file_path=str(path),
@@ -267,7 +245,7 @@ class TabularProcessor:
                 errors=[f"Failed to read file: {str(e)}"],
                 warnings=[]
             )
-    
+
     def preview(
         self,
         file_path: Union[str, Path],
@@ -275,24 +253,16 @@ class TabularProcessor:
         sheet_name: Union[str, int] = 0,
         include_types: bool = True
     ) -> PreviewResult:
-        """
-        Get a preview of the file contents.
-        
-        Args:
-            file_path: Path to the file
-            num_rows: Number of rows to include in preview
-            sheet_name: Sheet name or index for Excel files
-            include_types: Whether to include detected column types
-            
-        Returns:
-            PreviewResult with preview data in JSON-serializable format
-        """
+        """Get a preview of the file contents."""
         errors = []
         warnings = []
-        
+
+        logger.debug(f"Previewing file: {Path(file_path).name} | num_rows={num_rows}")
+
         try:
             path = self._validate_file_path(file_path)
         except FileNotFoundError as e:
+            logger.warning(f"Preview failed — file not found: {file_path}")
             return PreviewResult(
                 success=False,
                 file_name=Path(file_path).name,
@@ -305,9 +275,10 @@ class TabularProcessor:
                 data=[],
                 errors=[str(e)]
             )
-        
+
         file_type = detect_file_type(path)
         if file_type == FileType.UNKNOWN:
+            logger.warning(f"Preview failed — unsupported file type: {path.suffix}")
             return PreviewResult(
                 success=False,
                 file_name=path.name,
@@ -320,30 +291,31 @@ class TabularProcessor:
                 data=[],
                 errors=[f"Unsupported file type: {path.suffix}"]
             )
-        
+
         try:
-            # Read full file to get total count, then limit preview
             df_full = self.reader.read(path, file_type, sheet_name=sheet_name)
             total_rows = len(df_full)
-            
-            # Get preview data
+
             df_preview = df_full.head(num_rows)
-            
-            # Normalize column names if requested
+
             columns = [str(c) for c in df_preview.columns]
             if self.normalize_columns:
                 columns = normalize_column_names(columns)
                 df_preview.columns = columns
-            
-            # Get column types
+
             column_types = {}
             if include_types:
                 for col in df_preview.columns:
                     column_types[str(col)] = infer_column_type(df_preview[col])
-            
-            # Convert to JSON-serializable format
+
             data = dataframe_to_json_records(df_preview)
-            
+
+            logger.debug(
+                f"Preview generated for {path.name}: "
+                f"{total_rows} total rows, {len(columns)} columns, "
+                f"showing {len(df_preview)} rows"
+            )
+
             return PreviewResult(
                 success=True,
                 file_name=path.name,
@@ -357,8 +329,9 @@ class TabularProcessor:
                 errors=[],
                 warnings=warnings
             )
-            
+
         except Exception as e:
+            logger.error(f"Failed to preview {path.name}: {e}")
             return PreviewResult(
                 success=False,
                 file_name=path.name,
@@ -371,7 +344,7 @@ class TabularProcessor:
                 data=[],
                 errors=[f"Failed to preview file: {str(e)}"]
             )
-    
+
     def import_data(
         self,
         file_path: Union[str, Path],
@@ -384,31 +357,20 @@ class TabularProcessor:
         skip_empty_rows: bool = True,
         strip_whitespace: bool = True
     ) -> ImportResult:
-        """
-        Import data from a tabular file with flexible options.
-        
-        Args:
-            file_path: Path to the file
-            start_row: Row to start importing from (0-based index, after header if present)
-            columns: List of column indices (int) or names (str) to import. 
-                     None imports all columns.
-            column_names: Custom names for imported columns. If provided, must match
-                         the number of columns being imported.
-            has_header: Whether the file has a header row
-            sheet_name: Sheet name or index for Excel files
-            max_rows: Maximum number of rows to import (None = all)
-            skip_empty_rows: Whether to skip completely empty rows
-            strip_whitespace: Whether to strip whitespace from string values
-            
-        Returns:
-            ImportResult with imported data in JSON-serializable format
-        """
+        """Import data from a tabular file with flexible options."""
         errors = []
         warnings = []
-        
+
+        logger.debug(
+            f"Importing file: {Path(file_path).name} "
+            f"| start_row={start_row}, has_header={has_header}, "
+            f"columns={columns}, max_rows={max_rows}"
+        )
+
         try:
             path = self._validate_file_path(file_path)
         except FileNotFoundError as e:
+            logger.warning(f"Import failed — file not found: {file_path}")
             return ImportResult(
                 success=False,
                 file_name=Path(file_path).name,
@@ -422,9 +384,10 @@ class TabularProcessor:
                 data=[],
                 errors=[str(e)]
             )
-        
+
         file_type = detect_file_type(path)
         if file_type == FileType.UNKNOWN:
+            logger.warning(f"Import failed — unsupported file type: {path.suffix}")
             return ImportResult(
                 success=False,
                 file_name=path.name,
@@ -438,20 +401,17 @@ class TabularProcessor:
                 data=[],
                 errors=[f"Unsupported file type: {path.suffix}"]
             )
-        
+
         try:
-            # Calculate skiprows based on start_row and header settings
             skiprows = None
             if start_row > 0:
                 skiprows = list(range(0, start_row - 1))
             header_setting = 0 if has_header else None
-                        
-            # Process column selection
+
             usecols = None
             if columns is not None:
                 usecols = columns
-            
-            # Read the file
+
             df = self.reader.read(
                 path,
                 file_type,
@@ -461,51 +421,59 @@ class TabularProcessor:
                 header=header_setting,
                 sheet_name=sheet_name
             )
-            
+
             rows_before = len(df)
-            
-            # Skip empty rows if requested
+
             if skip_empty_rows:
                 df = df.dropna(how='all')
-            
+
             rows_skipped = rows_before - len(df)
-            
-            # Strip whitespace if requested
+
+            if rows_skipped > 0:
+                logger.debug(f"Skipped {rows_skipped} empty rows from {path.name}")
+
             if strip_whitespace:
                 for col in df.select_dtypes(include=['object']).columns:
                     df[col] = df[col].apply(
                         lambda x: x.strip() if isinstance(x, str) else x
                     )
-            
+
             # Apply custom column names
             original_columns = [str(c) for c in df.columns]
             column_mapping = None
-            
+
             if column_names is not None:
                 if len(column_names) != len(df.columns):
-                    warnings.append(
+                    msg = (
                         f"Column names count ({len(column_names)}) doesn't match "
                         f"data columns ({len(df.columns)}). Adjusting..."
                     )
-                    # Pad or truncate
+                    warnings.append(msg)
+                    logger.warning(f"Import {path.name}: {msg}")
+
                     if len(column_names) < len(df.columns):
                         column_names = list(column_names) + [
                             f"column_{i}" for i in range(len(column_names), len(df.columns))
                         ]
                     else:
                         column_names = column_names[:len(df.columns)]
-                
+
                 column_mapping = dict(zip(original_columns, column_names))
                 df.columns = column_names
             elif self.normalize_columns:
                 new_columns = normalize_column_names(original_columns)
                 column_mapping = dict(zip(original_columns, new_columns))
                 df.columns = new_columns
-            
-            # Convert to JSON-serializable format
+
             final_columns = [str(c) for c in df.columns]
             data = dataframe_to_json_records(df)
-            
+
+            logger.debug(
+                f"Imported {path.name}: {len(df)} rows, "
+                f"{len(final_columns)} columns "
+                f"(skipped={rows_skipped + start_row})"
+            )
+
             return ImportResult(
                 success=True,
                 file_name=path.name,
@@ -520,8 +488,9 @@ class TabularProcessor:
                 errors=[],
                 warnings=warnings
             )
-            
+
         except Exception as e:
+            logger.error(f"Failed to import {path.name}: {e}")
             return ImportResult(
                 success=False,
                 file_name=path.name,
@@ -535,36 +504,22 @@ class TabularProcessor:
                 data=[],
                 errors=[f"Failed to import file: {str(e)}"]
             )
-    
+
     def get_sheet_info(self, file_path: Union[str, Path]) -> SheetInfo:
-        """
-        Get sheet information for Excel files.
-        
-        Args:
-            file_path: Path to the Excel file
-            
-        Returns:
-            SheetInfo with sheet names
-        """
+        """Get sheet information for Excel files."""
         path = self._validate_file_path(file_path)
         sheet_names = self.reader.get_sheet_names(path)
-        
+
+        logger.debug(f"Sheet info for {path.name}: {len(sheet_names)} sheets")
+
         return SheetInfo(
             file_name=path.name,
             sheet_names=sheet_names,
             sheet_count=len(sheet_names)
         )
-    
+
     def is_tabular(self, file_path: Union[str, Path]) -> bool:
-        """
-        Quick check if a file appears to be valid tabular data.
-        
-        Args:
-            file_path: Path to the file
-            
-        Returns:
-            True if file appears to be valid tabular data
-        """
+        """Quick check if a file appears to be valid tabular data."""
         try:
             validation = self.validate(file_path, min_rows=0, min_columns=1)
             return validation.is_valid
