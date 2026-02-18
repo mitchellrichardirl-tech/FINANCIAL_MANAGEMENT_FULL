@@ -5,6 +5,7 @@ import sqlite3
 
 from flask import current_app, g
 
+from src.database.migrations import migrate
 from src.utils.logging import ContextLogger
 
 logger = ContextLogger(__name__)
@@ -144,6 +145,9 @@ def init_app(app, create_tables=True):
         schema_manager = SchemaManager(manager)
         schema_manager.init_db()
         logger.debug("Database schema initialized")
+        migrate(db_path)
+        logger.debug("Database migrations applied")
+
     else:
         logger.debug("Skipping table creation (create_tables=False)")
 

@@ -1,4 +1,4 @@
-from typing import Optional, Dict, List, Any, Union
+from typing import Optional, Dict, List, Any
 import sqlite3
 
 from src.database.connection import get_manager, DatabaseError
@@ -15,12 +15,13 @@ class AccountRepository:
         self.db = get_manager()
         self.br = BaseRepository()
 
-   # ========== Create ==========
+    # ========== Create ==========
 
     def add_account(
         self,
         account_name: str,
-        account_type: str
+        account_type: str,
+        statement_format: Optional[str] = None,  # <-- new, optional
     ) -> Optional[Dict[str, Any]]:
         """Add a new account and return the created record."""
         logger.debug(f"Adding account: {account_name} ({account_type})")
@@ -28,14 +29,15 @@ class AccountRepository:
         try:
             with self.db.transaction() as conn:
                 cursor = conn.cursor()
-                
+
                 cursor.execute(
-                    "INSERT INTO accounts (account_name, account_type) VALUES (?, ?)",
-                    (account_name, account_type)
+                    """INSERT INTO accounts
+                       (account_name, account_type, statement_format)
+                       VALUES (?, ?, ?)""",
+                    (account_name, account_type, statement_format),
                 )
                 account_id = cursor.lastrowid
-                
-                # Fetch within same transaction
+
                 cursor.execute("SELECT * FROM accounts WHERE id = ?", (account_id,))
                 row = cursor.fetchone()
 
@@ -59,7 +61,7 @@ class AccountRepository:
         try:
             row = self.br.select_query(
                 "SELECT * FROM accounts WHERE id = ?",
-                params=str(account_id)
+                params=str(account_id),
             )
             if not row:
                 logger.debug(f"Account {account_id} not found")
@@ -77,7 +79,7 @@ class AccountRepository:
                 cursor = conn.cursor()
                 cursor.execute(
                     "SELECT * FROM accounts WHERE account_name = ?",
-                    (account_name,)
+                    (account_name,),
                 )
                 row = cursor.fetchone()
 
@@ -112,7 +114,7 @@ class AccountRepository:
                 cursor = conn.cursor()
                 cursor.execute(
                     "SELECT * FROM accounts WHERE account_type = ? ORDER BY account_name",
-                    (account_type,)
+                    (account_type,),
                 )
                 rows = cursor.fetchall()
 
@@ -123,15 +125,65 @@ class AccountRepository:
             logger.error(f"Failed to get accounts by type '{account_type}': {e}")
             raise DatabaseError(f"Failed to get accounts: {e}") from e
 
+    def get_accounts_by_statement_format(
+        self, statement_format: str
+    ) -> List[Dict[str, Any]]:
+        """Get all accounts using a specific statement format."""
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """SELECT * FROM accounts
+                       WHERE statement_format = ?
+                       ORDER BY account_name""",
+                    (statement_format,),
+                )
+                rows = cursor.fetchall()
+
+                logger.debug(
+                    f"Retrieved {len(rows)} accounts with "
+                    f"statement format '{statement_format}'"
+                )
+                return [dict(row) for row in rows]
+
+        except Exception as e:
+            logger.error(
+                f"Failed to get accounts by statement format "
+                f"'{statement_format}': {e}"
+            )
+            raise DatabaseError(f"Failed to get accounts: {e}") from e
+
+    def get_accounts_without_statement_format(self) -> List[Dict[str, Any]]:
+        """Get accounts that don't have a statement format configured."""
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """SELECT * FROM accounts
+                       WHERE statement_format IS NULL
+                       ORDER BY account_name"""
+                )
+                rows = cursor.fetchall()
+
+                logger.debug(
+                    f"Retrieved {len(rows)} accounts without statement format"
+                )
+                return [dict(row) for row in rows]
+
+        except Exception as e:
+            logger.error(f"Failed to get unconfigured accounts: {e}")
+            raise DatabaseError(f"Failed to get accounts: {e}") from e
+
     # ========== Update ==========
 
     def update_account(
         self,
         account_id: int,
         account_name: Optional[str] = None,
-        account_type: Optional[str] = None
+        account_type: Optional[str] = None,
+        statement_format: Optional[str] = None,  # <-- new, optional
     ) -> Optional[Dict[str, Any]]:
-        """Update an account."""
+        """Update an account. Pass only the fields you want to change."""
         try:
             with self.db.transaction() as conn:
                 cursor = conn.cursor()
@@ -143,12 +195,17 @@ class AccountRepository:
                 if account_name is not None:
                     updates.append("account_name = ?")
                     params.append(account_name)
-                    updated_fields.append('account_name')
+                    updated_fields.append("account_name")
 
                 if account_type is not None:
                     updates.append("account_type = ?")
                     params.append(account_type)
-                    updated_fields.append('account_type')
+                    updated_fields.append("account_type")
+
+                if statement_format is not None:
+                    updates.append("statement_format = ?")
+                    params.append(statement_format)
+                    updated_fields.append("statement_format")
 
                 if not updates:
                     logger.debug(f"No fields to update for account {account_id}")
@@ -168,7 +225,9 @@ class AccountRepository:
         except sqlite3.IntegrityError as e:
             if "unique" in str(e).lower():
                 logger.warning(f"Duplicate account name on update: {account_name}")
-                raise DatabaseError(f"Account name already exists: {account_name}") from e
+                raise DatabaseError(
+                    f"Account name already exists: {account_name}"
+                ) from e
             logger.error(f"Integrity error updating account {account_id}: {e}")
             raise DatabaseError(f"Failed to update account: {e}") from e
         except Exception as e:
@@ -180,7 +239,7 @@ class AccountRepository:
     def delete_account(self, account_id: int) -> bool:
         """
         Delete an account by ID.
-        
+
         Returns True if deleted, False if not found.
         Raises DatabaseError if account has associated transactions.
         """
@@ -190,9 +249,9 @@ class AccountRepository:
 
                 cursor.execute(
                     "SELECT COUNT(*) as count FROM transactions WHERE account_id = ?",
-                    (account_id,)
+                    (account_id,),
                 )
-                count = cursor.fetchone()['count']
+                count = cursor.fetchone()["count"]
 
                 if count > 0:
                     logger.warning(
@@ -228,16 +287,18 @@ class AccountRepository:
                 cursor = conn.cursor()
                 cursor.execute(
                     "SELECT COUNT(*) as count FROM transactions WHERE account_id = ?",
-                    (account_id,)
+                    (account_id,),
                 )
                 row = cursor.fetchone()
-                count = row['count'] if row else 0
+                count = row["count"] if row else 0
 
                 logger.debug(f"Account {account_id} has {count} transactions")
                 return count
 
         except Exception as e:
-            logger.error(f"Failed to get transaction count for account {account_id}: {e}")
+            logger.error(
+                f"Failed to get transaction count for account {account_id}: {e}"
+            )
             raise DatabaseError(f"Failed to get transaction count: {e}") from e
 
     def get_distinct_account_types(self) -> List[str]:
@@ -249,7 +310,7 @@ class AccountRepository:
                     "SELECT DISTINCT account_type FROM accounts ORDER BY account_type"
                 )
                 rows = cursor.fetchall()
-                types = [row['account_type'] for row in rows]
+                types = [row["account_type"] for row in rows]
 
                 logger.debug(f"Retrieved {len(types)} distinct account types")
                 return types

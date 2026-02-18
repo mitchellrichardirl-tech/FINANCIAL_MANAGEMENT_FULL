@@ -5,12 +5,25 @@ from src.api.utils.response_helpers import success_response, error_response
 from src.api.utils.route_helpers import handle_exceptions, require_json, handle_database_errors
 from src.api.utils.validators import RequestValidator, require_at_least_one
 from src.utils.logging import ContextLogger, log_route
+from src.statements.configs import STATEMENT_CONFIGS  # <-- new import
 
 bp = Blueprint('accounts', __name__)
 logger = ContextLogger(__name__)
 
 
 # ==================== Helper Functions ====================
+
+def validate_statement_format_value(value: str) -> str | None:
+    """
+    Check a statement format key against the registry.
+    Returns an error message if invalid, None if valid.
+    """
+    formats = STATEMENT_CONFIGS
+    if value not in formats:
+        valid_keys = list(formats.keys())
+        return f"Unknown statement format '{value}'. Must be one of: {valid_keys}"
+    return None
+
 
 def validate_create_account(data: dict) -> tuple[bool, dict, str]:
     """Validate account creation data."""
@@ -22,12 +35,22 @@ def validate_create_account(data: dict) -> tuple[bool, dict, str]:
         validator.field('account_name').required().strip_string())
     validator.validate_field('account_type',
         validator.field('account_type').required().strip_string())
+    validator.validate_field('statement_format',
+        validator.field('statement_format').optional().strip_string())
 
     if not validator.is_valid():
         logger.warning(f"Validation failed: {validator.first_error_message()}")
         return False, {}, validator.first_error_message()
 
-    return True, validator.validated, None
+    # Check statement_format against registry if provided
+    validated = validator.validated
+    if 'statement_format' in validated:
+        error = validate_statement_format_value(validated['statement_format'])
+        if error:
+            logger.warning(f"Validation failed: {error}")
+            return False, {}, error
+
+    return True, validated, None
 
 
 def validate_update_account(data: dict) -> tuple[bool, dict, str]:
@@ -36,8 +59,8 @@ def validate_update_account(data: dict) -> tuple[bool, dict, str]:
 
     error = require_at_least_one(
         data,
-        ['account_name', 'account_type'],
-        'At least one of account_name or account_type is required'
+        ['account_name', 'account_type', 'statement_format'],
+        'At least one of account_name, account_type, or statement_format is required'
     )
     if error:
         logger.warning(f"Validation failed: {error}")
@@ -49,12 +72,22 @@ def validate_update_account(data: dict) -> tuple[bool, dict, str]:
         validator.field('account_name').optional().strip_string())
     validator.validate_field('account_type',
         validator.field('account_type').optional().strip_string())
+    validator.validate_field('statement_format',
+        validator.field('statement_format').optional().strip_string())
 
     if not validator.is_valid():
         logger.warning(f"Validation failed: {validator.first_error_message()}")
         return False, {}, validator.first_error_message()
 
-    return True, validator.validated, None
+    # Check statement_format against registry if provided
+    validated = validator.validated
+    if 'statement_format' in validated:
+        error = validate_statement_format_value(validated['statement_format'])
+        if error:
+            logger.warning(f"Validation failed: {error}")
+            return False, {}, error
+
+    return True, validated, None
 
 
 # ==================== Routes ====================
@@ -63,13 +96,17 @@ def validate_update_account(data: dict) -> tuple[bool, dict, str]:
 @handle_exceptions(log_prefix="get_accounts")
 @log_route(logger)
 def get_accounts():
-    """Get all accounts with optional filtering by type."""
+    """Get all accounts with optional filtering by type or statement format."""
     account_repo = AccountRepository()
     account_type = request.args.get('account_type')
+    statement_format = request.args.get('statement_format')
 
     if account_type:
         logger.debug(f"Filtering by account_type: {account_type}")
         accounts = account_repo.get_accounts_by_type(account_type)
+    elif statement_format:
+        logger.debug(f"Filtering by statement_format: {statement_format}")
+        accounts = account_repo.get_accounts_by_statement_format(statement_format)
     else:
         accounts = account_repo.get_all_accounts()
 
@@ -109,7 +146,7 @@ def create_account():
         return error_response(error_msg, status_code=400)
 
     account_repo = AccountRepository()
-    account = account_repo.add_account(**validated_data)  # Now returns full object
+    account = account_repo.add_account(**validated_data)
 
     logger.info(f"Created account with id: {account['id']}")
     return success_response(
@@ -180,6 +217,33 @@ def get_account_types():
 
     logger.info(f"Retrieved {len(account_types)} account types")
     return success_response(data=account_types)
+
+
+@bp.route('/statement-formats', methods=['GET'])
+@handle_exceptions(log_prefix="get_statement_formats")
+@log_route(logger)
+def get_statement_formats():
+    """Get all available statement format configurations."""
+    formats = STATEMENT_CONFIGS
+    format_list = [
+        {"key": key, "name": key}
+        for key in formats.keys()
+    ]
+
+    logger.info(f"Retrieved {len(format_list)} statement formats")
+    return success_response(data=format_list)
+
+
+@bp.route('/unconfigured', methods=['GET'])
+@handle_exceptions(log_prefix="get_unconfigured_accounts")
+@log_route(logger)
+def get_unconfigured_accounts():
+    """Get accounts that don't have a statement format configured."""
+    account_repo = AccountRepository()
+    accounts = account_repo.get_accounts_without_statement_format()
+
+    logger.info(f"Retrieved {len(accounts)} unconfigured accounts")
+    return success_response(data=accounts)
 
 
 @bp.route('/<int:account_id>/transaction-count', methods=['GET'])

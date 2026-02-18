@@ -1,7 +1,6 @@
 from pathlib import Path
-from datetime import datetime
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request
 
 from src.utils.tabular_files.processor import TabularProcessor
 from src.utils.tabular_files.exceptions import handle_tabular_errors
@@ -21,10 +20,12 @@ from src.api.utils.validators import (
     add_string_filters
 )
 
-from src.statements.statement import Statement
+from src.statements.registry import get_processor
 
 from src.database.repositories.uploads import UploadRepository
 from src.database.repositories.transactions import TransactionRepository
+from src.database.repositories.accounts import AccountRepository
+
 from src.utils.logging import ContextLogger, log_route
 
 bp = Blueprint('tabular_files', __name__)
@@ -87,7 +88,19 @@ def _process_as_statement(result, account_id: int, upload_id: int):
         f"for account {account_id} | {len(result.data)} rows"
     )
 
-    statement = Statement(account_id=account_id, upload_id=upload_id)
+    account_repo = AccountRepository()
+    account = account_repo.get_account_by_id(account_id)
+
+    logger.debug(
+        f"Account {account_id} statement format: {account['statement_format']}"
+    )
+    
+    # statement = Statement(account_id=account_id, upload_id=upload_id)
+    statement = get_processor(
+        statement_type=account['statement_format'],
+        account_id=account_id,
+        upload_id=upload_id
+    )
     transactions = statement.process_statement(result.data)
 
     transaction_repo = TransactionRepository()
