@@ -312,7 +312,7 @@ export default function CategorizeTransactions() {
         </div>
       )}
 
-      <div className="filters-section">
+      {<div className="filters-section">
         <div className="filter-group">
           <label htmlFor="upload-filter">Filter by Upload:</label>
           <select
@@ -334,7 +334,7 @@ export default function CategorizeTransactions() {
             ))}
           </select>
         </div>
-      </div>
+      </div>}
       
       <TransactionTable
         transactions={transactions}

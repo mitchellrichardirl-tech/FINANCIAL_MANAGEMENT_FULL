@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { getAccounts, previewFile, importFile } from '../services/api';
+import { getAccounts, previewFile, importFile, fetchStatementFormats } from '../services/api';
 import FileDropzone from '../components/FileDropzone';
 import PreviewTable from '../components/PreviewTable';
 import ImportResult from '../components/ImportResult';
@@ -10,11 +10,15 @@ function UploadStatement() {
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewData, setPreviewData] = useState(null);
   const [accounts, setAccounts] = useState([]);
+  const [statementFormats, setStatementFormats] = useState([]);  // <-- new
   const [selectedAccountId, setSelectedAccountId] = useState('');
   const [startRow, setStartRow] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [importResult, setImportResult] = useState(null);
+
+  // Helper to find the currently selected account object
+  const selectedAccount = accounts.find((a) => a.id === selectedAccountId) || null;
 
   const handleUploadAnother = () => {
     setSelectedFile(null);
@@ -35,9 +39,14 @@ function UploadStatement() {
     try {
       const preview = await previewFile(file);
       setPreviewData(preview.data);
-      
-      const accountsData = await getAccounts();
+
+      // Fetch both in parallel
+      const [accountsData, formatsData] = await Promise.all([
+        getAccounts(),
+        fetchStatementFormats(),
+      ]);
       setAccounts(accountsData);
+      setStatementFormats(formatsData);
     } catch (err) {
       setError(err.message || 'Failed to preview file');
       setSelectedFile(null);
@@ -52,15 +61,24 @@ function UploadStatement() {
 
   const handleAccountChange = (accountId) => {
     setSelectedAccountId(accountId);
-    if (accountId && error === 'Please select an account') {
+    // Clear any previous selection-related errors
+    if (accountId && (error === 'Please select an account' ||
+        error?.includes('statement format'))) {
       setError(null);
     }
   };
 
   const handleImport = async () => {
-    console.log('Import request:', {selectedFile, startRow, selectedAccountId});
     if (selectedAccountId === '' || !selectedAccountId) {
       setError('Please select an account');
+      return;
+    }
+
+    if (!selectedAccount?.statement_format) {
+      setError(
+        'The selected account has no statement format configured. ' +
+        'Please update the account settings before importing.'
+      );
       return;
     }
 
@@ -69,15 +87,8 @@ function UploadStatement() {
 
     try {
       const result = await importFile(selectedFile, startRow, selectedAccountId);
-      console.log('Import response (raw):', result);
-      console.log('Import response type:', typeof result);
-      console.log('Import response keys:', Object.keys(result || {}));
-      console.log('result.data:', result?.data);
-      console.log('result.result:', result?.result);    
       setImportResult(result.data);
     } catch (err) {
-      console.error('Import error:', err);
-      console.error('Error response:', err.response?.data);
       setError(err.message || 'Failed to import file');
     } finally {
       setIsLoading(false);
@@ -96,10 +107,13 @@ function UploadStatement() {
     return filename.split('.').pop().toUpperCase();
   };
 
+  // Warning shown below account selector when format is missing
+  const showFormatWarning = selectedAccount && !selectedAccount.statement_format;
+
   return (
     <div className="upload-statement">
       <h1>Upload Bank Statement</h1>
-      
+
       {error && (
         <div className="upload-error">
           {error}
@@ -114,7 +128,7 @@ function UploadStatement() {
 
       {importResult ? (
         <div className="import-result-section">
-          <ImportResult 
+          <ImportResult
             result={importResult}
             onUploadAnother={handleUploadAnother}
             showHeader={true}
@@ -124,18 +138,17 @@ function UploadStatement() {
         <>
           {!previewData && !isLoading && (
             <div className="dropzone-section">
-              <FileDropzone 
+              <FileDropzone
                 onFileSelect={handleFileSelect}
                 disabled={isLoading}
               />
             </div>
           )}
-          
+
           {selectedFile && previewData && (
             <>
-
               <div className="preview-section">
-                {/* File Info Table - Fixed at top */}
+                {/* File Info Table */}
                 <div className="file-info-table">
                   <table>
                     <tbody>
@@ -158,7 +171,7 @@ function UploadStatement() {
                   </table>
                 </div>
 
-                {/* Import Controls - Fixed below file info */}
+                {/* Import Controls */}
                 <div className="import-controls">
                   <div className="control-group">
                     <label htmlFor="start-row">Start Row:</label>
@@ -180,14 +193,29 @@ function UploadStatement() {
                       onAccountChange={handleAccountChange}
                       onAccountCreated={handleAccountCreated}
                       disabled={isLoading}
+                      statementFormats={statementFormats}
                     />
+                    {showFormatWarning && (
+                      <div style={{
+                        marginTop: '6px',
+                        padding: '8px 12px',
+                        backgroundColor: '#fff3cd',
+                        border: '1px solid #ffc107',
+                        borderRadius: '4px',
+                        color: '#856404',
+                        fontSize: '13px',
+                      }}>
+                        ⚠️ This account has no statement format configured.
+                        Import will not be available until a format is set.
+                      </div>
+                    )}
                   </div>
 
                   <div className="control-group btn-group">
                     <button
                       className="btn-import"
                       onClick={handleImport}
-                      disabled={isLoading || !selectedAccountId}
+                      disabled={isLoading || !selectedAccountId || showFormatWarning}
                     >
                       {isLoading ? 'Importing...' : 'Import Transactions'}
                     </button>
@@ -195,7 +223,7 @@ function UploadStatement() {
                 </div>
 
                 {/* Preview Table - Scrollable */}
-                <div 
+                <div
                   className="preview-table-wrapper"
                   style={{
                     height: 'calc(100vh - 60px)',
@@ -203,7 +231,7 @@ function UploadStatement() {
                     flexDirection: 'column',
                     overflow: 'hidden',
                   }}>
-                  <PreviewTable 
+                  <PreviewTable
                     previewData={previewData}
                     startRow={startRow}
                     onStartRowChange={setStartRow}

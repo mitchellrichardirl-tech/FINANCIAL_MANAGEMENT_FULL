@@ -86,6 +86,8 @@ export async function getTransactions(filters = {}) {
   const queryString = params.toString();
   const url = `/transactions${queryString ? '?' + queryString : ''}`;
   
+  console.log('Get Transactions URL:', url);
+  
   const response = await apiCall(url);
   
   // Extract transactions from nested structure
@@ -104,16 +106,21 @@ export async function getTransactions(filters = {}) {
 /**
  * Create a new account
  */
-export async function createAccount(accountName, accountType) {
+export async function createAccount(accountName, accountType, statementFormat = null) {
+  const body = {
+    account_name: accountName,
+    account_type: accountType
+  };
+  if (statementFormat) {
+    body.statement_format = statementFormat;
+  }
+
   const response = await apiCall('/accounts', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({
-      account_name: accountName,
-      account_type: accountType
-    })
+    body: JSON.stringify(body)
   });
   return response.data || response; // Return the created account
 }
@@ -409,4 +416,9 @@ export async function uploadReceiptsStream(formData) {
  */
 export async function getUploads() {
   return await apiCall('/uploads');
+}
+
+export async function fetchStatementFormats() {
+  const response = await apiCall('/accounts/statement-formats');
+  return response.data || response;
 }

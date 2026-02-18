@@ -1,10 +1,18 @@
 import { useState } from 'react';
 import { createAccount } from '../services/api';
 
-function AccountSelector({ accounts, selectedAccountId, onAccountChange, onAccountCreated, disabled }) {
+function AccountSelector({
+  accounts,
+  selectedAccountId,
+  onAccountChange,
+  onAccountCreated,
+  disabled,
+  statementFormats = [],  // <-- new prop
+}) {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newAccountName, setNewAccountName] = useState('');
   const [newAccountType, setNewAccountType] = useState('bank');
+  const [newStatementFormat, setNewStatementFormat] = useState('');  // <-- new
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
 
@@ -22,7 +30,7 @@ function AccountSelector({ accounts, selectedAccountId, onAccountChange, onAccou
   const handleCreateAccount = async (e) => {
     e.preventDefault();
     setError('');
-    
+
     if (!newAccountName.trim()) {
       setError('Account name is required');
       return;
@@ -30,18 +38,20 @@ function AccountSelector({ accounts, selectedAccountId, onAccountChange, onAccou
 
     setCreating(true);
     try {
-      const newAccount = await createAccount(newAccountName, newAccountType);
-      
-      // Notify parent component
+      const newAccount = await createAccount(
+        newAccountName,
+        newAccountType,
+        newStatementFormat || null,  // <-- send null if not selected
+      );
+
       onAccountCreated(newAccount);
-      
-      // Select the new account
       onAccountChange(newAccount.id);
-      
+
       // Reset form
       setShowCreateForm(false);
       setNewAccountName('');
       setNewAccountType('bank');
+      setNewStatementFormat('');
     } catch (err) {
       setError(err.message || 'Failed to create account');
     } finally {
@@ -49,17 +59,23 @@ function AccountSelector({ accounts, selectedAccountId, onAccountChange, onAccou
     }
   };
 
+  const getFormatName = (formatKey) => {
+    if (!formatKey) return null;
+    const format = statementFormats.find((f) => f.key === formatKey);
+    return format ? format.name : formatKey;
+  };
+
   if (showCreateForm) {
     return (
-      <div style={{ 
-        marginTop: '20px', 
+      <div style={{
+        marginTop: '20px',
         padding: '20px',
         border: '1px solid #ddd',
         borderRadius: '4px',
         backgroundColor: '#f9f9f9'
       }}>
         <h3 style={{ marginTop: 0 }}>Create New Account</h3>
-        
+
         <form onSubmit={handleCreateAccount}>
           <div style={{ marginBottom: '15px' }}>
             <label style={{ display: 'block', marginBottom: '5px' }}>
@@ -103,6 +119,34 @@ function AccountSelector({ accounts, selectedAccountId, onAccountChange, onAccou
               <option value="investment">Investment</option>
               <option value="other">Other</option>
             </select>
+          </div>
+
+          <div style={{ marginBottom: '15px' }}>
+            <label style={{ display: 'block', marginBottom: '5px' }}>
+              Statement Format:
+            </label>
+            <select
+              value={newStatementFormat}
+              onChange={(e) => setNewStatementFormat(e.target.value)}
+              disabled={creating}
+              style={{
+                padding: '8px',
+                width: '100%',
+                maxWidth: '400px',
+                border: '1px solid #ccc',
+                borderRadius: '4px'
+              }}
+            >
+              <option value="">-- None (configure later) --</option>
+              {statementFormats.map((format) => (
+                <option key={format.key} value={format.key}>
+                  {format.name}
+                </option>
+              ))}
+            </select>
+            <small style={{ display: 'block', marginTop: '4px', color: '#666' }}>
+              Required for importing bank statements. Can be set later.
+            </small>
           </div>
 
           {error && (
@@ -160,7 +204,7 @@ function AccountSelector({ accounts, selectedAccountId, onAccountChange, onAccou
         border: '1px solid #ccc',
         borderRadius: '4px',
         width: '100%',
-        height: '42px', // Match the height of other controls
+        height: '42px',
         cursor: disabled ? 'not-allowed' : 'pointer',
         backgroundColor: disabled ? '#f5f5f5' : 'white'
       }}
@@ -168,11 +212,18 @@ function AccountSelector({ accounts, selectedAccountId, onAccountChange, onAccou
       <option value="">-- Select an account to import into --</option>
       <option value="CREATE_NEW">➕ Create new account...</option>
       <optgroup label="Existing Accounts">
-        {accounts.map((account) => (
-          <option key={account.id} value={account.id}>
-            {account.account_name} ({account.account_type})
-          </option>
-        ))}
+        {accounts.map((account) => {
+          const formatLabel = getFormatName(account.statement_format);
+          const displayLabel = formatLabel
+            ? `${account.account_name} (${account.account_type}) — ${formatLabel}`
+            : `${account.account_name} (${account.account_type}) — ⚠️ No format`;
+
+          return (
+            <option key={account.id} value={account.id}>
+              {displayLabel}
+            </option>
+          );
+        })}
       </optgroup>
     </select>
   );
