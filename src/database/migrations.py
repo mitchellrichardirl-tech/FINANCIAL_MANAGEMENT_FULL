@@ -1,5 +1,7 @@
 import sqlite3
+from src.utils.logging import ContextLogger
 
+logger = ContextLogger(__name__)
 
 def migrate(db_path: str):
     """One-time migration — run manually or via a startup hook."""
@@ -18,8 +20,8 @@ def migrate(db_path: str):
         # Optionally copy from account_type if any values are salvageable
         # cursor.execute("UPDATE accounts SET statement_format = account_type")
         conn.commit()
-        print("Migration complete: added 'statement_format' column")
+        logger.info("Migration complete: added 'statement_format' column")
     else:
-        print("Migration already applied")
+        logger.info("Migration already applied")
 
     conn.close()
