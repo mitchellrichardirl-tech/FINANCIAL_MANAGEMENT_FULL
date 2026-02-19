@@ -49,7 +49,18 @@ def validate_transaction_filters(args: dict) -> tuple[bool, dict, str]:
     validator.validated.update(date_filters)
 
     # ID filters
-    validate_id_filters(validator, args, ['party_id', 'account_id', 'upload_id'])
+    validate_id_filters(
+        validator,
+        args,
+        [
+            'party_id',
+            'account_id',
+            'upload_id',
+            'category_id',
+            'sub_category_id',
+            'type_id'
+        ]
+    )
 
     # String filters
     add_string_filters(validator.validated, args, ['description', 'cleaned_description'])
