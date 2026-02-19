@@ -11,6 +11,13 @@ export default function FilterBar({
   types = [],  // NEW
   onFilterChange 
 }) {
+  console.log('FilterBar props:', { 
+    accounts: accounts.length, 
+    parties: parties.length,
+    categories: categories.length,
+    subCategories: subCategories.length,
+    types: types.length
+  });
   const [filters, setFilters] = useState({
     account_id: null,
     party_id: null,

@@ -257,3 +257,7 @@
 .amount-header .sort-indicator {
   margin-left: 4px;
 }
+
+.filter-cell .filter-date + .filter-date {
+  margin-top: 2px;
+}

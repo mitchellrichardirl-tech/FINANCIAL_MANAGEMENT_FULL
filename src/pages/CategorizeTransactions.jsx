@@ -110,7 +110,7 @@ export default function CategorizeTransactions() {
       cleanFilters.offset = (currentPage - 1) * ITEMS_PER_PAGE;
 
       console.log('Sending filters to API:', cleanFilters);
-
+      console.log('Filter types:', Object.entries(cleanFilters).map(([k, v]) => `${k}: ${typeof v}`));
       const data = await getTransactions(cleanFilters);
       
       console.log('Transactions received: ', data);
