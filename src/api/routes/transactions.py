@@ -28,6 +28,7 @@ from src.utils.logging import ContextLogger, log_route
 bp = Blueprint('transactions', __name__)
 logger = ContextLogger(__name__)
 
+# Test commits 
 
 def validate_transaction_filters(args: dict) -> tuple[bool, dict, str]:
     """Validate transaction query filters."""
@@ -216,6 +217,47 @@ def update_transaction(transaction_id: int):
         message='Transaction updated successfully'
     )
 
+
+@bp.route('/bulk', methods=['PUT'])
+@handle_exceptions(log_prefix="bulk_update_transactions")
+@require_json
+@log_route(logger)
+def bulk_update_transactions():
+    """Bulk update multiple transactions with the same values."""
+    data = request.get_json()
+
+    if not data:
+        logger.warning("Empty request body")
+        return error_response('Request body is required', status_code=400)
+
+    # Validate transaction IDs
+    transaction_ids = data.get('transaction_ids', [])
+    if not transaction_ids or not isinstance(transaction_ids, list):
+        return error_response('transaction_ids must be a non-empty array', status_code=400)
+
+    # Validate all IDs are integers
+    try:
+        transaction_ids = [int(id) for id in transaction_ids]
+    except (ValueError, TypeError):
+        return error_response('All transaction_ids must be integers', status_code=400)
+
+    # Validate the update data
+    updates = data.get('updates', {})
+    if not updates:
+        return error_response('updates object is required', status_code=400)
+
+    is_valid, validated_data, error_msg = validate_transaction_update(updates)
+    if not is_valid:
+        return error_response(error_msg, status_code=400)
+
+    repo = TransactionRepository()
+    result = repo.bulk_update_transactions(transaction_ids, **validated_data)
+
+    logger.info(f"Bulk updated {result['updated_count']} transactions: {list(validated_data.keys())}")
+    return success_response(
+        data=result,
+        message=f"Successfully updated {result['updated_count']} transactions"
+    )
 
 @bp.route('/search', methods=['POST'])
 @handle_exceptions(log_prefix="find_transactions")

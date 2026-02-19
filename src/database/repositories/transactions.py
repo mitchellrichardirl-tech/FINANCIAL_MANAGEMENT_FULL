@@ -528,6 +528,76 @@ class TransactionRepository:
             logger.error(f"Failed to update transaction {transaction_id}: {e}")
             raise DatabaseError(f"Failed to update transaction: {e}") from e
 
+    def bulk_update_transactions(
+        self,
+        transaction_ids: List[int],
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        Bulk update multiple transactions with the same values.
+        
+        Args:
+            transaction_ids: List of transaction IDs to update
+            **kwargs: Fields to update
+            
+        Returns:
+            Dict with updated_count and updated_ids
+        """
+        if not transaction_ids:
+            return {'updated_count': 0, 'updated_ids': []}
+
+        try:
+            with self.db.transaction() as conn:
+                cursor = conn.cursor()
+
+                allowed_fields = [
+                    'amount', 'description', 'cleaned_description',
+                    'is_credit', 'is_kids', 'is_one_off',
+                    'party_id', 'receipt_id', 'transaction_date'
+                ]
+
+                updates = []
+                params = []
+                updated_fields = []
+
+                for field, value in kwargs.items():
+                    if field in allowed_fields:
+                        updates.append(f"{field} = ?")
+                        params.append(value)
+                        updated_fields.append(field)
+
+                if not updates:
+                    logger.debug("No valid fields to update in bulk operation")
+                    return {'updated_count': 0, 'updated_ids': []}
+
+                # Create placeholders for the IN clause
+                placeholders = ','.join('?' * len(transaction_ids))
+                params.extend(transaction_ids)
+
+                query = f"""
+                    UPDATE transactions 
+                    SET {', '.join(updates)} 
+                    WHERE id IN ({placeholders})
+                """
+
+                cursor.execute(query, params)
+                updated_count = cursor.rowcount
+
+            logger.info(
+                f"Bulk updated {updated_count} transactions "
+                f"(requested {len(transaction_ids)}): {updated_fields}"
+            )
+            
+            return {
+                'updated_count': updated_count,
+                'updated_ids': transaction_ids,
+                'fields_updated': updated_fields
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to bulk update transactions: {e}")
+            raise DatabaseError(f"Failed to bulk update transactions: {e}") from e
+    
     def find_matching_transactions(
         self,
         amount: Optional[float] = None,
