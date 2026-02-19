@@ -148,6 +148,21 @@ export async function updateTransaction(transactionId, updates) {
   }
 }
 
+export async function bulkUpdateTransactions(transactionIds, updates) {
+  const body = {
+    transaction_ids: transactionIds,
+    updates: updates
+  };
+
+  const response = await apiCall('/transactions/bulk', {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+  return response;
+}
 
 /**
  * Get all categories

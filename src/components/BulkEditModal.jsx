@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import DropdownWithCreate from './DropdownWithCreate';
 import Checkbox from './Checkbox';
 import CreateCategoryModal from './CreateCategoryModal';
@@ -28,10 +28,6 @@ export default function BulkEditModal({
     is_one_off: null
   });
 
-  const [filteredSubCategories, setFilteredSubCategories] = useState(subCategories);
-  const [filteredTypes, setFilteredTypes] = useState(types);
-  const [filteredParties, setFilteredParties] = useState(parties);
-  
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState(null);
 
@@ -41,6 +37,60 @@ export default function BulkEditModal({
     parentName: '',
     parentId: null
   });
+
+  // Memoized sorted and filtered arrays
+  const sortedCategories = useMemo(() => 
+    [...categories].sort((a, b) => a.category.localeCompare(b.category)),
+    [categories]
+  );
+
+  const filteredSubCategories = useMemo(() => {
+    let filtered = [...subCategories];
+    
+    if (updates.category_id) {
+      filtered = filtered.filter(sc => sc.category_id === updates.category_id);
+    }
+    
+    return filtered.sort((a, b) => a.sub_category.localeCompare(b.sub_category));
+  }, [subCategories, updates.category_id]);
+
+  const filteredTypes = useMemo(() => {
+    let filtered = [...types];
+    
+    if (updates.sub_category_id) {
+      filtered = filtered.filter(t => t.sub_category_id === updates.sub_category_id);
+    } else if (updates.category_id) {
+      const subCatIds = subCategories
+        .filter(sc => sc.category_id === updates.category_id)
+        .map(sc => sc.id);
+      filtered = filtered.filter(t => subCatIds.includes(t.sub_category_id));
+    }
+    
+    return filtered.sort((a, b) => a.type.localeCompare(b.type));
+  }, [types, subCategories, updates.sub_category_id, updates.category_id]);
+
+  const filteredParties = useMemo(() => {
+    let filtered = [...parties];
+    
+    if (updates.type_id) {
+      filtered = filtered.filter(p => p.type_id === updates.type_id);
+    } else if (updates.sub_category_id) {
+      const typeIds = types
+        .filter(t => t.sub_category_id === updates.sub_category_id)
+        .map(t => t.id);
+      filtered = filtered.filter(p => typeIds.includes(p.type_id));
+    } else if (updates.category_id) {
+      const subCatIds = subCategories
+        .filter(sc => sc.category_id === updates.category_id)
+        .map(sc => sc.id);
+      const typeIds = types
+        .filter(t => subCatIds.includes(t.sub_category_id))
+        .map(t => t.id);
+      filtered = filtered.filter(p => typeIds.includes(p.type_id));
+    }
+    
+    return filtered.sort((a, b) => a.name.localeCompare(b.name));
+  }, [parties, types, subCategories, updates.type_id, updates.sub_category_id, updates.category_id]);
 
   // Reset state when modal opens
   useEffect(() => {
@@ -59,48 +109,10 @@ export default function BulkEditModal({
     }
   }, [isOpen]);
 
-  // Update filtered sub-categories based on category selection
-  useEffect(() => {
-    if (updates.category_id) {
-      const filtered = subCategories.filter(sc => sc.category_id === parseInt(updates.category_id));
-      setFilteredSubCategories(filtered);
-    } else {
-      setFilteredSubCategories(subCategories);
-    }
-  }, [updates.category_id, subCategories]);
-
-  // Update filtered types based on sub-category selection
-  useEffect(() => {
-    if (updates.sub_category_id) {
-      const filtered = types.filter(t => t.sub_category_id === parseInt(updates.sub_category_id));
-      setFilteredTypes(filtered);
-    } else if (updates.category_id) {
-      const subCatIds = filteredSubCategories.map(sc => sc.id);
-      const filtered = types.filter(t => subCatIds.includes(t.sub_category_id));
-      setFilteredTypes(filtered);
-    } else {
-      setFilteredTypes(types);
-    }
-  }, [updates.sub_category_id, updates.category_id, types, filteredSubCategories]);
-
-  // Update filtered parties based on type selection
-  useEffect(() => {
-    if (updates.type_id) {
-      const filtered = parties.filter(p => p.type_id === parseInt(updates.type_id));
-      setFilteredParties(filtered);
-    } else if (updates.sub_category_id || updates.category_id) {
-      const typeIds = filteredTypes.map(t => t.id);
-      const filtered = parties.filter(p => typeIds.includes(p.type_id));
-      setFilteredParties(filtered);
-    } else {
-      setFilteredParties(parties);
-    }
-  }, [updates.type_id, updates.sub_category_id, updates.category_id, parties, filteredTypes]);
-
   const handleCategoryChange = (categoryId) => {
     setUpdates(prev => ({
       ...prev,
-      category_id: categoryId || null,
+      category_id: categoryId ? parseInt(categoryId) : null,
       sub_category_id: null,
       type_id: null,
       party_id: null,
@@ -196,7 +208,7 @@ export default function BulkEditModal({
 
   const handleCreateSubCategory = () => {
     const currentCategory = updates.category_id 
-      ? categories.find(c => c.id === parseInt(updates.category_id))
+      ? categories.find(c => c.id === updates.category_id)
       : null;
     
     if (!currentCategory) {
@@ -214,7 +226,7 @@ export default function BulkEditModal({
 
   const handleCreateType = () => {
     const currentSubCategory = updates.sub_category_id
-      ? subCategories.find(sc => sc.id === parseInt(updates.sub_category_id))
+      ? subCategories.find(sc => sc.id === updates.sub_category_id)
       : null;
     
     if (!currentSubCategory) {
@@ -232,7 +244,7 @@ export default function BulkEditModal({
 
   const handleCreateParty = () => {
     const currentType = updates.type_id
-      ? types.find(t => t.id === parseInt(updates.type_id))
+      ? types.find(t => t.id === updates.type_id)
       : null;
     
     if (!currentType) {
@@ -321,9 +333,8 @@ export default function BulkEditModal({
     try {
       const finalUpdates = {};
       
-      // Only send party_id if selected
       if (updates.party_id) {
-        finalUpdates.party_id = parseInt(updates.party_id);
+        finalUpdates.party_id = updates.party_id;
       }
       
       if (updates.is_kids !== null) {
@@ -342,19 +353,16 @@ export default function BulkEditModal({
         return;
       }
 
-      // Call onSave and wait for it
       console.log('BulkEditModal: Calling onSave...');
       await onSave(finalUpdates);
       console.log('BulkEditModal: onSave completed successfully');
       
-      // onSave succeeded - the parent should close the modal
-      // But reset our state just in case
       setIsSaving(false);
       
     } catch (err) {
       console.error('BulkEditModal: Save failed:', err);
       setError(err.message || 'Failed to save changes');
-      setIsSaving(false); // Critical: Reset saving state on error
+      setIsSaving(false);
     }
   };
 
@@ -374,7 +382,7 @@ export default function BulkEditModal({
   };
 
   const handleCancel = () => {
-    if (isSaving) return; // Prevent closing while saving
+    if (isSaving) return;
     resetAndClose();
   };
 
@@ -432,7 +440,7 @@ export default function BulkEditModal({
                 <DropdownWithCreate
                   value={updates.category_id}
                   onChange={handleCategoryChange}
-                  options={categories}
+                  options={sortedCategories}
                   valueKey="id"
                   labelKey="category"
                   includeEmpty

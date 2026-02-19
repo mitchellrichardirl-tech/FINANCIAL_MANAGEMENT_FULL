@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   getTransactions,
   updateTransaction,
+  bulkUpdateTransactions,
   getAccounts,
   getCategories,
   getSubCategories,
@@ -161,22 +162,9 @@ export default function CategorizeTransactions() {
     setError(null);
     
     try {
-      // Update all selected transactions
-      const updatePromises = selectedTransactions.map(async (id) => {
-        console.log(`Updating transaction ${id} with:`, updates);
-        try {
-          const result = await updateTransaction(id, updates);
-          console.log(`Transaction ${id} updated successfully`);
-          return result;
-        } catch (err) {
-          console.error(`Failed to update transaction ${id}:`, err);
-          throw err;
-        }
-      });
-      
-      // Wait for all updates to complete
-      const results = await Promise.all(updatePromises);
-      console.log('All transactions updated:', results);
+      // Single API call for all updates
+      const result = await bulkUpdateTransactions(selectedTransactions, updates);
+      console.log('Bulk update result:', result);
       
       // Reload transactions to get fresh data
       await loadTransactions();
@@ -193,7 +181,6 @@ export default function CategorizeTransactions() {
       console.error('Bulk update failed:', err);
       const errorMessage = err.message || 'Failed to update transactions';
       setError(errorMessage);
-      // Re-throw so the modal can show the error
       throw new Error(errorMessage);
     } finally {
       setLoading(false);
