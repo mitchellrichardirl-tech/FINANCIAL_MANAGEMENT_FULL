@@ -1,5 +1,6 @@
 import re
 from typing import List, Set, Optional
+
 import pandas as pd
 
 from src.utils.logging import ContextLogger
@@ -11,15 +12,10 @@ class PartyExtractor:
     """Handles cleaning and normalization of transaction descriptions."""
 
     DEFAULT_PATTERNS = [
-        # Transaction type prefixes
         r'^(PAYMENT TO|TRANSFER TO|TRANSFER FROM|PURCHASE AT|POS TRANSACTION|'
         r'ONLINE PAYMENT|DIRECT DEBIT|DIRECT CREDIT|DEBIT CARD|CREDIT CARD)\s+',
-
-        # Common merchant code prefixes
         r'^(POS|CNC|TKN|DD|CT|VPP|INET|Rtd)\s+',
         r'^(PAYMENT|TRANSFER|PURCHASE|DEBIT|CREDIT)\s+',
-
-        # Dates and reference numbers
         r'\s+\d{2}/\d{2}/\d{2,4}.*$',
         r'\s+\d{2}/\d{2}\s+\d{1,2}:\d{2}.*$',
         r'\s+\d{2}/\d{2}\s+\d{1,2}$',
@@ -27,45 +23,27 @@ class PartyExtractor:
         r'\s+REF:.*$',
         r'\s+\*{4}\d{4}$',
         r'\s+\d{2}-\d{2}-\d{2,4}.*$',
-
-        # Time stamps
         r'\s+\d{1,2}:\d{2}.*$',
-
-        # Location/branch codes
         r'\s+\d{1,3}$',
         r'\s+[A-Z]\d{1,3}$',
         r'\s+#\d+.*$',
     ]
 
     DEFAULT_STOP_WORDS = {
-        # General
         'THE', 'AND', 'OR', 'FOR', 'WITH', 'AT', 'IN', 'ON', 'TO', 'FROM',
-
-        # Transaction types
         'PAYMENT', 'TRANSFER', 'TRANSACTION', 'PURCHASE', 'DEBIT', 'CREDIT',
         'ONLINE', 'DIRECT', 'WITHDRAWAL', 'DEPOSIT', 'FOREIGN',
-
-        # Card types
         'CARD', 'VISA', 'MASTERCARD', 'AMEX', 'AMERICAN', 'EXPRESS',
-
-        # Common codes
         'POS', 'ATM', 'CNC', 'TKN', 'DD', 'CT', 'VPP', 'INET', 'RTD',
-
-        # Generic terms
         'STORE', 'STORES', 'SHOP', 'CASH', 'FEE', 'FEES', 'CHARGE', 'CHARGES',
         'INTEREST', 'BRANCH', 'LOCATION', 'MERCHANT', 'SERVICE', 'SERVICES',
-
-        # Company suffixes
         'LTD', 'LIMITED', 'LLC', 'INC', 'INCORPORATED', 'CORP', 'CORPORATION',
         'PTY', 'COMPANY', 'CO', 'GROUP', 'HOLDINGS',
-
-        # Country/location markers
         'IRELAND', 'IRISH', 'DUBLIN', 'IE', 'IRL', 'UK', 'GB', 'USA', 'US',
         'AUSTRALIA', 'AUS', 'AU',
-
-        # Days/time
         'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN',
-        'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY',
+        'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY',
+        'SATURDAY', 'SUNDAY',
     }
 
     def __init__(
@@ -73,99 +51,101 @@ class PartyExtractor:
         custom_patterns: Optional[List[str]] = None,
         custom_stop_words: Optional[Set[str]] = None
     ):
-        """
-        Initialize the cleaner with optional custom patterns and stop words.
-        
-        Args:
-            custom_patterns: Additional regex patterns to remove
-            custom_stop_words: Additional stop words to filter
-        """
         self.patterns = self.DEFAULT_PATTERNS + (custom_patterns or [])
         self.stop_words = self.DEFAULT_STOP_WORDS.union(custom_stop_words or set())
 
-        custom_pattern_count = len(custom_patterns) if custom_patterns else 0
-        custom_stop_word_count = len(custom_stop_words) if custom_stop_words else 0
+        # Pre-compile patterns once — avoids recompiling per row
+        self._compiled_patterns = [
+            re.compile(p, re.IGNORECASE) for p in self.patterns
+        ]
+        # Build single stop-word regex for vectorized removal
+        escaped = [re.escape(w) for w in sorted(self.stop_words, key=len, reverse=True)]
+        self._stop_word_pattern = re.compile(
+            r'\b(' + '|'.join(escaped) + r')\b',
+            re.IGNORECASE
+        )
 
         logger.debug(
             f"Initialized PartyExtractor: "
-            f"{len(self.patterns)} patterns ({custom_pattern_count} custom), "
-            f"{len(self.stop_words)} stop words ({custom_stop_word_count} custom)"
+            f"{len(self.patterns)} patterns, {len(self.stop_words)} stop words"
         )
+
+    # ── keep the scalar methods for any non-batch callers ──
 
     def clean(self, description: str) -> str:
-        """
-        Clean and normalize a description string.
-        
-        Args:
-            description: Raw description text
-            
-        Returns:
-            Cleaned description
-        """
         if pd.isna(description):
             return ""
-
         text = str(description).upper()
-        original = text
-
-        # Apply all removal patterns
-        for pattern in self.patterns:
-            text = re.sub(pattern, '', text, flags=re.IGNORECASE)
-
-        # Remove special characters, keep alphanumeric and spaces
+        for pattern in self._compiled_patterns:
+            text = pattern.sub('', text)
         text = re.sub(r'[^\w\s]', ' ', text)
-
-        # Remove any standalone single characters that aren't meaningful
         text = re.sub(r'\s+[A-Z]\s+', ' ', text)
-
-        # Normalize whitespace
-        text = ' '.join(text.split())
-
-        if text != original:
-            logger.debug(f"Cleaned description: '{original[:50]}' -> '{text[:50]}'")
-
-        return text
+        return ' '.join(text.split())
 
     def extract_party_name(self, description: str, max_words: int = 3) -> str:
-        """
-        Extract potential party name from cleaned description.
-        
-        Args:
-            description: Cleaned description text
-            max_words: Maximum number of words to use for party name
-            
-        Returns:
-            Extracted party name or "UNKNOWN"
-        """
         if not description:
-            logger.debug("Empty description, returning UNKNOWN")
             return "UNKNOWN"
-
         words = description.split()
+        meaningful = [w for w in words if w not in self.stop_words and len(w) > 1]
+        if meaningful:
+            return ' '.join(meaningful[:max_words]).strip()
+        return description[:30] if len(description) > 30 else description
 
-        # Filter out stop words and very short words
-        meaningful_words = [
-            word for word in words
-            if word not in self.stop_words and len(word) > 1
-        ]
+    # ── new vectorized batch methods ──
 
-        if meaningful_words:
-            party_name = ' '.join(meaningful_words[:max_words]).strip()
-            filtered_count = len(words) - len(meaningful_words)
+    def clean_batch(self, descriptions: pd.Series) -> pd.Series:
+        """
+        Vectorized cleaning of an entire Series of descriptions.
+        
+        Uses pd.Series.str methods instead of Python-level loops.
+        """
+        logger.debug(f"Batch cleaning {len(descriptions)} descriptions")
 
-            if filtered_count > 0:
-                logger.debug(
-                    f"Extracted party '{party_name}' from '{description[:30]}' "
-                    f"(filtered {filtered_count} stop words)"
-                )
+        s = descriptions.fillna('').astype(str).str.upper()
 
-            return party_name
+        # Apply each compiled pattern across the whole series
+        for pattern in self._compiled_patterns:
+            s = s.str.replace(pattern, '', regex=True)
 
-        # Fallback to truncated description
-        fallback = description[:30] if len(description) > 30 else description
-        logger.debug(
-            f"No meaningful words in '{description[:30]}', "
-            f"using fallback: '{fallback}'"
+        # Remove special characters
+        s = s.str.replace(r'[^\w\s]', ' ', regex=True)
+
+        # Remove standalone single letters
+        s = s.str.replace(r'\s+[A-Z]\s+', ' ', regex=True)
+
+        # Normalize whitespace
+        s = s.str.strip().str.replace(r'\s+', ' ', regex=True)
+
+        return s
+
+    def extract_party_names_batch(
+        self, descriptions: pd.Series, max_words: int = 3
+    ) -> pd.Series:
+        """
+        Vectorized party name extraction from cleaned descriptions.
+        
+        Removes all stop words in one pass, then takes first N words.
+        """
+        logger.debug(f"Batch extracting party names from {len(descriptions)} descriptions")
+
+        # Remove stop words in one vectorized regex pass
+        filtered = descriptions.str.replace(
+            self._stop_word_pattern, '', regex=True
+        )
+        # Remove any resulting short (single-char) words
+        filtered = filtered.str.replace(r'\b\w\b', '', regex=True)
+        filtered = filtered.str.strip().str.replace(r'\s+', ' ', regex=True)
+
+        # Take first max_words words
+        # Split, slice, rejoin — this is the one part that's hard to avoid
+        extracted = filtered.apply(
+            lambda x: ' '.join(x.split()[:max_words]) if x else ''
         )
 
-        return fallback
+        # Fill empties: fall back to truncated original, then UNKNOWN
+        fallback = descriptions.str[:30]
+        empty_mask = extracted.str.strip() == ''
+        extracted = extracted.where(~empty_mask, fallback)
+        extracted = extracted.where(extracted.str.strip() != '', 'UNKNOWN')
+
+        return extracted

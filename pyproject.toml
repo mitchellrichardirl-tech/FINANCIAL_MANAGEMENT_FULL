@@ -22,6 +22,7 @@ dependencies = [
     "pytesseract>=0.3.13",
     "python-levenshtein>=0.27.3",
     "pyxlsb>=1.0.10",
+    "rapidfuzz>=3.14.3",
     "werkzeug==3.0.1",
     "xlrd>=2.0.2",
 ]

@@ -1,6 +1,13 @@
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
-from fuzzywuzzy import fuzz, process
+import pandas as pd
+
+try:
+    from rapidfuzz import fuzz, process
+    USING_RAPIDFUZZ = True
+except ImportError:
+    from fuzzywuzzy import fuzz, process
+    USING_RAPIDFUZZ = False
 
 from src.database.repositories.categories import CategoryRepository
 from src.utils.logging import ContextLogger
@@ -16,7 +23,6 @@ class PartyMatcher:
         db: Optional[CategoryRepository] = None,
         similarity_threshold: int = 70
     ):
-        """Initialize the matcher with similarity threshold."""
         if not 0 <= similarity_threshold <= 100:
             raise ValueError(
                 f"Similarity threshold must be between 0 and 100. "
@@ -32,52 +38,72 @@ class PartyMatcher:
         self._load_known_parties()
 
         logger.debug(
-            f"Initialized PartyMatcher: threshold={similarity_threshold}"
+            f"Initialized PartyMatcher: threshold={similarity_threshold}, "
+            f"using={'rapidfuzz' if USING_RAPIDFUZZ else 'fuzzywuzzy'}"
         )
 
     def _load_known_parties(self) -> Dict[str, int]:
-        """Load known party names and aliases from database."""
         logger.debug("Loading known parties from database")
-
         self.alias_mapping = self.db.get_all_party_aliases()
 
+        # Pre-build the list once; we'll refresh it when aliases are added
+        self._alias_keys = list(self.alias_mapping.keys())
+
         total_unique = len(set(self.alias_mapping.values()))
-        total_aliases = len(self.alias_mapping)
-
-        if total_unique > 0:
-            logger.info(
-                f"Loaded {total_unique} unique parties "
-                f"with {total_aliases} total aliases"
-            )
-        else:
-            logger.warning("No known parties loaded from database")
-
+        logger.info(
+            f"Loaded {total_unique} unique parties "
+            f"with {len(self.alias_mapping)} total aliases"
+        )
         return self.alias_mapping
 
+    def _refresh_alias_keys(self):
+        """Rebuild the alias key list after mutations."""
+        self._alias_keys = list(self.alias_mapping.keys())
+
+    @staticmethod
+    def custom_scorer(s1, s2, score_cutoff=0):
+        """Custom scorer that balances character and token matching.
+
+        Uses score_cutoff for early termination when available (rapidfuzz).
+        Falls back gracefully when called without it (fuzzywuzzy).
+        """
+        char_score = fuzz.ratio(s1, s2)
+
+        # If the full character score already beats the cutoff, no need
+        # to compute partial_ratio at all
+        if char_score >= score_cutoff:
+            partial_score = fuzz.partial_ratio(s1, s2)
+            return max(char_score, partial_score * 0.95)
+
+        # char_score is below cutoff — check if partial could save it.
+        # partial_ratio >= ratio in most cases, and we scale it by 0.95,
+        # so the maximum possible score from the partial path is
+        # partial_ratio * 0.95. Only worth computing if it could beat cutoff.
+        partial_score = fuzz.partial_ratio(s1, s2)
+        best = max(char_score, partial_score * 0.95)
+
+        # Return 0 if below cutoff — this is the rapidfuzz convention
+        # for signalling "not a match" during extractOne
+        if best < score_cutoff:
+            return 0
+
+        return best
+
+    # ── scalar methods (unchanged interface) ──
+
     def _check_exact_match(self, party_name: str) -> int:
-        """Check for exact matches in alias mapping."""
         try:
             return self.alias_mapping[party_name]
         except KeyError:
             raise KeyError(f"No exact match found for '{party_name}'")
 
-    @staticmethod
-    def custom_scorer(s1, s2):
-        """Custom scorer that balances character and token matching."""
-        char_score = fuzz.ratio(s1, s2)
-        partial_score = fuzz.partial_ratio(s1, s2)
-        return max(char_score, partial_score * 0.95)
-
     def _check_fuzzy_match(self, party_name: str) -> Tuple[int, int]:
-        """Check for fuzzy matches against all known parties."""
         if not self.alias_mapping:
-            raise LookupError(
-                f"No known parties to match against for '{party_name}'"
-            )
+            raise LookupError(f"No known parties to match against")
 
         best_match = process.extractOne(
             party_name,
-            list(self.alias_mapping.keys()),
+            self._alias_keys,
             scorer=self.custom_scorer
         )
 
@@ -88,62 +114,157 @@ class PartyMatcher:
 
             if party_name not in self.alias_mapping:
                 self.alias_mapping[party_name] = party_id
+                self._refresh_alias_keys()
                 self.new_aliases += 1
                 logger.debug(
                     f"Fuzzy matched '{party_name}' -> '{matched_name}' "
-                    f"(score={score}, party_id={party_id}) — added as alias"
-                )
-            else:
-                logger.debug(
-                    f"Fuzzy matched '{party_name}' -> '{matched_name}' "
-                    f"(score={score}, party_id={party_id})"
+                    f"(score={score}) — added as alias"
                 )
 
             return party_id, score
 
         best_score = best_match[1] if best_match else 0
         raise KeyError(
-            f"No match for '{party_name}' above threshold "
-            f"{self.similarity_threshold} (best={best_score})"
+            f"No match above threshold {self.similarity_threshold} "
+            f"(best={best_score})"
         )
 
     def find_match(self, party_name: str) -> Tuple[int, int]:
-        """Find the best matching party for a given name."""
         if not party_name or party_name.strip() == "":
             raise ValueError("No party name provided")
-
         self.last_match_score = 0
 
-        # Try exact match first
         try:
             party_id = self._check_exact_match(party_name)
             self.last_match_score = 100
-            return party_id, self.last_match_score
+            return party_id, 100
         except KeyError:
             pass
 
-        # Try fuzzy match
         try:
-            party_id, score = self._check_fuzzy_match(party_name)
-            self.last_match_score = score
-            return party_id, self.last_match_score
+            return self._check_fuzzy_match(party_name)
         except (LookupError, KeyError):
             pass
 
-        # Create new party
         party_id = self.db.add_party_unknown_type(party_name)
         self.alias_mapping[party_name] = party_id
+        self._refresh_alias_keys()
         self.new_parties += 1
-
         logger.info(f"Created new party '{party_name}' with id {party_id}")
         return party_id, 100
 
+    # ── new batch method ──
+
+    def find_matches_batch(self, party_names: pd.Series) -> pd.DataFrame:
+        """
+        Match an entire Series of extracted party names.
+        
+        Optimizations applied:
+          1. Deduplicate — only process each unique name once
+          2. Exact matches via dict lookup (vectorized with .map)
+          3. Fuzzy matching only on the remaining unmatched unique names
+          4. All results broadcast back to the original index
+        
+        Args:
+            party_names: Series of extracted party name strings
+            
+        Returns:
+            DataFrame with columns: cleaned_description, party_id, confidence
+        """
+        total = len(party_names)
+        logger.info(f"Batch matching {total} party names")
+
+        # ── Step 1: deduplicate ──
+        unique_names = party_names.unique()
+        unique_count = len(unique_names)
+        logger.info(
+            f"Deduplicated to {unique_count} unique names "
+            f"({total - unique_count} duplicates skipped)"
+        )
+
+        # We'll build results for each unique name
+        results: Dict[str, Tuple[int, int]] = {}
+
+        # ── Step 2: exact matches (bulk dict lookup) ──
+        for name in unique_names:
+            if not name or name.strip() == '':
+                continue
+            if name in self.alias_mapping:
+                results[name] = (self.alias_mapping[name], 100)
+
+        exact_count = len(results)
+        logger.info(f"Exact matches: {exact_count}/{unique_count}")
+
+        # ── Step 3: fuzzy match only the remaining names ──
+        unmatched = [
+            n for n in unique_names
+            if n and n.strip() != '' and n not in results
+        ]
+
+        if unmatched and self._alias_keys:
+            logger.info(
+                f"Fuzzy matching {len(unmatched)} unique names "
+                f"against {len(self._alias_keys)} known aliases"
+            )
+
+            self.db.prime_unknown_type_cache()
+
+            for idx, name in enumerate(unmatched):
+                if (idx + 1) % 200 == 0:
+                    logger.debug(
+                        f"Fuzzy matching {idx + 1}/{len(unmatched)}"
+                    )
+
+                best = process.extractOne(
+                    name,
+                    self._alias_keys,
+                    scorer=self.custom_scorer
+                )
+
+                if best and best[1] >= self.similarity_threshold:
+                    matched_name, score = best[0], best[1]
+                    party_id = self.alias_mapping[matched_name]
+
+                    results[name] = (party_id, score)
+
+                    # Register as new alias so future exact lookups hit
+                    if name not in self.alias_mapping:
+                        self.alias_mapping[name] = party_id
+                        self.new_aliases += 1
+                    continue
+
+                # No match — create new party
+                party_id = self.db.add_party_unknown_type(name)
+                self.alias_mapping[name] = party_id
+                self.new_parties += 1
+                results[name] = (party_id, 100)
+
+            # Refresh keys once at the end, not per iteration
+            self._refresh_alias_keys()
+
+        # Handle any blank/empty names that slipped through
+        for name in unique_names:
+            if name not in results:
+                results[name] = (None, 0)
+
+        # ── Step 4: broadcast back to original index ──
+        result_df = pd.DataFrame({
+            'cleaned_description': party_names,
+            'party_id': party_names.map(lambda n: results.get(n, (None, 0))[0]),
+            'confidence': party_names.map(lambda n: results.get(n, (None, 0))[1]),
+        })
+
+        fuzzy_count = len(results) - exact_count
+        logger.info(
+            f"Batch matching complete: exact={exact_count}, "
+            f"fuzzy={fuzzy_count}, new_parties={self.new_parties}"
+        )
+
+        return result_df
+
     def reset_counts(self):
-        """Reset the counts of new aliases and parties."""
         self.new_aliases = 0
         self.new_parties = 0
-        logger.debug("Match counts reset")
 
     def get_new_counts(self) -> Tuple[int, int]:
-        """Get the counts of new aliases and parties added."""
         return self.new_aliases, self.new_parties

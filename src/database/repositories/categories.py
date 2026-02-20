@@ -14,6 +14,7 @@ class CategoryRepository:
     def __init__(self):
         self.db = get_manager()
         self.br = BaseRepository()
+        self._unknown_type_id = None
 
     # ========== Categories ==========
 
@@ -904,11 +905,19 @@ class CategoryRepository:
             raise DatabaseError(f"Failed to get party aliases: {e}") from e
 
     def _ensure_unknown_hierarchy(self) -> int:
+        """Ensure 'Unknown' hierarchy exists and return its type_id.
+
+        Result is cached on the instance — the Unknown hierarchy is static
+        data that never changes at runtime, so querying it once per
+        repository lifetime is sufficient.
         """
-        Create or get the 'Unknown' category -> sub-category -> type chain.
-        
-        Returns the type_id for 'Unknown'.
-        """
+        if self._unknown_type_id is not None:
+            logger.debug(
+                f"Unknown hierarchy type_id resolved from cache: "
+                f"{self._unknown_type_id}"
+            )
+            return self._unknown_type_id
+
         logger.debug("Ensuring 'Unknown' hierarchy exists")
 
         unknown_category = self.br.select_query(
@@ -945,5 +954,17 @@ class CategoryRepository:
             )
             logger.info(f"Created 'Unknown' type: {type_id}")
 
-        logger.debug(f"Unknown hierarchy type_id: {type_id}")
-        return type_id
+        self._unknown_type_id = type_id
+        logger.debug(f"Unknown hierarchy type_id cached: {type_id}")
+        return self._unknown_type_id
+    
+    def prime_unknown_type_cache(self) -> int:
+        """Eagerly resolve and cache the Unknown type_id.
+
+        Call this before any batch operation that may add multiple new
+        parties, so the hierarchy lookup only happens once regardless of
+        how many parties are created.
+
+        Returns the cached type_id for convenience.
+        """
+        return self._ensure_unknown_hierarchy()

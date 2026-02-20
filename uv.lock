@@ -556,6 +556,7 @@ dependencies = [
     { name = "pytesseract" },
     { name = "python-levenshtein" },
     { name = "pyxlsb" },
+    { name = "rapidfuzz" },
     { name = "werkzeug" },
     { name = "xlrd" },
 ]
@@ -593,6 +594,7 @@ requires-dist = [
     { name = "pytesseract", specifier = ">=0.3.13" },
     { name = "python-levenshtein", specifier = ">=0.27.3" },
     { name = "pyxlsb", specifier = ">=1.0.10" },
+    { name = "rapidfuzz", specifier = ">=3.14.3" },
     { name = "werkzeug", specifier = "==3.0.1" },
     { name = "xlrd", specifier = ">=2.0.2" },
 ]

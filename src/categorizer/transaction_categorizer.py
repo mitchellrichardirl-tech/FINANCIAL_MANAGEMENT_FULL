@@ -1,5 +1,7 @@
 from typing import Dict, List, Union
 
+import pandas as pd
+
 from src.categorizer.party_extractor import PartyExtractor
 from src.categorizer.party_matcher import PartyMatcher
 from src.utils.logging import ContextLogger
@@ -8,13 +10,15 @@ logger = ContextLogger(__name__)
 
 
 class TransactionCategorizer:
-    """Main categorizer class that orchestrates the categorization process."""
+    """Main categorizer that orchestrates the categorization pipeline."""
 
     def __init__(self, similarity_threshold: int = 80):
         self.extractor = PartyExtractor()
         self.matcher = PartyMatcher(similarity_threshold=similarity_threshold)
 
-        logger.info(f"Initialized TransactionCategorizer: threshold={similarity_threshold}")
+        logger.info(
+            f"Initialized TransactionCategorizer: threshold={similarity_threshold}"
+        )
 
     def categorize(
         self, transactions: List[str]
@@ -22,40 +26,39 @@ class TransactionCategorizer:
         """
         Categorize a list of transaction descriptions.
         
-        Args:
-            transactions: List of raw transaction description strings
-            
+        Pipeline:
+            1. Vectorized clean (pd.Series.str operations)
+            2. Vectorized party name extraction
+            3. Batch matching (deduplicated fuzzy matching)
+        
         Returns:
-            List of dicts with cleaned_description, party_id, and confidence
+            List of dicts with cleaned_description, party_id, confidence
         """
         if not transactions:
             raise ValueError("No transactions data provided")
 
         total = len(transactions)
         logger.info(f"Starting categorization of {total} transactions")
-
-        party_mapping_ids = []
         self.matcher.reset_counts()
-        unknown_count = 0
 
-        for idx, description in enumerate(transactions):
-            if (idx + 1) % 500 == 0:
-                logger.debug(f"Processing transaction {idx + 1}/{total}")
+        # Convert to Series for vectorized ops
+        desc_series = pd.Series(transactions)
 
-            if not description or description.strip() == '':
-                extracted = 'UNKNOWN'
-                unknown_count += 1
-            else:
-                cleaned = self.extractor.clean(description)
-                extracted = self.extractor.extract_party_name(cleaned)
+        # ── Stage 1: vectorized cleaning ──
+        logger.debug("Stage 1: Cleaning descriptions")
+        cleaned = self.extractor.clean_batch(desc_series)
 
-            party_id, confidence = self.matcher.find_match(extracted)
+        # ── Stage 2: vectorized party extraction ──
+        logger.debug("Stage 2: Extracting party names")
+        # Handle empty/blank -> UNKNOWN before extraction
+        empty_mask = cleaned.str.strip() == ''
+        unknown_count = empty_mask.sum()
+        party_names = self.extractor.extract_party_names_batch(cleaned)
+        party_names = party_names.where(~empty_mask, 'UNKNOWN')
 
-            party_mapping_ids.append({
-                'cleaned_description': extracted,
-                'party_id': party_id,
-                'confidence': confidence
-            })
+        # ── Stage 3: batch matching ──
+        logger.debug("Stage 3: Matching parties")
+        result_df = self.matcher.find_matches_batch(party_names)
 
         new_aliases, new_parties = self.matcher.get_new_counts()
 
@@ -65,4 +68,4 @@ class TransactionCategorizer:
             f"unknown_descriptions={unknown_count}"
         )
 
-        return party_mapping_ids
+        return result_df.to_dict('records')

@@ -134,6 +134,44 @@ class FileReader:
             logger.error(f"Failed to read Excel {file_path.name}: {e}")
             raise FileReadError(f"Failed to read Excel file: {str(e)}")
 
+    @staticmethod
+    def _build_encoding_fallback_chain(detected: str) -> list[str]:
+        """
+        Build an ordered list of encodings to attempt.
+
+        The order matters:
+        1. Whatever the detector returned (trust it first)
+        2. utf-8 — the modern default, covers most files
+        3. utf-8-sig — handles Windows UTF-8 files with BOM
+        4. cp1252 — extremely common for bank/financial exports on Windows,
+            and a superset of latin-1 for printable characters
+        5. latin-1 — never raises UnicodeDecodeError (maps every byte 0-255),
+            so it acts as a guaranteed last resort, though it may decode
+            some characters incorrectly
+
+        Duplicates are removed while preserving order so we don't waste
+        time retrying the same encoding.
+        """
+        candidates = [
+            detected,
+            'utf-8',
+            'utf-8-sig',
+            'cp1252',
+            'latin-1',
+        ]
+
+        # Normalize for deduplication: 'ASCII' and 'ascii' are the same,
+        # 'utf8' and 'utf-8' should collapse, etc.
+        seen = set()
+        chain = []
+        for enc in candidates:
+            normalized = enc.lower().replace('-', '').replace('_', '')
+            if normalized not in seen:
+                seen.add(normalized)
+                chain.append(enc)
+
+        return chain
+
     def _read_text(
         self,
         file_path: Path,
@@ -164,7 +202,6 @@ class FileReader:
 
         read_kwargs = {
             'delimiter': delimiter,
-            'encoding': encoding,
             'header': header,
             'on_bad_lines': 'warn',
             'low_memory': False,
@@ -183,11 +220,54 @@ class FileReader:
 
         read_kwargs.update(kwargs)
 
-        try:
-            return pd.read_csv(file_path, **read_kwargs)
-        except Exception as e:
-            logger.error(f"Failed to read text file {file_path.name}: {e}")
-            raise FileReadError(f"Failed to read text file: {str(e)}")
+        # Build an ordered list of encodings to try.
+        # Start with the detected one, then fall through sensible defaults.
+        # This handles the very common case where chardet/charset-normalizer
+        # returns 'ascii' for a file that's actually Windows-1252.
+        encodings_to_try = self._build_encoding_fallback_chain(encoding)
+
+        last_error = None
+        for enc in encodings_to_try:
+            try:
+                read_kwargs['encoding'] = enc
+                df = pd.read_csv(file_path, **read_kwargs)
+
+                if enc != encoding:
+                    logger.warning(
+                        f"Detected encoding '{encoding}' failed for "
+                        f"{file_path.name}, successfully read with '{enc}'"
+                    )
+
+                return df
+
+            except (UnicodeDecodeError, UnicodeError) as e:
+                logger.debug(
+                    f"Encoding '{enc}' failed for {file_path.name}: {e}"
+                )
+                last_error = e
+                continue
+
+            except Exception as e:
+                # Non-encoding errors should not trigger fallback —
+                # a missing file, malformed CSV structure, etc. is not
+                # going to be fixed by trying a different encoding
+                logger.error(
+                    f"Failed to read text file {file_path.name}: {e}"
+                )
+                raise FileReadError(f"Failed to read text file: {str(e)}")
+
+        # All encodings exhausted
+        logger.error(
+            f"All encodings failed for {file_path.name}. "
+            f"Tried: {encodings_to_try}. Last error: {last_error}"
+        )
+        raise FileReadError(
+            f"Failed to read text file with any encoding. "
+            f"Tried: {', '.join(encodings_to_try)}. "
+            f"Last error: {str(last_error)}"
+        )
+
+
 
     def _read_parquet(
         self,
@@ -245,8 +325,23 @@ class FileReader:
 
         if file_type in TEXT_TYPES:
             encoding = self.encoding or detect_encoding(file_path)
-            with open(file_path, 'r', encoding=encoding, errors='replace') as f:
-                count = sum(1 for _ in f)
+            encodings = self._build_encoding_fallback_chain(encoding)
+
+            count = None
+            for enc in encodings:
+                try:
+                    with open(file_path, 'r', encoding=enc, errors='replace') as f:
+                        count = sum(1 for _ in f)
+                    break
+                except (UnicodeDecodeError, UnicodeError):
+                    continue
+
+            if count is None:
+                # errors='replace' with latin-1 should never fail,
+                # but handle it defensively
+                with open(file_path, 'rb') as f:
+                    count = sum(1 for _ in f)
+
             result = count - 1 if has_header else count
         else:
             df = self.read(file_path, file_type)
