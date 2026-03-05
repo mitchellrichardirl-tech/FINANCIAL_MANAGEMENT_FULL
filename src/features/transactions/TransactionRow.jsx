@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
-import DropdownWithCreate from './DropdownWithCreate';
-import Checkbox from './Checkbox';
+import DropdownWithCreate from '@/components/DropdownWithCreate';
+import Checkbox from '@/components/Checkbox';
 import RemapPartyPrompt from './RemapPartyPrompt';
 import './TransactionRow.css';
 

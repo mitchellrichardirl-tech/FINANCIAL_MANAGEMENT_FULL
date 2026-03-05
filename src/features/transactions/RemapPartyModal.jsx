@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import DropdownWithCreate from './DropdownWithCreate';
+import DropdownWithCreate from '@/components/DropdownWithCreate';
 import CreateCategoryModal from './CreateCategoryModal';
 import './RemapPartyModal.css';
 

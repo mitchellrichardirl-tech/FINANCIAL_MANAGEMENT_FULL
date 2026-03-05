@@ -1,7 +1,7 @@
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
-import UploadStatement from './pages/UploadStatement';
-import CategorizeTransactions from './pages/CategorizeTransactions';
-import ProcessReceipts from './pages/ProcessReceipts';
+import UploadStatement from '@/features/statements';
+import CategorizeTransactions from './features/transactions/CategorizeTransactions';
+import ProcessReceipts from './features/receipts/ProcessReceipts';
 import './App.css';
 
 function App() {

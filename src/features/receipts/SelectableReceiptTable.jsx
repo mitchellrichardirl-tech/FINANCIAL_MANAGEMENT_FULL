@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import ReceiptThumbnail from './Thumbnail';
+import ReceiptThumbnail from '@/components/Thumbnail';
 import './SelectableReceiptTable.css';
 
 export default function SelectableReceiptTable({

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
-import DropdownWithCreate from './DropdownWithCreate';
-import Checkbox from './Checkbox';
+import DropdownWithCreate from '@/components/DropdownWithCreate';
+import Checkbox from '@/components/Checkbox';
 import CreateCategoryModal from './CreateCategoryModal';
 import './BulkEditModal.css';
 

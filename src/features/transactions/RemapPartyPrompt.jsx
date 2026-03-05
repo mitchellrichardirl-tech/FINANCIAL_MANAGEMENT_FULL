@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import './RemapPartyPrompt.css';
 
 /**
@@ -16,7 +17,7 @@ export default function RemapPartyPrompt({
   onThisOnly,
   onCancel,
 }) {
-  return (
+  return createPortal(
     <div className="remap-prompt-overlay" onClick={onCancel}>
       <div
         className="remap-prompt"
@@ -76,6 +77,7 @@ export default function RemapPartyPrompt({
           Cancel — keep editing
         </button>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

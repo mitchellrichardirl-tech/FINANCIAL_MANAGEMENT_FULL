@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { getAccounts, previewFile, importFile, fetchStatementFormats } from '../services/api';
-import FileDropzone from '../components/FileDropzone';
-import PreviewTable from '../components/PreviewTable';
-import ImportResult from '../components/ImportResult';
-import AccountSelector from '../components/AccountSelector';
+import { previewFile, importFile, fetchStatementFormats, getAccounts, createAccount } from './api';
+import FileDropzone from '@/components/FileDropzone';
+import PreviewTable from './PreviewTable';
+import ImportResult from './ImportResult';
+import AccountSelector from './AccountSelector';
 import './UploadStatement.css';
 
-function UploadStatement() {
+export default function UploadStatement() {
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewData, setPreviewData] = useState(null);
   const [accounts, setAccounts] = useState([]);
@@ -247,4 +247,4 @@ function UploadStatement() {
   );
 }
 
-export default UploadStatement;
+// export default UploadStatement;

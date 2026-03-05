@@ -3,7 +3,6 @@ import {
   getTransactions,
   updateTransaction,
   bulkUpdateTransactions,
-  getAccounts,
   getCategories,
   getSubCategories,
   getTypes,
@@ -14,12 +13,13 @@ import {
   createType,
   createParty,
   remapParty
-} from '../services/api';
-import TransactionTable from '../components/TransactionTable';
-import FilterBar from '../components/FilterBar';
-import Pagination from '../components/Pagination';
-import BulkEditModal from '../components/BulkEditModal';
-import RemapPartyModal from '../components/RemapPartyModal';
+} from './api';
+import { getAccounts } from '@/features/statements/api';
+import TransactionTable from './TransactionTable';
+import FilterBar from './FilterBar';
+import Pagination from '@/components/Pagination';
+import BulkEditModal from './BulkEditModal';
+import RemapPartyModal from './RemapPartyModal';
 import './CategorizeTransactions.css';
 
 const ITEMS_PER_PAGE = 100;

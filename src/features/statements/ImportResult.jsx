@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getTransactions } from '../services/api';
+import { getTransactions } from '@/features/transactions/api';
 import './ImportResult.css';
 
 export default function ImportResult({ result, onUploadAnother, showHeader = true }) {

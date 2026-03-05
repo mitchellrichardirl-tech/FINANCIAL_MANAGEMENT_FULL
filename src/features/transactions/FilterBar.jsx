@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import Dropdown from './Dropdown';
-import Checkbox from './Checkbox';
+import Dropdown from '@/components/Dropdown';
+import Checkbox from '@/components/Checkbox';
 import './FilterBar.css';
 
 export default function FilterBar({ 

@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from "react";
-import { confirmReceipt, deleteReceipt, getCandidateTransactions, updateTransaction } from "../services/api";
-import BulkUploadReceipts from "../components/BulkUploadReceipts";
-import SelectableReceiptTable from "../components/SelectableReceiptTable";
-import ImagePreview from "../components/ImagePreview";
-import CandidateTransactions from "../components/CandidateTransactions";
+import { updateTransaction } from "@/features/transactions/api";
+import { confirmReceipt, deleteReceipt, getCandidateTransactions } from "./api";
+import BulkUploadReceipts from "./BulkUploadReceipts";
+import SelectableReceiptTable from "./SelectableReceiptTable";
+import ImagePreview from "./ImagePreview";
+import CandidateTransactions from "./CandidateTransactions";
 import './ProcessReceipts.css';
 
 function ProcessReceipts() {
@@ -265,12 +266,12 @@ function ProcessReceipts() {
     setIsSaving(true);
 
     try {
-      const receiptData = {
-        receiptId: selectedReceipt.receipt_id
-      };
+      // const receiptData = {
+      //   receiptId: selectedReceipt.receipt_id
+      // };
 
-      console.log("Deleting receipt:", receiptData);
-      const deleteResult = await deleteReceipt(receiptData);
+      console.log("Deleting receipt:", selectedReceipt.receipt_id);
+      const deleteResult = await deleteReceipt(selectedReceipt.receipt_id);
       console.log("Deletion result:", deleteResult);
 
       // Remove from list and select next

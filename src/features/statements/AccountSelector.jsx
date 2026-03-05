@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { createAccount } from '../services/api';
+import { createAccount } from './api';
 
 function AccountSelector({
   accounts,

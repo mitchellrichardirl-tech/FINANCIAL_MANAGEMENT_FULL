@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import { useState, useEffect } from 'react';
 import './CreateCategoryModal.css';
 
@@ -88,7 +89,7 @@ export default function CreateCategoryModal({
 
   if (!isOpen) return null;
 
-  return (
+  return createPortal(
     <div className="modal-backdrop" onClick={handleBackdropClick}>
       <div className="modal-content create-modal">
         <div className="modal-header">
@@ -162,6 +163,7 @@ export default function CreateCategoryModal({
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

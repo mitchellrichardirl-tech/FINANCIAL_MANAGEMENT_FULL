@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import FilePreview from "./FilePreview";
+import FilePreview from "@/components/FilePreview";
 import './BulkUploadReceipts.css';
 
 function BulkUploadReceipts({
