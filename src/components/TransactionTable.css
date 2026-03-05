@@ -261,3 +261,35 @@
 .filter-cell .filter-date + .filter-date {
   margin-top: 2px;
 }
+
+.party-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.remap-party-btn {
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: #6b7280;
+  font-size: 0.8rem;
+  line-height: 1;
+  padding: 1px 4px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s, border-color 0.15s;
+}
+
+/* Show the button only when the row is hovered */
+tr:hover .remap-party-btn,
+.party-cell:hover .remap-party-btn {
+  opacity: 1;
+}
+
+.remap-party-btn:hover {
+  color: #2563eb;
+  border-color: #93c5fd;
+  background: #eff6ff;
+}

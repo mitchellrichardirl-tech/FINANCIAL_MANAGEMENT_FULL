@@ -12,12 +12,14 @@ import {
   createCategory,
   createSubCategory,
   createType,
-  createParty
+  createParty,
+  remapParty
 } from '../services/api';
 import TransactionTable from '../components/TransactionTable';
 import FilterBar from '../components/FilterBar';
 import Pagination from '../components/Pagination';
 import BulkEditModal from '../components/BulkEditModal';
+import RemapPartyModal from '../components/RemapPartyModal';
 import './CategorizeTransactions.css';
 
 const ITEMS_PER_PAGE = 100;
@@ -40,16 +42,18 @@ export default function CategorizeTransactions() {
   const [filters, setFilters] = useState({});
   const [selectedTransactions, setSelectedTransactions] = useState([]);
   const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
+  const [sortField, setSortField] = useState('transaction_date');
+  const [sortDir, setSortDir] = useState('desc');
+  // RemapParty modal: null = closed, number = pre-selected party id,
+  // true = open with no pre-selection (launched from header button)
+  const [remapPartyId, setRemapPartyId] = useState(null);
 
-  // Load reference data on mount
-  useEffect(() => {
-    loadReferenceData();
-  }, []);
+  const isRemapOpen = remapPartyId !== null;
 
-  // Load transactions when filters or page changes
-  useEffect(() => {
-    loadTransactions();
-  }, [filters, currentPage]);
+  // ── Data loading ──
+
+  useEffect(() => { loadReferenceData(); }, []);
+  useEffect(() => { loadTransactions(); }, [filters, currentPage, sortField, sortDir]);
 
   const loadReferenceData = async () => {
     try {
@@ -69,9 +73,6 @@ export default function CategorizeTransactions() {
         getUploads()
       ]);
 
-      console.log('Accounts loaded:', accountsData);
-      console.log('Uploads loaded:', uploadsData);
-      
       setAccounts(accountsData);
       setCategories(categoriesData);
       setSubCategories(subCategoriesData);
@@ -79,49 +80,42 @@ export default function CategorizeTransactions() {
       setParties(partiesData);
       setUploads(uploadsData.data || uploadsData);
     } catch (err) {
-      console.error('Error loading reference data:', err);
       setError('Failed to load reference data: ' + err.message);
     }
   };
 
   const handleFilterChange = useCallback((newFilters) => {
-    console.log('CategorizeTransactions: handleFilterChange called with:', newFilters);
     setFilters(newFilters);
-    setCurrentPage(1); // Reset to first page when filters change
+    setCurrentPage(1);
   }, []);
 
-  // In loadTransactions, make sure boolean filters are sent correctly
   const loadTransactions = async () => {
     setLoading(true);
     setError(null);
-    
+
     try {
-      // Clean filters - remove null/empty values but KEEP false values
       const cleanFilters = Object.entries(filters).reduce((acc, [key, value]) => {
-        // Keep the value if it's not null, not undefined, and not empty string
-        // This ensures false values are preserved
         if (value !== null && value !== undefined && value !== '') {
           acc[key] = value;
         }
         return acc;
       }, {});
 
-      // Add pagination
       cleanFilters.limit = ITEMS_PER_PAGE;
       cleanFilters.offset = (currentPage - 1) * ITEMS_PER_PAGE;
 
-      console.log('Sending filters to API:', cleanFilters);
-      console.log('Filter types:', Object.entries(cleanFilters).map(([k, v]) => `${k}: ${typeof v}`));
+      // Add sort params
+      if (sortField) {
+        cleanFilters.sort_by = sortField;
+        cleanFilters.sort_dir = sortDir;
+      }
+
       const data = await getTransactions(cleanFilters);
-      
-      console.log('Transactions received: ', data);
-      console.log('Received transactions:', data.length);
-      
+
       setTransactions(data);
-      
       setTotalTransactions(
-        data.length === ITEMS_PER_PAGE 
-          ? currentPage * ITEMS_PER_PAGE + 1 
+        data.length === ITEMS_PER_PAGE
+          ? currentPage * ITEMS_PER_PAGE + 1
           : (currentPage - 1) * ITEMS_PER_PAGE + data.length
       );
     } catch (err) {
@@ -136,12 +130,9 @@ export default function CategorizeTransactions() {
   const handleTransactionUpdate = async (transactionId, updates) => {
     try {
       const updatedTransaction = await updateTransaction(transactionId, updates);
-      
-      // Update the transaction in the local state
       setTransactions(prev =>
         prev.map(t => t.id === transactionId ? { ...t, ...updatedTransaction } : t)
       );
-      
       return updatedTransaction;
     } catch (err) {
       setError('Failed to update transaction: ' + err.message);
@@ -150,38 +141,19 @@ export default function CategorizeTransactions() {
   };
 
   const handleBulkUpdate = async (updates) => {
-    console.log('CategorizeTransactions: handleBulkUpdate called with:', updates);
-    console.log('Selected transactions:', selectedTransactions);
-    
-    if (selectedTransactions.length === 0) {
-      console.error('No transactions selected');
-      throw new Error('No transactions selected');
-    }
-    
+    if (selectedTransactions.length === 0) throw new Error('No transactions selected');
+
     setLoading(true);
     setError(null);
-    
     try {
-      // Single API call for all updates
-      const result = await bulkUpdateTransactions(selectedTransactions, updates);
-      console.log('Bulk update result:', result);
-      
-      // Reload transactions to get fresh data
+      await bulkUpdateTransactions(selectedTransactions, updates);
       await loadTransactions();
-      
-      // Clear selection
       setSelectedTransactions([]);
-      
-      // Close the modal
       setIsBulkEditOpen(false);
-      
-      console.log('Bulk update complete and modal closed');
-      
     } catch (err) {
-      console.error('Bulk update failed:', err);
-      const errorMessage = err.message || 'Failed to update transactions';
-      setError(errorMessage);
-      throw new Error(errorMessage);
+      const msg = err.message || 'Failed to update transactions';
+      setError(msg);
+      throw new Error(msg);
     } finally {
       setLoading(false);
     }
@@ -189,19 +161,66 @@ export default function CategorizeTransactions() {
 
   const handlePageChange = (page) => {
     setCurrentPage(page);
-    setSelectedTransactions([]); // Clear selection when changing pages
+    setSelectedTransactions([]);
   };
 
-  // Create handlers
+  // ── Remap Party ──
+
+  const handleRemapParty = async (partyId, newTypeId) => {
+    try {
+      const result = await remapParty(partyId, newTypeId);
+      const [partiesData] = await Promise.all([getParties(), loadTransactions()]);
+      setParties(partiesData);
+      return result;
+    } catch (err) {
+      setError('Failed to remap party: ' + err.message);
+      throw err;
+    }
+  };
+
+  /**
+   * Find an existing party with `name` under `typeId`, or create one.
+   * Returns the party id.
+   */
+  const handleFindOrCreateParty = useCallback(async (name, typeId) => {
+    // Check if a party with this name already exists under this type
+    const existing = parties.find(
+      (p) => p.name.toLowerCase() === name.toLowerCase() && p.type_id === typeId
+    );
+    if (existing) return existing.id;
+
+    // Create a new one
+    const newParty = await handlePartyCreated(name, typeId, '');
+    return newParty.id;
+  }, [parties]);
+
+  /**
+   * Open the remap modal, optionally pre-selecting both party and target type.
+   * The second argument lets TransactionRow pass the type the user already
+   * chose, so RemapPartyModal can pre-fill it.
+   */
+  const handleOpenRemap = useCallback((partyId = null, targetTypeId = null) => {
+    setRemapPartyId(partyId ?? true);
+    setRemapTargetTypeId(targetTypeId);   // new state (see below)
+  }, []);
+
+  // Add alongside remapPartyId:
+  const [remapTargetTypeId, setRemapTargetTypeId] = useState(null);
+
+  // Clear it when the modal closes:
+  const handleCloseRemap = () => {
+    setRemapPartyId(null);
+    setRemapTargetTypeId(null);
+  };
+  
+  // ── Create handlers ──
+
   const handleCategoryCreated = async (name, description) => {
     try {
       const response = await createCategory(name, description);
       const categoriesData = await getCategories();
       setCategories(categoriesData);
-      
-      // Return the new category for the callback
-      const newCategory = categoriesData.find(c => c.category === name);
-      return newCategory || response;
+      return categoriesData.find(c => c.category === name) || response;
     } catch (err) {
       setError('Failed to create category: ' + err.message);
       throw err;
@@ -213,11 +232,9 @@ export default function CategorizeTransactions() {
       const response = await createSubCategory(name, categoryId, description);
       const subCategoriesData = await getSubCategories();
       setSubCategories(subCategoriesData);
-      
-      const newSubCategory = subCategoriesData.find(
+      return subCategoriesData.find(
         sc => sc.sub_category === name && sc.category_id === categoryId
-      );
-      return newSubCategory || response;
+      ) || response;
     } catch (err) {
       setError('Failed to create sub-category: ' + err.message);
       throw err;
@@ -229,11 +246,9 @@ export default function CategorizeTransactions() {
       const response = await createType(name, subCategoryId, description);
       const typesData = await getTypes();
       setTypes(typesData);
-      
-      const newType = typesData.find(
+      return typesData.find(
         t => t.type === name && t.sub_category_id === subCategoryId
-      );
-      return newType || response;
+      ) || response;
     } catch (err) {
       setError('Failed to create type: ' + err.message);
       throw err;
@@ -245,51 +260,51 @@ export default function CategorizeTransactions() {
       const response = await createParty(name, typeId, description);
       const partiesData = await getParties();
       setParties(partiesData);
-      
-      const newParty = partiesData.find(
+      return partiesData.find(
         p => p.name === name && p.type_id === typeId
-      );
-      return newParty || response;
+      ) || response;
     } catch (err) {
       setError('Failed to create party: ' + err.message);
       throw err;
     }
   };
 
-  if (loading && transactions.length === 0) {
-    return (
-      <div className="categorize-transactions">
-        <h1>Categorize Transactions</h1>
-        <div className="loading">Loading...</div>
-      </div>
-    );
-  }
+  const handleSortChange = useCallback((field, dir) => {
+    setSortField(field);
+    setSortDir(dir);
+    setCurrentPage(1); // reset to first page on sort change
+  }, []);
+
+  // ── Helpers ──
 
   const formatUploadDate = (dateString) => {
     if (!dateString) return 'Unknown date';
-    
     const date = new Date(dateString);
-    
     const day = date.getDate().toString().padStart(2, '0');
     const month = date.toLocaleDateString('en-GB', { month: 'short' });
     const hours = date.getHours().toString().padStart(2, '0');
     const minutes = date.getMinutes().toString().padStart(2, '0');
-    
     return `${day} ${month}; ${hours}:${minutes}`;
   };
+
+  // Derive the numeric initialPartyId to pass to the modal.
+  // When opened from the header button there's no pre-selection (null).
+  const initialPartyId = typeof remapPartyId === 'number' ? remapPartyId : null;
 
   return (
     <div className="categorize-transactions">
       <div className="page-header">
         <h1>Categorize Transactions</h1>
-        {selectedTransactions.length > 0 && (
-          <button 
-            onClick={() => setIsBulkEditOpen(true)}
-            className="bulk-edit-button"
-          >
-            Bulk Edit ({selectedTransactions.length})
-          </button>
-        )}
+        <div className="header-actions">
+          {selectedTransactions.length > 0 && (
+            <button
+              onClick={() => setIsBulkEditOpen(true)}
+              className="bulk-edit-button"
+            >
+              Bulk Edit ({selectedTransactions.length})
+            </button>
+          )}
+        </div>
       </div>
 
       {error && (
@@ -299,7 +314,7 @@ export default function CategorizeTransactions() {
         </div>
       )}
 
-      {<div className="filters-section">
+      <div className="filters-section">
         <div className="filter-group">
           <label htmlFor="upload-filter">Filter by Upload:</label>
           <select
@@ -309,7 +324,7 @@ export default function CategorizeTransactions() {
               const value = e.target.value;
               handleFilterChange({
                 ...filters,
-                upload_id: value ? parseInt(value) : null
+                upload_id: value ? parseInt(value) : null,
               });
             }}
           >
@@ -321,8 +336,8 @@ export default function CategorizeTransactions() {
             ))}
           </select>
         </div>
-      </div>}
-      
+      </div>
+
       <TransactionTable
         transactions={transactions}
         accounts={accounts}
@@ -339,6 +354,12 @@ export default function CategorizeTransactions() {
         onSelectionChange={setSelectedTransactions}
         filters={filters}
         onFilterChange={handleFilterChange}
+        // NEW: lets any row open the remap modal pre-filled with its party
+        onRemapParty={handleOpenRemap}
+        onFindOrCreateParty={handleFindOrCreateParty}
+        sortField={sortField}
+        sortDir={sortDir}
+        onSortChange={handleSortChange}
       />
 
       <Pagination
@@ -361,6 +382,21 @@ export default function CategorizeTransactions() {
         onSubCategoryCreated={handleSubCategoryCreated}
         onTypeCreated={handleTypeCreated}
         onPartyCreated={handlePartyCreated}
+      />
+
+      <RemapPartyModal
+        isOpen={isRemapOpen}
+        onClose={handleCloseRemap}
+        onSave={handleRemapParty}
+        parties={parties}
+        categories={categories}
+        subCategories={subCategories}
+        types={types}
+        onCategoryCreated={handleCategoryCreated}
+        onSubCategoryCreated={handleSubCategoryCreated}
+        onTypeCreated={handleTypeCreated}
+        initialPartyId={initialPartyId}
+        initialTypeId={remapTargetTypeId}
       />
     </div>
   );

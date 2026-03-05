@@ -7,10 +7,18 @@ const API_BASE_URL = 'http://localhost:5000/api';
 async function apiCall(endpoint, options = {}) {
   try {
     const response = await fetch(`${API_BASE_URL}${endpoint}`, options);
+
+    const contentType = response.headers.get('Content-Type') || '';
+    if (!contentType.includes('application/json')) {
+      throw new Error(
+        `Unexpected response format (${response.status} ${response.statusText})`
+      );
+    }
+
     const data = await response.json();
 
     if (!response.ok) {
-      throw new Error(data.message || 'API request failed');
+      throw new Error(data.error || data.message || 'API request failed');
     }
 
     return data;
@@ -343,6 +351,14 @@ export async function createParty(name, typeId, description = null) {
     body: JSON.stringify(body),
   });
   return response.party || response;
+}
+
+export async function remapParty(partyId, newTypeId) {
+  return apiCall(`/parties/${partyId}/remap`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type_id: newTypeId }),
+  });
 }
 
 /**

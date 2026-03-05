@@ -1,0 +1,115 @@
+/* ── Overlay ── */
+.remap-prompt-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1100; /* above the table, below full modals */
+  padding: 1rem;
+}
+
+/* ── Dialog box ── */
+.remap-prompt {
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.22);
+  padding: 1.5rem;
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.remap-prompt h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.remap-prompt p {
+  margin: 0;
+  font-size: 0.875rem;
+  color: #374151;
+  line-height: 1.5;
+}
+
+/* ── Option buttons ── */
+.remap-prompt-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.remap-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border: 2px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+  width: 100%;
+}
+
+.remap-option:hover {
+  background: #f9fafb;
+}
+
+.remap-option--all:hover {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+.remap-option--one:hover {
+  border-color: #059669;
+  background: #ecfdf5;
+}
+
+.remap-option__icon {
+  font-size: 1.25rem;
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+
+.remap-option__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.remap-option__label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.remap-option__hint {
+  font-size: 0.78rem;
+  color: #6b7280;
+  line-height: 1.4;
+}
+
+/* ── Cancel link ── */
+.remap-prompt-cancel {
+  background: none;
+  border: none;
+  color: #6b7280;
+  font-size: 0.82rem;
+  cursor: pointer;
+  text-align: center;
+  padding: 0.25rem;
+  border-radius: 4px;
+  text-decoration: underline;
+  transition: color 0.15s;
+}
+
+.remap-prompt-cancel:hover {
+  color: #374151;
+}

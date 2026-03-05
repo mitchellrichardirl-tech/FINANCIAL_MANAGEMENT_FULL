@@ -18,9 +18,13 @@ export default function TransactionTable({
   selectedTransactions,
   onSelectionChange,
   filters,
-  onFilterChange
+  onFilterChange,
+  onRemapParty,
+  onFindOrCreateParty,
+  sortField,
+  sortDir,
+  onSortChange,
 }) {
-  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
   
   // Modal state
   const [createModalState, setCreateModalState] = useState({
@@ -32,33 +36,6 @@ export default function TransactionTable({
   });
 
   const transactionArray = Array.isArray(transactions) ? transactions : [];
-
-  const sortedTransactions = useMemo(() => {
-    if (!sortConfig.key || transactionArray.length === 0) return transactionArray;
-
-    return [...transactionArray].sort((a, b) => {
-      let aVal = a[sortConfig.key];
-      let bVal = b[sortConfig.key];
-
-      if (aVal === null || aVal === undefined) return 1;
-      if (bVal === null || bVal === undefined) return -1;
-
-      if (sortConfig.key === 'transaction_date') {
-        aVal = new Date(aVal);
-        bVal = new Date(bVal);
-      } else if (sortConfig.key === 'amount') {
-        aVal = parseFloat(aVal);
-        bVal = parseFloat(bVal);
-      } else if (typeof aVal === 'string') {
-        aVal = aVal.toLowerCase();
-        bVal = bVal.toLowerCase();
-      }
-
-      if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
-      if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
-      return 0;
-    });
-  }, [transactionArray, sortConfig]);
 
   const sortedAccounts = useMemo(() => 
     [...accounts]
@@ -125,11 +102,10 @@ export default function TransactionTable({
     return filtered.sort((a, b) => a.name.localeCompare(b.name));
   }, [parties, types, subCategories, filters.type_id, filters.sub_category_id, filters.category_id]);
 
-  const handleSort = (key) => {
-    setSortConfig(prev => ({
-      key,
-      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
-    }));
+  const handleSort = (field) => {
+    const newDir =
+      sortField === field && sortDir === 'asc' ? 'desc' : 'asc';
+    onSortChange(field, newDir);
   };
 
   const handleSelectAll = (checked) => {
@@ -259,9 +235,9 @@ export default function TransactionTable({
       className={`sortable-header ${className}`}
     >
       {children}
-      {sortConfig.key === field && (
+      {sortField === field && (
         <span className="sort-indicator">
-          {sortConfig.direction === 'asc' ? ' ↑' : ' ↓'}
+          {sortDir === 'asc' ? ' ↑' : ' ↓'}
         </span>
       )}
     </th>
@@ -471,7 +447,7 @@ export default function TransactionTable({
             </tr>
           </thead>
           <tbody>
-            {sortedTransactions.map(transaction => (
+            {transactions.map(transaction => (
               <TransactionRow
                 key={transaction.id}
                 transaction={transaction}
@@ -484,6 +460,8 @@ export default function TransactionTable({
                 onOpenCreateModal={handleOpenCreateModal}
                 isSelected={selectedTransactions.includes(transaction.id)}
                 onSelectionChange={(checked) => handleRowSelection(transaction.id, checked)}
+                onRemapParty={onRemapParty}
+                onFindOrCreateParty={onFindOrCreateParty}
               />
             ))}
           </tbody>
