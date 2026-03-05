@@ -312,9 +312,29 @@ class TransactionRepository:
         is_credit: Optional[bool] = None,
         category_id: Optional[int] = None,
         sub_category_id: Optional[int] = None,
-        type_id: Optional[int] = None
-        ) -> List[Dict[str, Any]]:
+        type_id: Optional[int] = None,
+        sort_by: Optional[str] = None,
+        sort_dir: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """Get transactions with full party hierarchy information."""
+        
+        # Whitelist of allowed sort columns to prevent SQL injection
+        # Keys are the API field names, values are the actual SQL column references
+        SORTABLE_COLUMNS = {
+            'transaction_date': 't.transaction_date',
+            'amount': 't.amount',
+            'description': 't.description',
+            'cleaned_description': 't.cleaned_description',
+            'is_credit': 't.is_credit',
+            'is_kids': 't.is_kids',
+            'is_one_off': 't.is_one_off',
+            'account_name': 'a.account_name',
+            'party_name': 'p.name',
+            'type_name': 'tp.type',
+            'sub_category_name': 'sc.sub_category',
+            'category_name': 'c.category',
+        }
+        
         try:
             with self.db.get_connection() as conn:
                 cursor = conn.cursor()
@@ -379,6 +399,13 @@ class TransactionRepository:
 
                 where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
+                # Build ORDER BY clause safely
+                sort_column = SORTABLE_COLUMNS.get(sort_by, 't.transaction_date')
+                sort_direction = 'ASC' if sort_dir == 'asc' else 'DESC'
+                
+                # Add secondary sort by id for stable ordering
+                order_clause = f"ORDER BY {sort_column} {sort_direction}, t.id DESC"
+
                 query = f'''
                     SELECT 
                         t.*,
@@ -405,7 +432,7 @@ class TransactionRepository:
                     LEFT JOIN categories c ON sc.category_id = c.id
                     LEFT JOIN receipts r ON t.receipt_id = r.id
                     {where_clause}
-                    ORDER BY t.transaction_date DESC, t.id DESC
+                    {order_clause}
                 '''
 
                 if limit:
@@ -421,7 +448,7 @@ class TransactionRepository:
 
                 logger.debug(
                     f"Retrieved {len(rows)} transactions with hierarchy "
-                    f"(offset={offset}, limit={limit})"
+                    f"(offset={offset}, limit={limit}, sort={sort_by} {sort_dir})"
                 )
                 return [dict(row) for row in rows]
 

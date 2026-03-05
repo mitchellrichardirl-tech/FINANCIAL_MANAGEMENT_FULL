@@ -78,6 +78,9 @@ def create_app(config=None):
     # Register blueprints
     _register_blueprints(app)
 
+    for rule in sorted(app.url_map.iter_rules(), key=lambda r: r.rule):
+        print(f"{rule.rule:50s} {sorted(rule.methods)}")
+        
     # Register error handlers
     register_error_handlers(app)
     logger.debug("Error handlers registered")

@@ -17,6 +17,7 @@ from src.api.utils.validators import (
     validate_date_range_filters,
     validate_id_filters,
     validate_boolean_fields,
+    validate_sort_params,
     add_string_filters,
     require_at_least_one,
     validate_positive_int,
@@ -30,6 +31,22 @@ logger = ContextLogger(__name__)
 
 # Test commits 
 
+TRANSACTION_SORT_FIELDS = {
+    'transaction_date',
+    'amount',
+    'description',
+    'cleaned_description',
+    'is_credit',
+    'is_kids',
+    'is_one_off',
+    'account_name',
+    'party_name',
+    'type_name',
+    'sub_category_name',
+    'category_name',
+}
+
+
 def validate_transaction_filters(args: dict) -> tuple[bool, dict, str]:
     """Validate transaction query filters."""
     logger.debug(f"Validating transaction filters: {list(args.keys())}")
@@ -38,6 +55,17 @@ def validate_transaction_filters(args: dict) -> tuple[bool, dict, str]:
     is_valid, pagination, error = validate_pagination(args)
     if not is_valid:
         logger.warning(f"Pagination validation failed: {error}")
+        return False, {}, error
+
+    # Sorting
+    is_valid, sort_params, error = validate_sort_params(
+        args,
+        allowed_fields=TRANSACTION_SORT_FIELDS,
+        default_field='transaction_date',
+        default_dir='desc'
+    )
+    if not is_valid:
+        logger.warning(f"Sort validation failed: {error}")
         return False, {}, error
 
     # Date range
@@ -73,8 +101,8 @@ def validate_transaction_filters(args: dict) -> tuple[bool, dict, str]:
         logger.warning(f"Validation failed: {validator.first_error_message()}")
         return False, {}, validator.first_error_message()
 
-    return True, {**pagination, **validator.validated}, None
-
+    # Merge all validated params
+    return True, {**pagination, **sort_params, **validator.validated}, None
 
 def validate_transaction_update(data: dict) -> tuple[bool, dict, str]:
     """Validate transaction update data."""
@@ -158,15 +186,26 @@ def get_transactions():
 
     limit = filters.pop('limit')
     offset = filters.pop('offset')
+    sort_by = filters.pop('sort_by', None)
+    sort_dir = filters.pop('sort_dir', None)
 
     active_filters = {k: v for k, v in filters.items() if v is not None}
     if active_filters:
         logger.debug(f"Active filters: {active_filters}")
 
     repo = TransactionRepository()
-    transactions = repo.get_transactions_with_hierarchy(limit=limit, offset=offset, **filters)
+    transactions = repo.get_transactions_with_hierarchy(
+        limit=limit,
+        offset=offset,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
+        **filters
+    )
 
-    logger.info(f"Retrieved {len(transactions)} transactions (offset={offset}, limit={limit})")
+    logger.info(
+        f"Retrieved {len(transactions)} transactions "
+        f"(offset={offset}, limit={limit}, sort={sort_by} {sort_dir})"
+    )
     return paginated_response(transactions, limit, offset, data_key='transactions')
 
 

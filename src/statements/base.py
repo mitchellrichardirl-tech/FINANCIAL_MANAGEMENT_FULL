@@ -121,6 +121,7 @@ class StatementProcessor(ABC):
         '%d-%m-%Y',   # 15-09-2025
         '%d.%m.%Y',   # 15.09.2025
         '%Y/%m/%d',   # 2025/09/15
+        '%Y-%m-%dT%H:%M:%S',  # 2025-09-15T13:45:30 (ISO with time)
     ]
 
     def __init__(

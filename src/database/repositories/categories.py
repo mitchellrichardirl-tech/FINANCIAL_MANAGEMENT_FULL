@@ -643,7 +643,29 @@ class CategoryRepository:
         type_id: Optional[int] = None,
         description: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
-        """Update a party."""
+        """
+        Update a party's name and/or description.
+
+        For changing a party's type_id, use remap_party() instead — it
+        handles the UNIQUE(name, type_id) constraint by merging when a
+        conflict exists, and logs the transaction impact.
+
+        Args:
+            party_id: The party to update
+            name: New name (optional)
+            type_id: Rejected — raises ValueError, use remap_party()
+            description: New description (optional)
+
+        Returns:
+            Updated party dict, or None if not found
+        """
+        if type_id is not None:
+            raise ValueError(
+                "Cannot change type_id through update_party(). "
+                "Use remap_party() instead, which handles potential "
+                "merge conflicts with existing parties."
+            )
+
         try:
             with self.db.transaction() as conn:
                 cursor = conn.cursor()
@@ -656,11 +678,6 @@ class CategoryRepository:
                     updates.append("name = ?")
                     params.append(name)
                     updated_fields.append('name')
-
-                if type_id is not None:
-                    updates.append("type_id = ?")
-                    params.append(type_id)
-                    updated_fields.append('type_id')
 
                 if description is not None:
                     updates.append("description = ?")
@@ -686,15 +703,172 @@ class CategoryRepository:
             error_msg = str(e).lower()
             if "unique" in error_msg:
                 logger.warning(f"Duplicate party name on update: {name}")
-                raise DatabaseError(f"Party name already exists in this type") from e
-            if "foreign key" in error_msg:
-                logger.warning(f"Type {type_id} does not exist")
-                raise DatabaseError(f"Type {type_id} does not exist") from e
+                raise DatabaseError(
+                    f"A party named '{name}' already exists under this type"
+                ) from e
             logger.error(f"Integrity error updating party {party_id}: {e}")
             raise DatabaseError(f"Failed to update party: {e}") from e
         except Exception as e:
             logger.error(f"Failed to update party {party_id}: {e}")
             raise DatabaseError(f"Failed to update party: {e}") from e
+        
+    def remap_party(self, party_id: int, new_type_id: int) -> dict:
+        """
+        Remap a party to a new type in the category hierarchy.
+
+        If a party with the same name already exists under the target type,
+        merges: re-points all transactions to the existing party and deletes
+        the old one. Otherwise, simply updates the type_id.
+
+        This is the only method that should change a party's type_id.
+
+        Args:
+            party_id: The party to remap
+            new_type_id: The target type_id
+
+        Returns:
+            Dict describing what happened (remapped, merged, or no-op)
+        """
+        try:
+            with self.db.transaction() as conn:
+                cursor = conn.cursor()
+
+                # Get the party we're remapping
+                cursor.execute(
+                    "SELECT id, name, type_id FROM parties WHERE id = ?",
+                    (party_id,)
+                )
+                party = cursor.fetchone()
+
+                if not party:
+                    raise ValueError(f"Party {party_id} not found")
+
+                party_name = party['name']
+                old_type_id = party['type_id']
+
+                # No-op check
+                if old_type_id == new_type_id:
+                    logger.info(
+                        f"Party '{party_name}' (id={party_id}) already "
+                        f"mapped to type_id={new_type_id}"
+                    )
+                    return {
+                        'action': 'none',
+                        'party_id': party_id,
+                        'message': 'Party already mapped to this type',
+                    }
+
+                # Validate target type exists
+                cursor.execute(
+                    "SELECT id FROM types WHERE id = ?",
+                    (new_type_id,)
+                )
+                if not cursor.fetchone():
+                    raise ValueError(f"Type {new_type_id} not found")
+
+                # Check for UNIQUE(name, type_id) conflict
+                cursor.execute(
+                    "SELECT id FROM parties "
+                    "WHERE name = ? AND type_id = ? AND id != ?",
+                    (party_name, new_type_id, party_id)
+                )
+                existing = cursor.fetchone()
+
+                if existing:
+                    return self._merge_parties(
+                        cursor, party_id, existing['id'],
+                        party_name, new_type_id
+                    )
+                else:
+                    return self._remap_party_type(
+                        cursor, party_id, party_name,
+                        old_type_id, new_type_id
+                    )
+
+        except ValueError:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to remap party {party_id}: {e}")
+            raise DatabaseError(f"Failed to remap party: {e}") from e
+
+    def _merge_parties(
+        self,
+        cursor,
+        old_party_id: int,
+        target_party_id: int,
+        party_name: str,
+        new_type_id: int,
+    ) -> dict:
+        """Merge old party into an existing party under the target type."""
+
+        # Re-point transactions
+        cursor.execute(
+            "UPDATE transactions SET party_id = ? WHERE party_id = ?",
+            (target_party_id, old_party_id)
+        )
+        transactions_moved = cursor.rowcount
+
+        # Re-point aliases if you have an aliases table
+        # cursor.execute(
+        #     "UPDATE party_aliases SET party_id = ? WHERE party_id = ?",
+        #     (target_party_id, old_party_id)
+        # )
+
+        # Delete the now-orphaned party
+        cursor.execute(
+            "DELETE FROM parties WHERE id = ?",
+            (old_party_id,)
+        )
+
+        logger.info(
+            f"Merged party '{party_name}' (id={old_party_id}) into "
+            f"existing party (id={target_party_id}) under "
+            f"type_id={new_type_id}. "
+            f"Moved {transactions_moved} transactions."
+        )
+
+        return {
+            'action': 'merged',
+            'old_party_id': old_party_id,
+            'new_party_id': target_party_id,
+            'type_id': new_type_id,
+            'transactions_moved': transactions_moved,
+        }
+
+    def _remap_party_type(
+        self,
+        cursor,
+        party_id: int,
+        party_name: str,
+        old_type_id: int,
+        new_type_id: int,
+    ) -> dict:
+        """Simple remap — no naming conflict."""
+
+        cursor.execute(
+            "UPDATE parties SET type_id = ? WHERE id = ?",
+            (new_type_id, party_id)
+        )
+
+        cursor.execute(
+            "SELECT COUNT(*) as count FROM transactions WHERE party_id = ?",
+            (party_id,)
+        )
+        tx_count = cursor.fetchone()['count']
+
+        logger.info(
+            f"Remapped party '{party_name}' (id={party_id}) "
+            f"from type_id={old_type_id} to type_id={new_type_id}. "
+            f"{tx_count} transactions affected."
+        )
+
+        return {
+            'action': 'remapped',
+            'party_id': party_id,
+            'old_type_id': old_type_id,
+            'new_type_id': new_type_id,
+            'transactions_affected': tx_count,
+        }
 
     def get_party_by_id(self, party_id: int) -> Optional[Dict[str, Any]]:
         """Get a party by ID."""

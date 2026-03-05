@@ -45,6 +45,7 @@ data/
 *.jpg
 *.png
 *.jpeg
+notebooks
 
 # Temporary files
 tmp/

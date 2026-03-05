@@ -21,7 +21,8 @@ class PartyMatcher:
     def __init__(
         self,
         db: Optional[CategoryRepository] = None,
-        similarity_threshold: int = 70
+        similarity_threshold: int = 70,
+        use_db: bool = True
     ):
         if not 0 <= similarity_threshold <= 100:
             raise ValueError(
@@ -30,17 +31,22 @@ class PartyMatcher:
             )
 
         self.similarity_threshold = similarity_threshold
-        self.db = db if db else CategoryRepository()
+        if use_db:
+            self.db = db if db else CategoryRepository()
         self.last_match_score: int = 0
         self.new_aliases = 0
         self.new_parties = 0
-
         self._load_known_parties()
+        self.log_freq = 10  # Log every N fuzzy matches
 
         logger.debug(
             f"Initialized PartyMatcher: threshold={similarity_threshold}, "
             f"using={'rapidfuzz' if USING_RAPIDFUZZ else 'fuzzywuzzy'}"
         )
+
+    def _intermittent_log(self, idx: int, total: int, message: str = ""):
+        if (idx + 1) % self.log_freq == 0 or idx == total - 1:
+            logger.debug(f"{message} {idx + 1}/{total}")
 
     def _load_known_parties(self) -> Dict[str, int]:
         logger.debug("Loading known parties from database")
@@ -97,6 +103,12 @@ class PartyMatcher:
         except KeyError:
             raise KeyError(f"No exact match found for '{party_name}'")
 
+    def _add_unknown_party(self, party_name: str) -> int:
+        return self.db.add_party_unknown_type(party_name)
+    
+    def _prime_unknown_type_cache(self):
+        self.db.prime_unknown_type_cache()
+
     def _check_fuzzy_match(self, party_name: str) -> Tuple[int, int]:
         if not self.alias_mapping:
             raise LookupError(f"No known parties to match against")
@@ -146,7 +158,7 @@ class PartyMatcher:
         except (LookupError, KeyError):
             pass
 
-        party_id = self.db.add_party_unknown_type(party_name)
+        party_id = self._add_unknown_party(party_name)
         self.alias_mapping[party_name] = party_id
         self._refresh_alias_keys()
         self.new_parties += 1
@@ -201,19 +213,18 @@ class PartyMatcher:
             if n and n.strip() != '' and n not in results
         ]
 
-        if unmatched and self._alias_keys:
+        logger.debug(f"{len(unmatched)} unique names to fuzzy match after exact matches")
+        
+        if unmatched:
             logger.info(
                 f"Fuzzy matching {len(unmatched)} unique names "
                 f"against {len(self._alias_keys)} known aliases"
             )
 
-            self.db.prime_unknown_type_cache()
+            self._prime_unknown_type_cache()
 
             for idx, name in enumerate(unmatched):
-                if (idx + 1) % 200 == 0:
-                    logger.debug(
-                        f"Fuzzy matching {idx + 1}/{len(unmatched)}"
-                    )
+                self._intermittent_log(idx, len(unmatched), message="Fuzzy matching")
 
                 best = process.extractOne(
                     name,
@@ -224,6 +235,7 @@ class PartyMatcher:
                 if best and best[1] >= self.similarity_threshold:
                     matched_name, score = best[0], best[1]
                     party_id = self.alias_mapping[matched_name]
+                    self._intermittent_log(idx, len(unmatched), message=f"Fuzzy matched '{name}' with '{matched_name}', ID {party_id}, score={score}")
 
                     results[name] = (party_id, score)
 
@@ -234,7 +246,8 @@ class PartyMatcher:
                     continue
 
                 # No match — create new party
-                party_id = self.db.add_party_unknown_type(name)
+                party_id = self._add_unknown_party(name)
+                self._intermittent_log(idx, len(unmatched), message=f"No match for '{name}' — created new party with ID {party_id}")
                 self.alias_mapping[name] = party_id
                 self.new_parties += 1
                 results[name] = (party_id, 100)
@@ -268,3 +281,9 @@ class PartyMatcher:
 
     def get_new_counts(self) -> Tuple[int, int]:
         return self.new_aliases, self.new_parties
+    
+def get_party_matcher(similarity_threshold: int = 70, use_db: bool = True) -> PartyMatcher:
+    """Factory function to get a PartyMatcher instance."""
+    if use_db:
+        return PartyMatcher(similarity_threshold=similarity_threshold, use_db=True)
+    return PartyMatcherRaw(similarity_threshold=similarity_threshold)

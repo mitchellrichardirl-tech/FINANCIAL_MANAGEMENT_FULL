@@ -419,3 +419,35 @@ def get_party_transactions(party_id: int):
 
     logger.info(f"Retrieved {len(transactions)} transactions for party {party_id}")
     return success_response(data=transactions)
+
+@bp.route("/parties/<int:party_id>/remap", methods=['PUT'])
+@handle_exceptions(log_prefix="remap_party")
+@require_json
+@log_route(logger)
+def remap_party(party_id: int):
+    """Remap a party to a different type in the category hierarchy."""
+    try:
+        data = request.get_json()
+
+        if not data or 'type_id' not in data:
+            return error_response({
+                'error': 'type_id is required'
+            }, status_code=400)
+
+        new_type_id = data['type_id']
+
+        if not isinstance(new_type_id, int) or new_type_id < 1:
+            return error_response({
+                'error': 'type_id must be a positive integer'
+            }, status_code=400)
+
+        repo = CategoryRepository()
+        result = repo.remap_party(party_id, new_type_id)
+
+        return success_response(data=result)
+
+    except ValueError as e:
+        return error_response({'error': str(e)}, status_code=404)
+    except Exception as e:
+        logger.error(f"Failed to remap party {party_id}: {e}")
+        return error_response({'error': f'Failed to remap party: {str(e)}'}, status_code=500)

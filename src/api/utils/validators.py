@@ -85,6 +85,29 @@ class FieldValidator:
             ))
         return self
 
+    def in_set(self, allowed_values: set, case_insensitive: bool = False) -> 'FieldValidator':
+        """Validate value is in a set of allowed values."""
+        if self._stopped:
+            return self
+        
+        check_value = self.value
+        check_set = allowed_values
+        
+        if case_insensitive and isinstance(self.value, str):
+            check_value = self.value.lower()
+            check_set = {v.lower() if isinstance(v, str) else v for v in allowed_values}
+        
+        if check_value not in check_set:
+            allowed_list = ', '.join(str(v) for v in sorted(allowed_values))
+            self.errors.append(ValidationError(
+                self.field_name,
+                f"{self.field_name} must be one of: {allowed_list}",
+                "not_in_set"
+            ))
+            self._stopped = True
+        
+        return self
+
     def transform(self, transformer: Callable[[Any], Any], error_message: str = None) -> 'FieldValidator':
         """Transform value using provided function."""
         if self._stopped:
@@ -264,6 +287,28 @@ def add_string_filters(validated: dict, args: dict, field_names: List[str]) -> d
             validated[field] = args[field]
     return validated
 
+def validate_sort_params(
+    args: dict,
+    allowed_fields: set[str],
+    default_field: str|None = None,
+    default_dir: str = 'desc'
+) -> Tuple[bool, dict, Optional[str]]:
+    """Validate sort parameters using fluent validators."""
+    validator = RequestValidator(args)
+    
+    validator.validate_field('sort_by',
+        validator.field('sort_by').optional().in_set(allowed_fields))
+    
+    validator.validate_field('sort_dir',
+        validator.field('sort_dir').optional().in_set({'asc', 'desc'}, case_insensitive=True))
+    
+    if not validator.is_valid():
+        return False, {}, validator.first_error_message()
+    
+    return True, {
+        'sort_by': validator.validated.get('sort_by', default_field),
+        'sort_dir': validator.validated.get('sort_dir', default_dir).lower()
+    }, None
 
 def require_at_least_one(data: dict, field_names: List[str], error_message: str = None) -> Optional[str]:
     """Validate that at least one of the specified fields is present."""

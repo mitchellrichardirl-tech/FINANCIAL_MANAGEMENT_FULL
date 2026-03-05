@@ -4,6 +4,7 @@ import pandas as pd
 
 from src.categorizer.party_extractor import PartyExtractor
 from src.categorizer.party_matcher import PartyMatcher
+from src.categorizer.party_matcher_raw import PartyMatcherRaw
 from src.utils.logging import ContextLogger
 
 logger = ContextLogger(__name__)
@@ -12,9 +13,12 @@ logger = ContextLogger(__name__)
 class TransactionCategorizer:
     """Main categorizer that orchestrates the categorization pipeline."""
 
-    def __init__(self, similarity_threshold: int = 80):
+    def __init__(self, similarity_threshold: int = 80, use_db: bool = True):
         self.extractor = PartyExtractor()
-        self.matcher = PartyMatcher(similarity_threshold=similarity_threshold)
+        if use_db:
+            self.matcher = PartyMatcher(similarity_threshold=similarity_threshold)
+        else:
+            self.matcher = PartyMatcherRaw(similarity_threshold=similarity_threshold)
 
         logger.info(
             f"Initialized TransactionCategorizer: threshold={similarity_threshold}"
