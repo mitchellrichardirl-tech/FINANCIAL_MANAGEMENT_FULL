@@ -1,14 +1,12 @@
 import os
 import logging
 from src.api.app import create_app
+from src.utils.logging import ContextLogger
 
 # Configure logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+ContextLogger.setup_logging()
 
-logger = logging.getLogger(__name__)
+logger = ContextLogger(__name__)
 
 # Create the application
 app = create_app()

@@ -1,5 +1,6 @@
 import inspect
 import logging
+from logging.handlers import RotatingFileHandler
 import functools
 import time
 
@@ -39,6 +40,27 @@ class ContextLogger:
             return f"[{method_name}]"
         finally:
             del frame
+
+    @staticmethod
+    def setup_logging():
+        # Console output
+        console = logging.StreamHandler()
+        console.setFormatter(logging.Formatter(
+            "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
+        ))
+
+        # File output — this is what actually saves logs
+        file_handler = RotatingFileHandler(
+            "app.log", maxBytes=10_000_000, backupCount=5
+        )
+        file_handler.setFormatter(logging.Formatter(
+            "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
+        ))
+
+        logging.basicConfig(
+            level=logging.DEBUG,
+            handlers=[console, file_handler]
+        )
 
     def debug(self, msg: str, *args, **kwargs):
         if self._logger.isEnabledFor(logging.DEBUG):
