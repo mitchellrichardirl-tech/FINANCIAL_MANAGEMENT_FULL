@@ -6,6 +6,7 @@ import pandas as pd
 
 from src.categorizer.transaction_categorizer import TransactionCategorizer
 from src.utils.logging import ContextLogger
+from src.api.utils.errors import AppError, ErrorCode
 
 logger = ContextLogger(__name__)
 
@@ -53,25 +54,19 @@ class DateConfig:
 class StatementConfig:
     """Complete configuration for a bank statement format."""
     bank_name: str
-    account_type: str  # e.g., 'current', 'credit_card', 'savings'
-    
-    # Column mappings
+    account_type: str
+
     date_config: DateConfig
     amount_config: AmountConfig
     description_column: str
-    
-    # Optional columns that may exist in the statement
+
     balance_column: Optional[str] = None
     reference_column: Optional[str] = None
-    
-    # Rows to skip (headers, footers, summary rows)
+
     skip_rows_start: int = 0
     skip_rows_end: int = 0
-    
-    # Filters to exclude non-transaction rows
+
     exclude_patterns: list[str] = field(default_factory=list)
-    
-    # Default values for output fields
     defaults: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
@@ -79,12 +74,33 @@ class StatementConfig:
         amt = self.amount_config
         has_split = amt.credit_column and amt.debit_column
         has_single = amt.amount_column is not None
-        
+
         if not has_split and not has_single:
             raise ValueError(
                 "AmountConfig must specify either credit_column/debit_column "
                 "or amount_column"
             )
+
+    @property
+    def required_columns(self) -> list[str]:
+        """All source columns this config expects to find in the input data."""
+        cols = [self.date_config.column, self.description_column]
+
+        amt = self.amount_config
+        if amt.credit_column and amt.debit_column:
+            cols.extend([amt.credit_column, amt.debit_column])
+        elif amt.amount_column:
+            cols.append(amt.amount_column)
+            if amt.credit_indicator_column:
+                cols.append(amt.credit_indicator_column)
+
+        # Dedupe while preserving order
+        seen = set()
+        return [c for c in cols if c and not (c in seen or seen.add(c))]
+
+    @property
+    def display_name(self) -> str:
+        return f"{self.bank_name} {self.account_type}"
 
 
 class StatementProcessor(ABC):
@@ -149,44 +165,87 @@ class StatementProcessor(ABC):
     def process_statement(self, transactions: list[dict]) -> pd.DataFrame:
         """
         Main entry point: process raw statement data into categorized transactions.
-        
-        Args:
-            transactions: List of dictionaries representing statement rows
-            
-        Returns:
-            DataFrame with standardized, categorized transactions
+
+        Raises:
+            AppError: if input columns don't match the config, or dates can't be parsed.
         """
         logger.info(
-            f"Processing {self.config.bank_name} {self.config.account_type} statement: "
+            f"Processing {self.config.display_name} statement: "
             f"{len(transactions)} rows for account {self.account_id}"
         )
-        
+
         df = pd.DataFrame(transactions)
-        
-        # Skip configured rows
+
+        # Skip configured rows BEFORE validating columns — headers/footers
+        # won't affect the column set, but doing it first matches the
+        # original behaviour order.
         if self.config.skip_rows_start > 0:
             df = df.iloc[self.config.skip_rows_start:]
         if self.config.skip_rows_end > 0:
             df = df.iloc[:-self.config.skip_rows_end]
-        
+
+        # Validate columns before any processing touches them
+        self._validate_required_columns(df)
+
         df = self._filter_rows(df)
         df = self._parse_dates(df)
         df = self._parse_amounts(df)
         df = self._parse_description(df)
         df = self._apply_defaults(df)
         df = self._categorize(df)
-        
-        # Add metadata
+
         df['account_id'] = int(self.account_id)
         df['upload_id'] = int(self.upload_id)
-        
-        # Ensure output columns exist and are ordered
+
         self.transactions = self._finalize_columns(df)
-        
+
         logger.info(
             f"Processing complete: {len(self.transactions)} transactions"
         )
         return self.transactions
+
+    def _validate_required_columns(self, df: pd.DataFrame) -> None:
+        """
+        Verify all columns required by the config exist in the input data.
+
+        Raises AppError with details about what's missing and what was found,
+        so the user can tell whether they picked the wrong account or the
+        wrong file.
+        """
+        required = self.config.required_columns
+        actual = list(df.columns)
+        missing = [c for c in required if c not in actual]
+
+        if not missing:
+            logger.debug(
+                f"Column check passed for {self.config.display_name}: "
+                f"all {len(required)} required columns present"
+            )
+            return
+
+        logger.warning(
+            f"Column mismatch for {self.config.display_name}: "
+            f"missing={missing}, found={actual}"
+        )
+
+        raise AppError(
+            code=ErrorCode.INVALID_FORMAT,
+            message=(
+                f"This file doesn't match the '{self.config.display_name}' "
+                f"statement format. "
+                f"Missing column(s): {', '.join(missing)}. "
+                f"File contains: {', '.join(actual) or '(no columns)'}."
+            ),
+            status_code=422,
+            entity='Statement',
+            details={
+                'statement_format': self.config.display_name,
+                'account_id': self.account_id,
+                'missing_columns': missing,
+                'required_columns': required,
+                'found_columns': actual,
+            },
+        )
 
     def _filter_rows(self, df: pd.DataFrame) -> pd.DataFrame:
         """Remove non-transaction rows based on configured patterns."""
@@ -260,11 +319,10 @@ class StatementProcessor(ABC):
     ) -> tuple[pd.Series, str]:
         """
         Try the configured format first, then fall back through common formats.
-        
+
         Returns the successfully parsed Series and the format that worked.
-        Raises ValueError if no format produces any valid dates.
+        Raises AppError if no format produces any valid dates.
         """
-        # Try the configured format first (may be None = auto-detect)
         result = pd.to_datetime(
             series,
             format=date_cfg.format,
@@ -276,23 +334,21 @@ class StatementProcessor(ABC):
         total = len(series.dropna())
 
         if valid_count == total:
-            # Everything parsed cleanly with the configured format
             return result, date_cfg.format or 'auto-detected'
 
         if valid_count > 0:
-            # Partial success — log it but don't fall back, as mixing
-            # formats across rows would silently corrupt the data
             logger.debug(
                 f"Configured format {date_cfg.format!r} parsed "
                 f"{valid_count}/{total} dates"
             )
             return result, date_cfg.format or 'auto-detected'
 
-        # Configured format parsed nothing — try fallbacks
         logger.debug(
             f"Configured format {date_cfg.format!r} parsed 0/{total} dates, "
             f"trying {len(self._DATE_FORMAT_FALLBACKS)} fallback formats"
         )
+
+        best_fmt = date_cfg.format or 'auto-detected'
 
         for fmt in self._DATE_FORMAT_FALLBACKS:
             if fmt == date_cfg.format:
@@ -304,24 +360,34 @@ class StatementProcessor(ABC):
             logger.debug(f"Tried '{fmt}': {attempt_valid}/{total} valid")
 
             if attempt_valid == total:
-                # Perfect match — return immediately
                 return attempt, fmt
 
             if attempt_valid > valid_count:
-                # Better than what we had; keep looking for a perfect match
                 result = attempt
                 valid_count = attempt_valid
+                best_fmt = fmt
 
         if valid_count == 0:
-            raise ValueError(
-                f"Could not parse any dates in column '{series.name}'. "
-                f"Sample values: {series.dropna().head(3).tolist()}. "
-                f"Tried formats: {[date_cfg.format] + self._DATE_FORMAT_FALLBACKS}"
+            sample = series.dropna().head(3).tolist()
+            tried = [date_cfg.format] + self._DATE_FORMAT_FALLBACKS
+            raise AppError(
+                code=ErrorCode.INVALID_FORMAT,
+                message=(
+                    f"Could not parse any dates in column "
+                    f"'{date_cfg.column}'. "
+                    f"Sample values: {sample}. "
+                    f"The file may use an unsupported date format."
+                ),
+                status_code=422,
+                entity='Statement',
+                field=date_cfg.column,
+                details={
+                    'column': date_cfg.column,
+                    'sample_values': sample,
+                    'formats_tried': [f for f in tried if f],
+                },
             )
 
-        # Return the best we found even if not perfect — the caller will
-        # log and drop the remaining NaTs
-        best_fmt = self._DATE_FORMAT_FALLBACKS[0]  # whatever worked best
         return result, best_fmt
 
     def _parse_amounts(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -422,9 +488,9 @@ class StatementProcessor(ABC):
             **self.config.defaults
         }
         
-        for field, default in defaults.items():
-            if field not in df.columns:
-                df[field] = default
+        for col, default in defaults.items():
+            if col not in df.columns:
+                df[col] = default
                 
         return df
 

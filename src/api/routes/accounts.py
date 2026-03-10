@@ -1,11 +1,12 @@
 from flask import Blueprint, request
 
 from src.database.repositories.accounts import AccountRepository
-from src.api.utils.response_helpers import success_response, error_response
-from src.api.utils.route_helpers import handle_exceptions, require_json, handle_database_errors
+from src.api.utils.response_helpers import success_response
+from src.api.utils.route_helpers import handle_errors, require_json
+from src.api.utils.errors import required, invalid_value, not_found
 from src.api.utils.validators import RequestValidator, require_at_least_one
 from src.utils.logging import ContextLogger, log_route
-from src.statements.configs import STATEMENT_CONFIGS  # <-- new import
+from src.statements.configs import STATEMENT_CONFIGS
 
 bp = Blueprint('accounts', __name__)
 logger = ContextLogger(__name__)
@@ -42,7 +43,6 @@ def validate_create_account(data: dict) -> tuple[bool, dict, str]:
         logger.warning(f"Validation failed: {validator.first_error_message()}")
         return False, {}, validator.first_error_message()
 
-    # Check statement_format against registry if provided
     validated = validator.validated
     if 'statement_format' in validated:
         error = validate_statement_format_value(validated['statement_format'])
@@ -79,7 +79,6 @@ def validate_update_account(data: dict) -> tuple[bool, dict, str]:
         logger.warning(f"Validation failed: {validator.first_error_message()}")
         return False, {}, validator.first_error_message()
 
-    # Check statement_format against registry if provided
     validated = validator.validated
     if 'statement_format' in validated:
         error = validate_statement_format_value(validated['statement_format'])
@@ -93,7 +92,7 @@ def validate_update_account(data: dict) -> tuple[bool, dict, str]:
 # ==================== Routes ====================
 
 @bp.route('', methods=['GET'])
-@handle_exceptions(log_prefix="get_accounts")
+@handle_errors(entity='Account')
 @log_route(logger)
 def get_accounts():
     """Get all accounts with optional filtering by type or statement format."""
@@ -115,7 +114,7 @@ def get_accounts():
 
 
 @bp.route('/<int:account_id>', methods=['GET'])
-@handle_exceptions(log_prefix="get_account")
+@handle_errors(entity='Account')
 @log_route(logger)
 def get_account(account_id: int):
     """Get a single account by ID."""
@@ -123,14 +122,13 @@ def get_account(account_id: int):
     account = account_repo.get_account_by_id(account_id)
 
     if account is None:
-        logger.warning(f"Account {account_id} not found")
-        return error_response(f'Account {account_id} not found', status_code=404)
+        raise not_found('Account', account_id)
 
     return success_response(data=account)
 
 
 @bp.route('', methods=['POST'])
-@handle_database_errors()
+@handle_errors(entity='Account')
 @require_json
 @log_route(logger)
 def create_account():
@@ -138,12 +136,11 @@ def create_account():
     data = request.get_json()
 
     if not data:
-        logger.warning("Empty request body")
-        return error_response('Request body is required', status_code=400)
+        raise required('Request body')
 
     is_valid, validated_data, error_msg = validate_create_account(data)
     if not is_valid:
-        return error_response(error_msg, status_code=400)
+        raise invalid_value(error_msg)
 
     account_repo = AccountRepository()
     account = account_repo.add_account(**validated_data)
@@ -157,7 +154,7 @@ def create_account():
 
 
 @bp.route('/<int:account_id>', methods=['PUT'])
-@handle_database_errors()
+@handle_errors(entity='Account')
 @require_json
 @log_route(logger)
 def update_account(account_id: int):
@@ -165,12 +162,11 @@ def update_account(account_id: int):
     data = request.get_json()
 
     if not data:
-        logger.warning("Empty request body")
-        return error_response('Request body is required', status_code=400)
+        raise required('Request body')
 
     is_valid, validated_data, error_msg = validate_update_account(data)
     if not is_valid:
-        return error_response(error_msg, status_code=400)
+        raise invalid_value(error_msg)
 
     account_repo = AccountRepository()
     updated_account = account_repo.update_account(
@@ -179,8 +175,7 @@ def update_account(account_id: int):
     )
 
     if updated_account is None:
-        logger.warning(f"Account {account_id} not found")
-        return error_response(f'Account {account_id} not found', status_code=404)
+        raise not_found('Account', account_id)
 
     logger.info(f"Updated account {account_id} fields: {list(validated_data.keys())}")
     return success_response(
@@ -190,7 +185,7 @@ def update_account(account_id: int):
 
 
 @bp.route('/<int:account_id>', methods=['DELETE'])
-@handle_database_errors()
+@handle_errors(entity='Account')
 @log_route(logger)
 def delete_account(account_id: int):
     """Delete an account."""
@@ -198,8 +193,7 @@ def delete_account(account_id: int):
     deleted = account_repo.delete_account(account_id)
 
     if not deleted:
-        logger.warning(f"Account {account_id} not found")
-        return error_response(f'Account {account_id} not found', status_code=404)
+        raise not_found('Account', account_id)
 
     return success_response(
         data={'deleted_id': account_id},
@@ -208,7 +202,7 @@ def delete_account(account_id: int):
 
 
 @bp.route('/types', methods=['GET'])
-@handle_exceptions(log_prefix="get_account_types")
+@handle_errors(entity='Account')
 @log_route(logger)
 def get_account_types():
     """Get all distinct account types."""
@@ -220,7 +214,7 @@ def get_account_types():
 
 
 @bp.route('/statement-formats', methods=['GET'])
-@handle_exceptions(log_prefix="get_statement_formats")
+@handle_errors(entity='Statement format')
 @log_route(logger)
 def get_statement_formats():
     """Get all available statement format configurations."""
@@ -235,7 +229,7 @@ def get_statement_formats():
 
 
 @bp.route('/unconfigured', methods=['GET'])
-@handle_exceptions(log_prefix="get_unconfigured_accounts")
+@handle_errors(entity='Account')
 @log_route(logger)
 def get_unconfigured_accounts():
     """Get accounts that don't have a statement format configured."""
@@ -247,7 +241,7 @@ def get_unconfigured_accounts():
 
 
 @bp.route('/<int:account_id>/transaction-count', methods=['GET'])
-@handle_exceptions(log_prefix="get_transaction_count")
+@handle_errors(entity='Account')
 @log_route(logger)
 def get_transaction_count(account_id: int):
     """Get the number of transactions for an account."""
@@ -255,8 +249,7 @@ def get_transaction_count(account_id: int):
 
     account = account_repo.get_account_by_id(account_id)
     if account is None:
-        logger.warning(f"Account {account_id} not found")
-        return error_response(f'Account {account_id} not found', status_code=404)
+        raise not_found('Account', account_id)
 
     count = account_repo.get_account_transaction_count(account_id)
 

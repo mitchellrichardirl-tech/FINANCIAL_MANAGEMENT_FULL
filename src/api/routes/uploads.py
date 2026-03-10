@@ -2,8 +2,9 @@ from flask import Blueprint, request
 from datetime import datetime
 
 from src.database.repositories.uploads import UploadRepository
-from src.api.utils.response_helpers import success_response, error_response
-from src.api.utils.route_helpers import handle_exceptions, require_json, handle_database_errors
+from src.api.utils.response_helpers import success_response
+from src.api.utils.route_helpers import handle_errors, require_json
+from src.api.utils.errors import required, invalid_value, not_found
 from src.api.utils.validators import RequestValidator, require_at_least_one
 from src.utils.logging import ContextLogger, log_route
 
@@ -11,10 +12,15 @@ bp = Blueprint('uploads', __name__)
 logger = ContextLogger(__name__)
 
 
-# ==================== Helper Functions ====================
+# =============================================================================
+# Validation Helpers
+# =============================================================================
 
-def validate_create_upload(data: dict) -> tuple[bool, dict, str]:
-    """Validate upload creation data."""
+def validate_create_upload(data: dict) -> dict:
+    """
+    Validate upload creation data.
+    Raises AppError on invalid input.
+    """
     logger.debug(f"Validating creation data with keys: {list(data.keys())}")
 
     validator = RequestValidator(data)
@@ -34,33 +40,31 @@ def validate_create_upload(data: dict) -> tuple[bool, dict, str]:
 
     if not validator.is_valid():
         logger.warning(f"Validation failed: {validator.first_error_message()}")
-        return False, {}, validator.first_error_message()
+        raise invalid_value(validator.first_error_message())
 
-    # Apply defaults for optional integer fields not provided
     validated = validator.validated
     validated.setdefault('row_count', 0)
     validated.setdefault('column_count', 0)
 
-    return True, validated, None
+    return validated
 
 
-def validate_update_upload(data: dict) -> tuple[bool, dict, str]:
-    """Validate upload update data."""
+def validate_update_upload(data: dict) -> dict:
+    """
+    Validate upload update data.
+    Raises AppError on invalid input.
+    """
     logger.debug(f"Validating update data with keys: {list(data.keys())}")
 
     updatable_fields = [
         'original_filename', 'filename', 'file_type',
-        'row_count', 'column_count', 'columns'
+        'row_count', 'column_count', 'columns',
     ]
 
-    error = require_at_least_one(
-        data,
-        updatable_fields,
-        'At least one updatable field is required'
-    )
+    error = require_at_least_one(data, updatable_fields, 'At least one updatable field is required')
     if error:
         logger.warning(f"Validation failed: {error}")
-        return False, {}, error
+        raise invalid_value(error)
 
     validator = RequestValidator(data)
 
@@ -79,32 +83,33 @@ def validate_update_upload(data: dict) -> tuple[bool, dict, str]:
 
     if not validator.is_valid():
         logger.warning(f"Validation failed: {validator.first_error_message()}")
-        return False, {}, validator.first_error_message()
+        raise invalid_value(validator.first_error_message())
 
-    return True, validator.validated, None
+    return validator.validated
 
 
-def parse_date_param(param_name: str) -> tuple[datetime | None, str | None]:
-    """Parse an ISO 8601 date from query parameters.
-
-    Returns:
-        Tuple of (parsed_datetime, error_message).
-        On success error_message is None; on failure datetime is None.
+def parse_date_param(param_name: str) -> datetime | None:
+    """
+    Parse an ISO 8601 date from query parameters.
+    Raises AppError if the format is invalid.
+    Returns None if the parameter is not present.
     """
     raw = request.args.get(param_name)
     if not raw:
-        return None, None
+        return None
 
     try:
-        return datetime.fromisoformat(raw), None
+        return datetime.fromisoformat(raw)
     except ValueError:
-        return None, f"Invalid {param_name} format. Use ISO 8601."
+        raise invalid_value(f"Invalid {param_name} format. Use ISO 8601", field=param_name)
 
 
-# ==================== Upload CRUD Routes ====================
+# =============================================================================
+# Upload CRUD Routes
+# =============================================================================
 
 @bp.route('', methods=['GET'])
-@handle_exceptions(log_prefix="list_uploads")
+@handle_errors(entity='Upload')
 @log_route(logger)
 def list_uploads():
     """List all uploads with optional filtering and pagination."""
@@ -116,13 +121,8 @@ def list_uploads():
     original_filename = request.args.get('original_filename')
     filename = request.args.get('filename')
 
-    start_date, err = parse_date_param('start_date')
-    if err:
-        return error_response(err, status_code=400)
-
-    end_date, err = parse_date_param('end_date')
-    if err:
-        return error_response(err, status_code=400)
+    start_date = parse_date_param('start_date')
+    end_date = parse_date_param('end_date')
 
     uploads = repo.get_all_uploads(
         limit=limit,
@@ -131,13 +131,13 @@ def list_uploads():
         original_filename=original_filename,
         filename=filename,
         start_date=start_date,
-        end_date=end_date
+        end_date=end_date,
     )
 
     total = repo.count_uploads(
         file_type=file_type,
         start_date=start_date,
-        end_date=end_date
+        end_date=end_date,
     )
 
     logger.info(f"Retrieved {len(uploads)} uploads (total: {total})")
@@ -145,7 +145,7 @@ def list_uploads():
 
 
 @bp.route('/stats', methods=['GET'])
-@handle_exceptions(log_prefix="get_upload_stats")
+@handle_errors(entity='Upload')
 @log_route(logger)
 def get_stats():
     """Get aggregate upload statistics."""
@@ -157,7 +157,7 @@ def get_stats():
 
 
 @bp.route('/<int:upload_id>', methods=['GET'])
-@handle_exceptions(log_prefix="get_upload")
+@handle_errors(entity='Upload')
 @log_route(logger)
 def get_upload(upload_id: int):
     """Get a single upload by ID, optionally including its data rows."""
@@ -171,20 +171,19 @@ def get_upload(upload_id: int):
         upload = repo.get_upload_with_data(
             upload_id,
             data_limit=data_limit,
-            data_offset=data_offset
+            data_offset=data_offset,
         )
     else:
         upload = repo.get_upload_by_id(upload_id)
 
     if upload is None:
-        logger.warning(f"Upload {upload_id} not found")
-        return error_response(f'Upload {upload_id} not found', status_code=404)
+        raise not_found('Upload', upload_id)
 
     return success_response(data=upload)
 
 
 @bp.route('', methods=['POST'])
-@handle_database_errors()
+@handle_errors(entity='Upload')
 @require_json
 @log_route(logger)
 def create_upload():
@@ -192,12 +191,9 @@ def create_upload():
     data = request.get_json()
 
     if not data:
-        logger.warning("Empty request body")
-        return error_response('Request body is required', status_code=400)
+        raise required('Request body')
 
-    is_valid, validated_data, error_msg = validate_create_upload(data)
-    if not is_valid:
-        return error_response(error_msg, status_code=400)
+    validated_data = validate_create_upload(data)
 
     repo = UploadRepository()
     upload_id = repo.create_upload(**validated_data)
@@ -207,12 +203,12 @@ def create_upload():
     return success_response(
         data=upload,
         message='Upload created successfully',
-        status_code=201
+        status_code=201,
     )
 
 
 @bp.route('/<int:upload_id>', methods=['PUT'])
-@handle_database_errors()
+@handle_errors(entity='Upload')
 @require_json
 @log_route(logger)
 def update_upload(upload_id: int):
@@ -220,29 +216,25 @@ def update_upload(upload_id: int):
     data = request.get_json()
 
     if not data:
-        logger.warning("Empty request body")
-        return error_response('Request body is required', status_code=400)
+        raise required('Request body')
 
-    is_valid, validated_data, error_msg = validate_update_upload(data)
-    if not is_valid:
-        return error_response(error_msg, status_code=400)
+    validated_data = validate_update_upload(data)
 
     repo = UploadRepository()
     updated = repo.update_upload(upload_id=upload_id, **validated_data)
 
     if updated is None:
-        logger.warning(f"Upload {upload_id} not found")
-        return error_response(f'Upload {upload_id} not found', status_code=404)
+        raise not_found('Upload', upload_id)
 
     logger.info(f"Updated upload {upload_id} fields: {list(validated_data.keys())}")
     return success_response(
         data=updated,
-        message='Upload updated successfully'
+        message='Upload updated successfully',
     )
 
 
 @bp.route('/<int:upload_id>', methods=['DELETE'])
-@handle_database_errors()
+@handle_errors(entity='Upload')
 @log_route(logger)
 def delete_upload(upload_id: int):
     """Delete an upload and all associated data."""
@@ -250,19 +242,20 @@ def delete_upload(upload_id: int):
     deleted = repo.delete_upload(upload_id)
 
     if not deleted:
-        logger.warning(f"Upload {upload_id} not found")
-        return error_response(f'Upload {upload_id} not found', status_code=404)
+        raise not_found('Upload', upload_id)
 
     return success_response(
         data={'deleted_id': upload_id},
-        message=f'Upload {upload_id} deleted successfully'
+        message=f'Upload {upload_id} deleted successfully',
     )
 
 
-# ==================== Upload Data Row Routes ====================
+# =============================================================================
+# Upload Data Row Routes
+# =============================================================================
 
 @bp.route('/<int:upload_id>/data', methods=['GET'])
-@handle_exceptions(log_prefix="get_upload_data")
+@handle_errors(entity='Upload')
 @log_route(logger)
 def get_upload_data(upload_id: int):
     """Get data rows for a specific upload."""
@@ -270,8 +263,7 @@ def get_upload_data(upload_id: int):
 
     upload = repo.get_upload_by_id(upload_id)
     if upload is None:
-        logger.warning(f"Upload {upload_id} not found")
-        return error_response(f'Upload {upload_id} not found', status_code=404)
+        raise not_found('Upload', upload_id)
 
     limit = request.args.get('limit', type=int)
     offset = request.args.get('offset', 0, type=int)
@@ -283,7 +275,7 @@ def get_upload_data(upload_id: int):
         limit=limit,
         offset=offset,
         start_row=start_row,
-        end_row=end_row
+        end_row=end_row,
     )
 
     total = repo.count_upload_data_rows(upload_id)
@@ -292,12 +284,12 @@ def get_upload_data(upload_id: int):
     return success_response(data={
         'rows': rows,
         'total': total,
-        'upload_id': upload_id
+        'upload_id': upload_id,
     })
 
 
 @bp.route('/<int:upload_id>/data/<int:row_index>', methods=['GET'])
-@handle_exceptions(log_prefix="get_upload_data_row")
+@handle_errors(entity='Upload data row')
 @log_route(logger)
 def get_upload_data_row(upload_id: int, row_index: int):
     """Get a specific data row from an upload."""
@@ -305,17 +297,13 @@ def get_upload_data_row(upload_id: int, row_index: int):
 
     row = repo.get_upload_data_row(upload_id, row_index)
     if row is None:
-        logger.warning(f"Row {row_index} not found in upload {upload_id}")
-        return error_response(
-            f'Row {row_index} not found in upload {upload_id}',
-            status_code=404
-        )
+        raise not_found(f'Row {row_index} in upload {upload_id}')
 
     return success_response(data=row)
 
 
 @bp.route('/<int:upload_id>/data/<int:row_index>', methods=['PUT'])
-@handle_database_errors()
+@handle_errors(entity='Upload data row')
 @require_json
 @log_route(logger)
 def update_upload_data_row(upload_id: int, row_index: int):
@@ -323,32 +311,26 @@ def update_upload_data_row(upload_id: int, row_index: int):
     data = request.get_json()
 
     if not data:
-        logger.warning("Empty request body")
-        return error_response('Request body is required', status_code=400)
+        raise required('Request body')
 
     if 'row_data' not in data:
-        logger.warning("Missing row_data in request body")
-        return error_response('row_data is required in request body', status_code=400)
+        raise required('row_data')
 
     repo = UploadRepository()
     updated = repo.update_upload_data_row(upload_id, row_index, data['row_data'])
 
     if updated is None:
-        logger.warning(f"Row {row_index} not found in upload {upload_id}")
-        return error_response(
-            f'Row {row_index} not found in upload {upload_id}',
-            status_code=404
-        )
+        raise not_found(f'Row {row_index} in upload {upload_id}')
 
     logger.info(f"Updated row {row_index} in upload {upload_id}")
     return success_response(
         data=updated,
-        message=f'Row {row_index} updated successfully'
+        message=f'Row {row_index} updated successfully',
     )
 
 
 @bp.route('/<int:upload_id>/data', methods=['DELETE'])
-@handle_database_errors()
+@handle_errors(entity='Upload')
 @log_route(logger)
 def delete_upload_data(upload_id: int):
     """Delete all data rows for an upload (keeps the upload record)."""
@@ -356,13 +338,12 @@ def delete_upload_data(upload_id: int):
 
     upload = repo.get_upload_by_id(upload_id)
     if upload is None:
-        logger.warning(f"Upload {upload_id} not found")
-        return error_response(f'Upload {upload_id} not found', status_code=404)
+        raise not_found('Upload', upload_id)
 
     deleted_count = repo.delete_upload_data(upload_id)
 
     logger.info(f"Deleted {deleted_count} rows from upload {upload_id}")
     return success_response(
         data={'upload_id': upload_id, 'deleted_count': deleted_count},
-        message=f'Deleted {deleted_count} rows from upload {upload_id}'
+        message=f'Deleted {deleted_count} rows from upload {upload_id}',
     )

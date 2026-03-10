@@ -1,13 +1,11 @@
-from flask import Blueprint, Response, request, jsonify, current_app as app, send_file
-import json
+from flask import Blueprint, request, jsonify, send_file
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional
 import os
 import tempfile
 from pathlib import Path
 
 from src.database.repositories.receipts import ReceiptRepository
-from src.database.connection import DatabaseError
 
 from src.models.receipt import Receipt
 
@@ -15,22 +13,24 @@ from src.receipts.receipt_extractor import ReceiptExtractor
 from src.receipts.receipt_loader import ReceiptLoader
 
 from src.api.utils.file_handling import FileHandler, TempFileManager
-from src.api.utils.response_helpers import success_response, error_response
-from src.api.utils.sse import SSEEventBuilder, ProgressInfo, create_sse_response, create_error_sse_response
-from src.api.utils.route_helpers import handle_exceptions, require_json, handle_database_errors
+from src.api.utils.response_helpers import success_response
+from src.api.utils.sse import create_sse_response, create_error_sse_response
+from src.api.utils.route_helpers import handle_errors, require_json
+from src.api.utils.errors import (
+    AppError, ErrorCode, required, invalid_value, not_found,
+)
 from src.api.utils.validators import (
     RequestValidator, parse_date, parse_float, parse_int,
     validate_pagination, validate_date_range_filters,
-    add_string_filters, require_at_least_one
+    add_string_filters, require_at_least_one,
 )
 from src.api.formatters.receipt_formatter import ReceiptFormatter
-from src.api.services.receipt_processor import ReceiptStreamProcessor, receipt_worker, ProcessingResult
+from src.api.services.receipt_processor import ReceiptStreamProcessor
 from src.utils.logging import ContextLogger, log_route
 
 bp = Blueprint('receipts', __name__)
 logger = ContextLogger(__name__)
 
-# Initialize services
 receipt_repository = ReceiptRepository()
 receipt_loader = ReceiptLoader()
 receipt_extractor = ReceiptExtractor()
@@ -41,11 +41,7 @@ receipt_extractor = ReceiptExtractor()
 # =============================================================================
 
 def process_receipt_images(file_path: str) -> Optional[Receipt]:
-    """
-    Load and process receipt image(s), returning the best result.
-
-    For multi-page documents, returns the page with highest confidence.
-    """
+    """Load and process receipt image(s), returning the best result."""
     logger.debug(f"Loading receipt images from: {file_path}")
     receipts = receipt_loader.process_files(file_path, yield_pages=True)
 
@@ -62,17 +58,16 @@ def process_receipt_images(file_path: str) -> Optional[Receipt]:
             f"from {len(processed_receipts)} pages"
         )
         return best
-    else:
-        processed = receipt_extractor.process_receipt(receipts[0])
-        logger.debug(f"Single page processed with confidence: {processed.confidence}")
-        return processed
+
+    processed = receipt_extractor.process_receipt(receipts[0])
+    logger.debug(f"Single page processed with confidence: {processed.confidence}")
+    return processed
 
 
-def apply_form_overrides(receipt: Receipt, form) -> Tuple[Receipt, Optional[str]]:
+def apply_form_overrides(receipt: Receipt, form) -> Receipt:
     """
     Apply form data overrides to a receipt.
-
-    Returns (receipt, error_message) - error_message is None if successful.
+    Raises AppError on invalid input.
     """
     overridden_fields = []
 
@@ -86,7 +81,7 @@ def apply_form_overrides(receipt: Receipt, form) -> Tuple[Receipt, Optional[str]
             overridden_fields.append('amount')
         except ValueError:
             logger.warning(f"Invalid amount format: {form['amount']}")
-            return receipt, 'Invalid amount format'
+            raise invalid_value('Invalid amount format', field='amount')
 
     if form.get('date'):
         try:
@@ -94,71 +89,62 @@ def apply_form_overrides(receipt: Receipt, form) -> Tuple[Receipt, Optional[str]
             overridden_fields.append('date')
         except ValueError:
             logger.warning(f"Invalid date format: {form['date']}")
-            return receipt, 'Invalid date format. Use YYYY-MM-DD'
+            raise invalid_value('Invalid date format. Use YYYY-MM-DD', field='date')
 
     if overridden_fields:
         logger.debug(f"Applied form overrides: {overridden_fields}")
 
-    return receipt, None
+    return receipt
 
 
-def validate_receipt_filters(args) -> Tuple[Optional[Dict], Optional[str]]:
+def validate_receipt_filters(args) -> Dict:
     """
     Parse and validate receipt filter parameters from request args.
-
-    Returns (filters_dict, error_message) - error_message is None if valid.
+    Raises AppError on invalid input.
     """
     logger.debug(f"Validating receipt filters: {list(args.keys())}")
 
-    # Validate pagination
     is_valid, pagination, error = validate_pagination(args)
     if not is_valid:
         logger.warning(f"Pagination validation failed: {error}")
-        return None, error
+        raise invalid_value(error)
 
-    # Validate date range
     is_valid, date_filters, error = validate_date_range_filters(args)
     if not is_valid:
         logger.warning(f"Date range validation failed: {error}")
-        return None, error
+        raise invalid_value(error)
 
     validator = RequestValidator(args)
     validator.validated.update(date_filters)
 
-    # Vendor filter
     add_string_filters(validator.validated, args, ['vendor'])
 
-    # Confidence filter
     validator.validate_field('min_confidence',
         validator.field('min_confidence').optional().transform(parse_int).in_range(0, 3))
 
-    # Date range validation
     if validator.validated.get('start_date') and validator.validated.get('end_date'):
         if validator.validated['start_date'] > validator.validated['end_date']:
             logger.warning("start_date is after end_date")
-            return None, 'start_date cannot be after end_date'
+            raise invalid_value('start_date cannot be after end_date', field='start_date')
 
     if not validator.is_valid():
         logger.warning(f"Filter validation failed: {validator.first_error_message()}")
-        return None, validator.first_error_message()
+        raise invalid_value(validator.first_error_message())
 
-    return {**pagination, **validator.validated}, None
+    return {**pagination, **validator.validated}
 
 
-def validate_receipt_update(data: Dict) -> Tuple[Optional[Dict], Optional[str]]:
+def validate_receipt_update(data: Dict) -> Dict:
     """
     Validate and extract receipt update fields from request data.
-
-    Returns (update_kwargs, error_message) - error_message is None if valid.
+    Raises AppError on invalid input.
     """
     logger.debug(f"Validating update data with keys: {list(data.keys())}")
 
     validator = RequestValidator(data)
 
-    # String fields
     add_string_filters(validator.validated, data, ['vendor', 'raw_text'])
 
-    # Amount
     if 'amount' in data:
         if data['amount'] is not None:
             validator.validate_field('amount',
@@ -166,7 +152,6 @@ def validate_receipt_update(data: Dict) -> Tuple[Optional[Dict], Optional[str]]:
         else:
             validator.validated['amount'] = None
 
-    # Date
     if 'date' in data:
         if data['date'] is not None:
             validator.validate_field('date',
@@ -174,7 +159,6 @@ def validate_receipt_update(data: Dict) -> Tuple[Optional[Dict], Optional[str]]:
         else:
             validator.validated['date'] = None
 
-    # Confidence
     if 'confidence' in data:
         if data['confidence'] is not None:
             validator.validate_field('confidence',
@@ -184,30 +168,30 @@ def validate_receipt_update(data: Dict) -> Tuple[Optional[Dict], Optional[str]]:
 
     if not validator.is_valid():
         logger.warning(f"Validation failed: {validator.first_error_message()}")
-        return None, validator.first_error_message()
+        raise invalid_value(validator.first_error_message())
 
-    return validator.validated, None
+    return validator.validated
 
 
-def validate_confirm_receipt(data: Dict) -> Tuple[Optional[Dict], Optional[str]]:
-    """Validate receipt confirmation data."""
+def validate_confirm_receipt(data: Dict) -> Dict:
+    """
+    Validate receipt confirmation data.
+    Raises AppError on invalid input.
+    """
     logger.debug(f"Validating confirmation data with keys: {list(data.keys())}")
 
-    # Check required fields
     error = require_at_least_one(data, ['original_filename', 'vendor'])
     if error:
         logger.warning(f"Validation failed: {error}")
-        return None, error
+        raise invalid_value(error)
 
     validator = RequestValidator(data)
 
-    # Required string fields
     validator.validate_field('original_filename',
         validator.field('original_filename').required().strip_string())
     validator.validate_field('vendor',
         validator.field('vendor').required().strip_string())
 
-    # Optional fields
     if 'amount' in data and data['amount'] is not None:
         validator.validate_field('amount',
             validator.field('amount').transform(parse_float, 'Invalid amount format'))
@@ -216,28 +200,28 @@ def validate_confirm_receipt(data: Dict) -> Tuple[Optional[Dict], Optional[str]]
         validator.validate_field('date',
             validator.field('date').transform(parse_date, 'Invalid date format. Use YYYY-MM-DD'))
 
-    # Confidence with default
-    confidence = data.get('confidence', 0)
     validator.validate_field('confidence',
         validator.field('confidence').transform(parse_int).in_range(0, 3))
     if 'confidence' not in validator.validated:
         validator.validated['confidence'] = 0
 
-    # Other optional fields
-    for field in ['id', 'file_path', 'stored_filename', 'raw_text']:
-        if field in data:
-            validator.validated[field] = data[field]
+    for field_name in ['id', 'file_path', 'stored_filename', 'raw_text']:
+        if field_name in data:
+            validator.validated[field_name] = data[field_name]
 
     if not validator.is_valid():
         logger.warning(f"Validation failed: {validator.first_error_message()}")
-        return None, validator.first_error_message()
+        raise invalid_value(validator.first_error_message())
 
-    return validator.validated, None
+    return validator.validated
 
 
 # =============================================================================
 # Streaming Upload Endpoint
 # =============================================================================
+# NOTE: This route returns SSE responses, not JSON. It keeps its own
+# try/except rather than using @handle_errors, because the decorator would
+# try to return a JSON error_response on failure, which breaks SSE clients.
 
 @bp.route('/receipts/upload-stream', methods=['POST'])
 @log_route(logger)
@@ -249,21 +233,18 @@ def upload_receipts_stream():
         file_handler = FileHandler.from_app_config(prefix="receipt")
         files = request.files.getlist('files')
 
-        # Validate we have files
         if not files or (len(files) == 1 and files[0].filename == ''):
             logger.warning("No files provided in stream upload")
             return create_error_sse_response("No files provided")
 
         logger.info(f"Received {len(files)} files for stream processing")
 
-        # Save files to temp locations - cleanup happens in generator
         for file in files:
             validation = file_handler.validate_file(file)
             if not validation.is_valid:
                 logger.warning(f"Skipping invalid file: {validation.error}")
                 continue
 
-            # Create temp file
             fd, temp_path = tempfile.mkstemp(suffix=validation.extension)
             try:
                 with os.fdopen(fd, 'wb') as f:
@@ -289,7 +270,6 @@ def upload_receipts_stream():
         )
 
         def cleanup_and_stream():
-            """Generator wrapper that ensures cleanup after streaming completes."""
             try:
                 yield from processor.process_files(temp_files, form_data)
             finally:
@@ -308,7 +288,6 @@ def upload_receipts_stream():
 
     except Exception as e:
         logger.error(f"Stream upload failed: {e}", exc_info=True)
-        # Cleanup on error before streaming starts
         for _, temp_path in temp_files:
             if os.path.exists(temp_path):
                 try:
@@ -323,7 +302,7 @@ def upload_receipts_stream():
 # =============================================================================
 
 @bp.route('/receipts/upload', methods=['POST'])
-@handle_exceptions(log_prefix="upload_receipt")
+@handle_errors(entity='Receipt')
 @log_route(logger)
 def upload_receipt():
     """
@@ -334,61 +313,58 @@ def upload_receipt():
         - vendor: Override extracted vendor
         - amount: Override extracted amount
         - date: Override extracted date (YYYY-MM-DD)
-
-    Returns: receipt_id and extracted data
     """
     file_handler = FileHandler.from_app_config(prefix="receipt")
-    stored_path = None
 
-    # Validate file presence
     if 'file' not in request.files:
         logger.warning("No file field in request")
-        return error_response('No file provided', status_code=400)
+        raise required('file')
 
     file = request.files['file']
     validation = file_handler.validate_file(file)
 
     if not validation.is_valid:
         logger.warning(f"File validation failed: {validation.error}")
-        return error_response(validation.error, status_code=400)
+        raise invalid_value(validation.error, field='file')
 
     with TempFileManager() as temp_manager:
-        # Save to temp location for processing
         temp_path = temp_manager.save_file_to_temp(file, suffix=validation.extension)
 
         logger.info(f"Processing uploaded file: {validation.secured_filename}")
 
-        # Load and process the image
         receipt = process_receipt_images(str(temp_path))
 
         if receipt is None:
             logger.warning(f"Failed to process image: {validation.secured_filename}")
-            return error_response('Unable to process the uploaded image', status_code=422)
+            raise AppError(
+                code=ErrorCode.INVALID_VALUE,
+                message='Unable to process the uploaded image',
+                status_code=422,
+                field='file',
+            )
 
-        # Apply any manual overrides from form data
-        receipt, override_error = apply_form_overrides(receipt, request.form)
-        if override_error:
-            return error_response(override_error, status_code=400)
+        # Raises AppError on bad overrides
+        receipt = apply_form_overrides(receipt, request.form)
 
-        # Move file to permanent storage
         stored_filename = file_handler.generate_stored_filename(validation.secured_filename)
         stored_path = file_handler.move_to_permanent(temp_path, stored_filename)
         logger.debug(f"Moved to permanent storage: {stored_path}")
 
-        # Update receipt with file info
         receipt.original_filename = validation.secured_filename
         receipt.stored_filename = stored_filename
         receipt.file_path = stored_path
 
-        # Save to database
         receipt_id = receipt_repository.save(receipt)
 
         if receipt_id is None:
             file_handler.delete_file(stored_path)
             logger.error(f"Database save failed, cleaned up file: {stored_path}")
-            return error_response('Failed to save receipt', status_code=500)
+            raise AppError(
+                code=ErrorCode.DATABASE_ERROR,
+                message='Failed to save receipt',
+                status_code=500,
+            )
 
-        # Fetch the saved receipt for response
         saved_receipt = receipt_repository.get_by_id(receipt_id)
 
         logger.info(
@@ -410,28 +386,12 @@ def upload_receipt():
 # =============================================================================
 
 @bp.route('/receipts', methods=['GET'])
-@handle_exceptions(log_prefix="get_receipts")
+@handle_errors(entity='Receipt')
 @log_route(logger)
 def get_receipts():
-    """
-    Get list of receipts with optional filters and pagination.
+    """Get list of receipts with optional filters and pagination."""
+    filters = validate_receipt_filters(request.args)
 
-    Query params:
-        - vendor: Filter by vendor name (partial match)
-        - min_confidence: Minimum confidence score (0-3)
-        - limit: Max results (default: 50, max: 500)
-        - offset: Pagination offset (default: 0)
-        - start_date: Filter from date (YYYY-MM-DD)
-        - end_date: Filter until date (YYYY-MM-DD)
-
-    Returns: List of receipts with pagination info
-    """
-    # Validate and parse filters
-    filters, error = validate_receipt_filters(request.args)
-    if error:
-        return error_response(error, status_code=400)
-
-    # Extract pagination from filters
     limit = filters.pop('limit')
     offset = filters.pop('offset')
 
@@ -439,14 +399,7 @@ def get_receipts():
     if active_filters:
         logger.debug(f"Active filters: {active_filters}")
 
-    # Get receipts
-    receipts = receipt_repository.get_all(
-        limit=limit,
-        offset=offset,
-        **filters
-    )
-
-    # Format response
+    receipts = receipt_repository.get_all(limit=limit, offset=offset, **filters)
     formatted_receipts = ReceiptFormatter.summary_list(receipts)
 
     response = {
@@ -473,60 +426,39 @@ def get_receipts():
 
 
 @bp.route('/receipts/<int:receipt_id>', methods=['GET'])
-@handle_exceptions(log_prefix="get_receipt")
+@handle_errors(entity='Receipt')
 @log_route(logger)
 def get_receipt(receipt_id: int):
     """Get a specific receipt by ID."""
     receipt = receipt_repository.get_by_id(receipt_id)
 
     if receipt is None:
-        logger.warning(f"Receipt {receipt_id} not found")
-        return error_response(f'Receipt {receipt_id} not found', status_code=404)
+        raise not_found('Receipt', receipt_id)
 
-    return success_response({
-        'receipt': ReceiptFormatter.detail(receipt)
-    })
+    return success_response({'receipt': ReceiptFormatter.detail(receipt)})
 
 
 @bp.route('/receipts/<int:receipt_id>', methods=['PUT'])
-@handle_exceptions(log_prefix="update_receipt")
+@handle_errors(entity='Receipt')
 @require_json
 @log_route(logger)
 def update_receipt(receipt_id: int):
-    """
-    Update receipt attributes.
-
-    Expected JSON:
-        - vendor: New vendor name
-        - amount: New amount
-        - date: New date (YYYY-MM-DD)
-        - confidence: New confidence score (0-3)
-
-    Returns: Updated receipt
-    """
-    # Check if receipt exists
+    """Update receipt attributes."""
     existing = receipt_repository.get_by_id(receipt_id)
     if existing is None:
-        logger.warning(f"Receipt {receipt_id} not found")
-        return error_response(f'Receipt {receipt_id} not found', status_code=404)
+        raise not_found('Receipt', receipt_id)
 
     data = request.get_json()
-
-    # Validate update fields
-    update_kwargs, error = validate_receipt_update(data)
-    if error:
-        return error_response(error, status_code=400)
+    update_kwargs = validate_receipt_update(data)
 
     if not update_kwargs:
-        logger.warning("No valid fields to update")
-        return error_response('No valid fields to update', status_code=400)
+        raise invalid_value('No valid fields to update')
 
-    # Perform update
     updated_receipt = receipt_repository.update(receipt_id, **update_kwargs)
 
     if updated_receipt is None:
-        logger.warning(f"Receipt {receipt_id} not found during update")
-        return error_response(f'Receipt {receipt_id} not found', status_code=404)
+        # Race: deleted between existence check and update
+        raise not_found('Receipt', receipt_id)
 
     logger.info(f"Updated receipt {receipt_id}: {list(update_kwargs.keys())}")
 
@@ -537,27 +469,26 @@ def update_receipt(receipt_id: int):
 
 
 @bp.route('/receipts/<int:receipt_id>', methods=['DELETE'])
-@handle_exceptions(log_prefix="delete_receipt")
+@handle_errors(entity='Receipt')
 @log_route(logger)
 def delete_receipt(receipt_id: int):
     """Delete a specific receipt and its associated image file."""
     file_handler = FileHandler.from_app_config()
 
-    # Get receipt to find file path
     receipt = receipt_repository.get_by_id(receipt_id)
-
     if receipt is None:
-        logger.warning(f"Receipt {receipt_id} not found")
-        return error_response(f'Receipt {receipt_id} not found', status_code=404)
+        raise not_found('Receipt', receipt_id)
 
-    # Delete from database
     deleted = receipt_repository.delete(receipt_id)
 
     if not deleted:
         logger.error(f"Database deletion failed for receipt {receipt_id}")
-        return error_response(f'Failed to delete receipt {receipt_id}', status_code=500)
+        raise AppError(
+            code=ErrorCode.DATABASE_ERROR,
+            message=f'Failed to delete receipt {receipt_id}',
+            status_code=500,
+        )
 
-    # Delete associated file
     file_path = receipt.get('file_path')
     if file_path:
         if file_handler.delete_file(file_path):
@@ -578,34 +509,36 @@ def delete_receipt(receipt_id: int):
 # =============================================================================
 
 @bp.route('/receipts/<int:receipt_id>/image', methods=['GET'])
-@handle_exceptions(log_prefix="get_receipt_image")
+@handle_errors(entity='Receipt')
 @log_route(logger)
 def get_receipt_image(receipt_id: int):
     """Get the image file for a specific receipt."""
     file_handler = FileHandler.from_app_config()
 
     receipt = receipt_repository.get_by_id(receipt_id)
-
     if receipt is None:
-        logger.warning(f"Receipt {receipt_id} not found")
-        return error_response(f'Receipt {receipt_id} not found', status_code=404)
+        raise not_found('Receipt', receipt_id)
 
     file_path = receipt.get('file_path')
 
     if not file_path:
         logger.warning(f"No image file associated with receipt {receipt_id}")
-        return error_response(
-            f'No image file associated with receipt {receipt_id}',
-            status_code=404
+        raise AppError(
+            code=ErrorCode.NOT_FOUND,
+            message=f'No image file associated with receipt {receipt_id}',
+            status_code=404,
+            entity='Receipt image',
         )
 
     path = Path(file_path)
 
     if not path.exists():
         logger.error(f"Image file missing from disk: {file_path}")
-        return error_response(
-            f'Image file not found for receipt {receipt_id}',
-            status_code=404
+        raise AppError(
+            code=ErrorCode.NOT_FOUND,
+            message=f'Image file not found for receipt {receipt_id}',
+            status_code=404,
+            entity='Receipt image',
         )
 
     return send_file(
@@ -621,67 +554,57 @@ def get_receipt_image(receipt_id: int):
 # =============================================================================
 
 @bp.route('/receipts/<int:receipt_id>/reprocess', methods=['POST'])
-@handle_exceptions(log_prefix="reprocess_receipt")
+@handle_errors(entity='Receipt')
 @log_route(logger)
 def reprocess_receipt(receipt_id: int):
-    """
-    Rerun OCR processing on an existing receipt.
-
-    Optional JSON body:
-        - keep_overrides: If true, preserve manual vendor/amount/date edits (default: false)
-
-    Returns: Updated receipt data
-    """
-    # Get existing receipt
+    """Rerun OCR processing on an existing receipt."""
     receipt = receipt_repository.get_by_id(receipt_id)
-
     if receipt is None:
-        logger.warning(f"Receipt {receipt_id} not found")
-        return error_response(f'Receipt {receipt_id} not found', status_code=404)
+        raise not_found('Receipt', receipt_id)
 
     file_path = receipt.get('file_path')
 
     if not file_path:
         logger.warning(f"No image file associated with receipt {receipt_id}")
-        return error_response(
-            f'No image file associated with receipt {receipt_id}',
-            status_code=400
+        raise invalid_value(
+            f'Receipt {receipt_id} has no associated image file to reprocess'
         )
 
     path = Path(file_path)
 
     if not path.exists():
         logger.error(f"Image file missing from disk: {file_path}")
-        return error_response(
-            f'Image file not found for receipt {receipt_id}',
-            status_code=404
+        raise AppError(
+            code=ErrorCode.NOT_FOUND,
+            message=f'Image file not found on disk for receipt {receipt_id}',
+            status_code=404,
+            entity='Receipt image',
         )
 
-    # Check for options
     data = request.get_json(silent=True) or {}
     keep_overrides = data.get('keep_overrides', False)
 
-    # Store original values if keeping overrides
     original_vendor = receipt.get('vendor') if keep_overrides else None
     original_amount = receipt.get('amount') if keep_overrides else None
     original_date = receipt.get('date') if keep_overrides else None
 
     logger.info(f"Reprocessing receipt {receipt_id} | keep_overrides={keep_overrides}")
 
-    # Reload and reprocess the image
     processed = process_receipt_images(str(path))
 
     if processed is None:
         logger.warning(f"Reprocessing failed for receipt {receipt_id}")
-        return error_response('Unable to reprocess the image', status_code=422)
+        raise AppError(
+            code=ErrorCode.INVALID_VALUE,
+            message='Unable to reprocess the image',
+            status_code=422,
+        )
 
-    # Build update data
     update_kwargs = {
         'confidence': processed.confidence,
         'raw_text': processed.extracted_text,
     }
 
-    # Apply new values or keep overrides
     if keep_overrides:
         preserved = []
         if original_vendor is not None:
@@ -703,7 +626,6 @@ def reprocess_receipt(receipt_id: int):
         update_kwargs['amount'] = processed.amount
         update_kwargs['date'] = processed.date
 
-    # Update in database
     updated_receipt = receipt_repository.update(receipt_id, **update_kwargs)
 
     logger.info(
@@ -725,42 +647,39 @@ def reprocess_receipt(receipt_id: int):
 
 
 @bp.route('/receipts/process', methods=['POST'])
-@handle_exceptions(log_prefix="process_receipt")
+@handle_errors(entity='Receipt')
 @log_route(logger)
 def process_receipt():
-    """
-    Run OCR on receipt image without saving to database.
-
-    Expected: multipart/form-data with 'file' field
-
-    Returns: Extracted data (vendor, amount, date, confidence, etc.)
-    """
+    """Run OCR on receipt image without saving to database."""
     file_handler = FileHandler.from_app_config(prefix="receipt")
 
     if 'file' not in request.files:
         logger.warning("No file field in request")
-        return error_response('No file provided', status_code=400)
+        raise required('file')
 
     file = request.files['file']
     validation = file_handler.validate_file(file)
 
     if not validation.is_valid:
         logger.warning(f"File validation failed: {validation.error}")
-        return error_response(validation.error, status_code=400)
+        raise invalid_value(validation.error, field='file')
 
     with TempFileManager() as temp_manager:
         temp_path = temp_manager.save_file_to_temp(file, suffix=validation.extension)
 
         logger.info(f"Processing image (no save): {validation.secured_filename}")
 
-        # Load and process
         receipts = receipt_loader.process_files(str(temp_path), yield_pages=True)
 
         if not receipts:
             logger.warning(f"Failed to process image: {validation.secured_filename}")
-            return error_response('Unable to process the uploaded image', status_code=422)
+            raise AppError(
+                code=ErrorCode.INVALID_VALUE,
+                message='Unable to process the uploaded image',
+                status_code=422,
+                field='file',
+            )
 
-        # Process each page
         results = []
         for receipt in receipts:
             processed = receipt_extractor.process_receipt(receipt)
@@ -768,7 +687,6 @@ def process_receipt():
 
         logger.debug(f"Processed {len(results)} pages from {validation.secured_filename}")
 
-        # Build response
         if len(results) == 1:
             response = {
                 'success': True,
@@ -802,36 +720,23 @@ def process_receipt():
 # =============================================================================
 
 @bp.route('/receipts/<int:receipt_id>/cancel', methods=['POST'])
-@handle_exceptions(log_prefix="cancel_receipt")
+@handle_errors(entity='Receipt')
 @log_route(logger)
 def cancel_receipt(receipt_id: int):
-    """
-    Cancel receipt upload and delete temporary file.
-
-    This endpoint is used when a user abandons the upload process after
-    the preview/processing step but before confirmation.
-
-    Returns: Success message
-    """
+    """Cancel receipt upload and delete temporary file."""
     file_handler = FileHandler.from_app_config()
 
     receipt = receipt_repository.delete(receipt_id)
 
     if not receipt:
-        logger.warning(f"No receipt found to cancel: {receipt_id}")
-        return error_response(
-            message=f'No receipt found with ID {receipt_id}',
-            status_code=400
-        )
+        raise not_found('Receipt', receipt_id)
 
     receipt_deleted = True
     file_deleted = False
     stored_filename = receipt.get('stored_filename')
     file_deletion_message = None
 
-    # Clean up stored file (if upload was partially completed)
     if stored_filename:
-        # Security: prevent directory traversal
         if not file_handler.is_safe_filename(stored_filename):
             file_deletion_message = (
                 f'For receipt {receipt_id} invalid stored_filename {stored_filename}. '
@@ -869,55 +774,36 @@ def cancel_receipt(receipt_id: int):
 
 
 @bp.route('/receipts/confirm', methods=['POST'])
-@handle_exceptions(log_prefix="confirm_receipt")
+@handle_errors(entity='Receipt')
 @require_json
 @log_route(logger)
 def confirm_receipt():
-    """
-    Save receipt data to database (typically after processing/preview).
-
-    Expected JSON:
-        - id: Receipt ID to confirm
-        - original_filename: Original file name
-        - vendor: Vendor name
-        - amount: Receipt amount
-        - date: Receipt date (YYYY-MM-DD)
-        - confidence: Confidence score (0-3)
-        - selected_method: OCR method used
-        - raw_text: (optional) Extracted text
-
-    Returns: Saved receipt with receipt_id
-    """
+    """Save receipt data to database after processing/preview."""
     file_handler = FileHandler.from_app_config()
     data = request.get_json()
 
-    # Validate required fields
-    validated_data, error = validate_confirm_receipt(data)
-    if error:
-        return error_response(error, status_code=400)
-
+    validated_data = validate_confirm_receipt(data)
     receipt_id = validated_data.get('id')
 
-    # Get file path from existing receipt
     file_path = validated_data.get('file_path')
     if not file_path:
         existing_receipt = receipt_repository.get_by_id(receipt_id)
         if not existing_receipt:
-            logger.warning(f"Receipt {receipt_id} not found for confirmation")
-            return error_response(f'Receipt {receipt_id} not found', status_code=400)
+            raise not_found('Receipt', receipt_id)
         file_path = existing_receipt.get('file_path')
 
     if not file_path or not Path(file_path).exists():
         logger.warning(f"File not found at: {file_path}")
-        return error_response(f'File not found at {file_path}', status_code=400)
+        raise invalid_value(
+            f'Receipt file not found at {file_path}',
+            field='file_path',
+        )
 
-    # Generate stored filename if not provided
     stored_filename = validated_data.get('stored_filename')
     if not stored_filename:
         stored_filename = file_handler.generate_stored_filename(validated_data['original_filename'])
         logger.debug(f"Generated stored filename: {stored_filename}")
 
-    # Update in database
     saved_receipt = receipt_repository.update(
         id=receipt_id,
         vendor=validated_data['vendor'],
@@ -929,7 +815,11 @@ def confirm_receipt():
 
     if saved_receipt is None:
         logger.error(f"Failed to confirm receipt {receipt_id}")
-        return error_response('Failed to save receipt', status_code=500)
+        raise AppError(
+            code=ErrorCode.DATABASE_ERROR,
+            message='Failed to save receipt',
+            status_code=500,
+        )
 
     logger.info(
         f"Confirmed receipt {receipt_id}: {validated_data['original_filename']} "
@@ -950,7 +840,7 @@ def confirm_receipt():
 # =============================================================================
 
 @bp.route('/receipts/stats', methods=['GET'])
-@handle_exceptions(log_prefix="get_receipt_stats")
+@handle_errors(entity='Receipt')
 @log_route(logger)
 def get_receipt_stats():
     """Get receipt statistics."""

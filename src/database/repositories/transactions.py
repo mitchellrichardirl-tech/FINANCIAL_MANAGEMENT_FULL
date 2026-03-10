@@ -4,7 +4,7 @@ import pandas as pd
 from src.database.connection import get_manager, DatabaseError
 from src.models.transaction import Transaction
 from src.utils.logging import ContextLogger
-
+from src.api.utils.errors import not_found
 logger = ContextLogger(__name__)
 
 
@@ -768,7 +768,7 @@ class TransactionRepository:
             return self.get_transaction_with_hierarchy(transaction_id)
 
         except ValueError:
-            raise
+            raise not_found(entity="Receipt", identifier=receipt_id)
         except Exception as e:
             logger.error(
                 f"Failed to link receipt {receipt_id} to transaction {transaction_id}: {e}"

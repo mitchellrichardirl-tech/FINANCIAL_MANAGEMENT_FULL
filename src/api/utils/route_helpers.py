@@ -1,3 +1,4 @@
+import re
 from functools import wraps
 from typing import Callable, Optional, Type, List, Union
 from dataclasses import dataclass
@@ -6,36 +7,20 @@ from flask import request
 
 from src.api.utils.response_helpers import error_response
 from src.api.utils.file_handling import FileHandler, TempFileManager
+from src.api.utils.errors import (
+  AppError, ErrorCode, not_found, duplicate, has_dependencies, invalid_value
+)
 from src.database.connection import DatabaseError
 from src.utils.logging import ContextLogger
 
 logger = ContextLogger(__name__)
 
-
-def handle_exceptions(log_prefix: str = "Error"):
-    """
-    Decorator to handle common exceptions in routes.
-    
-    Usage:
-        @bp.route('/receipts/<int:id>')
-        @handle_exceptions(log_prefix="get_receipt")
-        def get_receipt(id):
-            ...
-    """
-    def decorator(f: Callable) -> Callable:
-        @wraps(f)
-        def wrapper(*args, **kwargs):
-            try:
-                return f(*args, **kwargs)
-            except DatabaseError as e:
-                logger.error(f"{log_prefix} - Database error: {e}")
-                return error_response(f'Database error: {str(e)}', status_code=500)
-            except Exception as e:
-                logger.error(f"{log_prefix} - Unexpected error: {e}", exc_info=True)
-                return error_response('Internal server error', status_code=500)
-        return wrapper
-    return decorator
-
+SQLITE_CONSTRAINT_MAP = {
+    'categories.category': ('Category', 'name'),
+    'sub_categories.sub_category': ('Sub-category', 'name'),
+    'types.type': ('Type', 'name'),
+    'parties.name': ('Party', 'name'),
+}
 
 def require_json(f: Callable) -> Callable:
     """Decorator to require JSON request body."""
@@ -122,7 +107,7 @@ def require_resource(
     return decorator
 
 
-def with_uploaded_file(allowed_extensions: set = None):
+def with_uploaded_file(allowed_extensions: set|None = None):
     """Decorator that handles file upload boilerplate."""
     def decorator(f):
         @wraps(f)
@@ -201,60 +186,116 @@ def parse_bool(form_data, key: str, default: bool = True) -> bool:
     """Parse a boolean form value."""
     return form_data.get(key, str(default)).lower() == 'true'
 
+def classify_database_error(e: Exception, entity_hint: str|None = None) -> AppError:
+    """Convert a database exception to a structured AppError."""
+    error_str = str(e).lower()
 
-def handle_database_errors(
-    status_mapping: dict[str, int] = None
-) -> Callable:
+    # ── Duplicate / unique violations ──
+    # Covers:
+    #   - SQLite raw: "UNIQUE constraint failed: categories.category"
+    #   - Postgres raw: "duplicate key value violates unique constraint"
+    #   - Repo-wrapped: "Record already exists: (...)"
+    if any(k in error_str for k in ('unique constraint', 'duplicate key', 'already exists')):
+        entity = entity_hint or 'Item'
+        field = 'name'
+        value = None
+
+        # SQLite: "UNIQUE constraint failed: categories.category"
+        m = re.search(r'unique constraint failed:\s*(\w+\.\w+)', error_str)
+        if m:
+            constraint = m.group(1)
+            if constraint in SQLITE_CONSTRAINT_MAP:
+                entity, field = SQLITE_CONSTRAINT_MAP[constraint]
+
+        # Postgres: 'constraint "categories_category_key"'
+        m = re.search(r'constraint "(\w+?)(?:_key|_unique)?"', error_str)
+        if m:
+            constraint = m.group(1)
+            # reuse your existing CONSTRAINT_ENTITY_MAP lookup here if you
+            # ever run against Postgres
+
+        # Repo-wrapped: "Record already exists: ('Groceries', ...)"
+        # Try to pull the offending value out of the tuple repr
+        m = re.search(r"already exists:\s*\('([^']+)'", str(e))
+        if m:
+            value = m.group(1)
+
+        return duplicate(entity=entity, field=field, value=value)
+
+    # ── Foreign key violations ──
+    if 'foreign key' in error_str:
+        if 'is still referenced' in error_str or 'constraint failed' in error_str:
+            # SQLite: "FOREIGN KEY constraint failed" (unfortunately not specific)
+            # We can't tell insert-fk vs delete-fk from SQLite's message alone,
+            # so lean on entity_hint + context
+            return AppError(
+                code=ErrorCode.FOREIGN_KEY_VIOLATION,
+                message="Operation would violate a relationship constraint.",
+                status_code=409,
+                entity=entity_hint,
+            )
+        return AppError(
+            code=ErrorCode.PARENT_NOT_FOUND,
+            message="Referenced item does not exist. It may have been deleted.",
+            status_code=400,
+        )
+
+    # ── Not found ──
+    if 'not found' in error_str or 'does not exist' in error_str:
+        return not_found(entity=entity_hint or 'Item')
+
+    # ── Fallback ──
+    return AppError(
+        code=ErrorCode.DATABASE_ERROR,
+        message="A database error occurred. Please try again.",
+        status_code=500,
+    )
+
+
+def handle_errors(entity: str|None = None):
     """
-    Decorator to handle database errors with appropriate status codes.
+    Unified error handling decorator.
+    
+    Args:
+        entity: Hint for error messages (e.g., 'Category', 'Transaction')
     
     Usage:
-        @handle_database_errors({
-            'already exists': 409,
-            'does not exist': 404,
-            'associated': 409
-        })
+        @handle_errors(entity='Category')
         def create_category():
             ...
     """
-    default_mapping = {
-        'already exists': 409,
-        'does not exist': 404,
-        'not found': 404,
-        'associated': 409,
-        'has': 409,
-        'constraint': 409,
-        'foreign key': 409,
-    }
-
-    if status_mapping:
-        default_mapping.update(status_mapping)
-
     def decorator(f: Callable) -> Callable:
         @wraps(f)
         def wrapper(*args, **kwargs):
             try:
                 return f(*args, **kwargs)
+            
+            except AppError as e:
+                # Our structured errors — pass through
+                logger.info(f"{f.__name__}: {e.code.value} - {e.message}")
+                return error_response(e)
+            
             except DatabaseError as e:
-                error_str = str(e).lower()
-                for keyword, status_code in default_mapping.items():
-                    if keyword in error_str:
-                        logger.debug(
-                            f"Database error in {f.__name__} "
-                            f"matched '{keyword}' -> {status_code}: {e}"
-                        )
-                        return error_response(str(e), status_code=status_code)
-                logger.error(f"Unmatched database error in {f.__name__}: {e}")
-                return error_response(f'Database error: {str(e)}', status_code=500)
+                # Classify and convert
+                app_error = classify_database_error(e, entity_hint=entity)
+                logger.warning(f"{f.__name__}: DatabaseError -> {app_error.code.value}: {e}")
+                return error_response(app_error)
+            
+            except ValueError as e:
+                # Common for repo-layer validation
+                logger.info(f"{f.__name__}: ValueError - {e}")
+                return error_response(invalid_value(str(e)))
+            
             except Exception as e:
-                logger.error(
-                    f"Unexpected error in {f.__name__}: {e}",
-                    exc_info=True
-                )
-                return error_response('Internal server error', status_code=500)
+                logger.error(f"{f.__name__}: Unexpected error: {e}", exc_info=True)
+                return error_response(AppError(
+                    code=ErrorCode.INTERNAL_ERROR,
+                    message="An unexpected error occurred",
+                    status_code=500
+                ))
+        
         return wrapper
     return decorator
-
 
 class ResourceController:
     """

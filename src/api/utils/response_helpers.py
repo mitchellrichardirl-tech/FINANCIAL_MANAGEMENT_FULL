@@ -1,6 +1,7 @@
 from flask import jsonify
 
 from src.utils.logging import ContextLogger
+from src.api.utils.errors import AppError, ErrorCode
 
 logger = ContextLogger(__name__)
 
@@ -27,29 +28,31 @@ def success_response(data=None, message=None, status_code=200):
 
     return jsonify(response), status_code
 
-
-def error_response(message, errors=None, status_code=400):
+def error_response(error: AppError | str, status_code: int = 400):
     """
     Format an error API response.
     
     Args:
-        message: Error message
-        errors: Optional list of detailed errors
-        status_code: HTTP status code
-        
-    Returns:
-        Flask JSON response
+        error: AppError instance or legacy string message
+        status_code: HTTP status code (ignored if error is AppError)
     """
-    response = {
-        'success': False,
-        'error': message
-    }
-
-    if errors:
-        response['errors'] = errors
-
-    logger.debug(f"Error response ({status_code}): {message}")
-
+    if isinstance(error, AppError):
+        response = {
+            'success': False,
+            'error': error.to_dict()
+        }
+        status_code = error.status_code
+    else:
+        # Legacy string format — wrap in minimal structure
+        response = {
+            'success': False,
+            'error': {
+                'code': ErrorCode.INTERNAL_ERROR.value,
+                'message': str(error)
+            }
+        }
+    
+    logger.debug(f"Error response ({status_code}): {response['error']}")
     return jsonify(response), status_code
 
 

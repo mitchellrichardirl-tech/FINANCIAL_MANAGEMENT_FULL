@@ -6,18 +6,19 @@ from src.utils.tabular_files.processor import TabularProcessor
 from src.utils.tabular_files.exceptions import handle_tabular_errors
 
 from src.api.utils.file_handling import FileValidationResult
-from src.api.utils.response_helpers import success_response, error_response, paginated_response
+from src.api.utils.response_helpers import success_response, paginated_response
 from src.api.utils.route_helpers import (
     with_uploaded_file,
     TabularValidationParams,
     TabularPreviewParams,
     TabularImportParams,
-    handle_exceptions
+    handle_errors,
 )
+from src.api.utils.errors import invalid_value, not_found
 from src.api.utils.validators import (
     validate_pagination,
     validate_date_range_filters,
-    add_string_filters
+    add_string_filters,
 )
 
 from src.statements.registry import get_processor
@@ -73,7 +74,7 @@ def _create_upload_record(result, original_filename) -> int:
         filename=result.file_name,
         file_type=result.file_type,
         columns=result.columns_imported,
-        rows=result.data
+        rows=result.data,
     )
 
     upload_id = upload_result["upload_id"]
@@ -91,15 +92,17 @@ def _process_as_statement(result, account_id: int, upload_id: int):
     account_repo = AccountRepository()
     account = account_repo.get_account_by_id(account_id)
 
+    if account is None:
+        raise not_found('Account', account_id)
+
     logger.debug(
         f"Account {account_id} statement format: {account['statement_format']}"
     )
-    
-    # statement = Statement(account_id=account_id, upload_id=upload_id)
+
     statement = get_processor(
         statement_type=account['statement_format'],
         account_id=account_id,
-        upload_id=upload_id
+        upload_id=upload_id,
     )
     transactions = statement.process_statement(result.data)
 
@@ -112,34 +115,45 @@ def _process_as_statement(result, account_id: int, upload_id: int):
     )
 
 
-def validate_upload_filters(args) -> tuple[bool, dict, str]:
-    """Validate upload query filters."""
+def validate_upload_filters(args) -> dict:
+    """
+    Validate upload query filters.
+    Raises AppError on invalid input.
+    """
     logger.debug(f"Validating upload filters: {list(args.keys())}")
 
-    # Validate pagination
     is_valid, pagination, error = validate_pagination(args)
     if not is_valid:
         logger.warning(f"Pagination validation failed: {error}")
-        return False, {}, error
+        raise invalid_value(error)
 
-    # Validate date range
     is_valid, date_filters, error = validate_date_range_filters(args)
     if not is_valid:
         logger.warning(f"Date range validation failed: {error}")
-        return False, {}, error
+        raise invalid_value(error)
 
-    # String filters
     filters = {}
     add_string_filters(filters, args, ['file_type', 'filename'])
 
-    return True, {**pagination, **date_filters, **filters}, None
+    return {**pagination, **date_filters, **filters}
 
 
 # =============================================================================
 # File Processing Endpoints
 # =============================================================================
+# Decorator order (top → bottom = outer → inner):
+#   @handle_errors         ← catches AppError, DatabaseError, anything else
+#   @handle_tabular_errors ← catches TabularProcessorError first (more specific)
+#   @with_uploaded_file    ← provides temp_path, file_info
+#   @log_route             ← innermost, logs timing
+#
+# An exception bubbles inner→outer, so tabular errors are caught by
+# handle_tabular_errors before reaching handle_errors. Everything else
+# (bad account_id, DB failures in _create_upload_record, etc.) falls
+# through to handle_errors.
 
 @bp.route('/validate', methods=['POST'])
+@handle_errors(entity='File')
 @handle_tabular_errors
 @with_uploaded_file(allowed_extensions={'csv', 'tsv', 'xls', 'xlsx'})
 @log_route(logger)
@@ -159,7 +173,7 @@ def validate_file(temp_path: Path, file_info: FileValidationResult):
         min_rows=params.min_rows,
         min_columns=params.min_columns,
         required_columns=params.required_columns,
-        sheet_name=params.sheet_name
+        sheet_name=params.sheet_name,
     )
 
     logger.info(
@@ -170,6 +184,7 @@ def validate_file(temp_path: Path, file_info: FileValidationResult):
 
 
 @bp.route('/preview', methods=['POST'])
+@handle_errors(entity='File')
 @handle_tabular_errors
 @with_uploaded_file(allowed_extensions={'csv', 'tsv', 'xls', 'xlsx'})
 @log_route(logger)
@@ -188,7 +203,7 @@ def preview_file(temp_path: Path, file_info: FileValidationResult):
         temp_path,
         num_rows=params.num_rows,
         sheet_name=params.sheet_name,
-        include_types=params.include_types
+        include_types=params.include_types,
     )
 
     logger.info(
@@ -199,6 +214,7 @@ def preview_file(temp_path: Path, file_info: FileValidationResult):
 
 
 @bp.route('/import', methods=['POST'])
+@handle_errors(entity='Upload')
 @handle_tabular_errors
 @with_uploaded_file(allowed_extensions={'csv', 'tsv', 'xlsx', 'xls'})
 @log_route(logger)
@@ -212,15 +228,12 @@ def import_file(temp_path: Path, file_info: FileValidationResult):
         f"| account_id={params.account_id or 'none'}"
     )
 
-    # Step 1: Import tabular data
     result = _process_tabular_file(temp_path, params)
 
-    # Step 2: Create upload record
     upload_id = _create_upload_record(result, original_filename)
     result.upload_id = upload_id
     result.file_name = original_filename
 
-    # Step 3: Process as statement (if account_id provided)
     if params.account_id:
         _process_as_statement(result, params.account_id, upload_id)
     else:
@@ -234,6 +247,8 @@ def import_file(temp_path: Path, file_info: FileValidationResult):
 
 
 @bp.route('/sheets', methods=['POST'])
+@handle_errors(entity='File')
+@handle_tabular_errors
 @with_uploaded_file(allowed_extensions={'xls', 'xlsx'})
 @log_route(logger)
 def get_sheets(temp_path: Path, file_info: FileValidationResult):
@@ -250,6 +265,7 @@ def get_sheets(temp_path: Path, file_info: FileValidationResult):
 
 
 @bp.route('/check', methods=['POST'])
+@handle_errors(entity='File')
 @handle_tabular_errors
 @with_uploaded_file(allowed_extensions={'csv', 'tsv', 'xls', 'xlsx'})
 @log_route(logger)
@@ -264,7 +280,7 @@ def check_tabular(temp_path: Path, file_info: FileValidationResult):
     )
     return success_response({
         'is_tabular': is_tabular,
-        'file_name': file_info.secured_filename
+        'file_name': file_info.secured_filename,
     })
 
 
@@ -273,16 +289,12 @@ def check_tabular(temp_path: Path, file_info: FileValidationResult):
 # =============================================================================
 
 @bp.route('', methods=['GET'])
-@handle_exceptions(log_prefix="get_uploads")
+@handle_errors(entity='Upload')
 @log_route(logger)
 def get_uploads():
     """Get all uploads with optional filters."""
-    # Validate filters
-    is_valid, filters, error_msg = validate_upload_filters(request.args.to_dict())
-    if not is_valid:
-        return error_response(error_msg, status_code=400)
+    filters = validate_upload_filters(request.args.to_dict())
 
-    # Extract pagination
     limit = filters.pop('limit')
     offset = filters.pop('offset')
 
@@ -290,20 +302,15 @@ def get_uploads():
     if active_filters:
         logger.debug(f"Active filters: {active_filters}")
 
-    # Get uploads
     upload_repo = UploadRepository()
-    uploads = upload_repo.get_all_uploads(
-        limit=limit,
-        offset=offset,
-        **filters
-    )
+    uploads = upload_repo.get_all_uploads(limit=limit, offset=offset, **filters)
 
     logger.info(f"Retrieved {len(uploads)} uploads (offset={offset}, limit={limit})")
     return paginated_response(uploads, limit, offset, data_key='uploads')
 
 
 @bp.route('/<int:upload_id>', methods=['GET'])
-@handle_exceptions(log_prefix="get_upload")
+@handle_errors(entity='Upload')
 @log_route(logger)
 def get_upload(upload_id: int):
     """Get a single upload by ID."""
@@ -311,14 +318,13 @@ def get_upload(upload_id: int):
     upload = upload_repo.get_upload_by_id(upload_id)
 
     if upload is None:
-        logger.warning(f"Upload {upload_id} not found")
-        return error_response(f'Upload {upload_id} not found', status_code=404)
+        raise not_found('Upload', upload_id)
 
     return success_response(data=upload)
 
 
 @bp.route('/<int:upload_id>', methods=['DELETE'])
-@handle_exceptions(log_prefix="delete_upload")
+@handle_errors(entity='Upload')
 @log_route(logger)
 def delete_upload(upload_id: int):
     """Delete an upload and all associated data."""
@@ -326,10 +332,9 @@ def delete_upload(upload_id: int):
     deleted = upload_repo.delete_upload(upload_id)
 
     if not deleted:
-        logger.warning(f"Upload {upload_id} not found")
-        return error_response(f'Upload {upload_id} not found', status_code=404)
+        raise not_found('Upload', upload_id)
 
     return success_response(
         data={'deleted_upload_id': upload_id},
-        message=f'Upload {upload_id} deleted successfully'
+        message=f'Upload {upload_id} deleted successfully',
     )
