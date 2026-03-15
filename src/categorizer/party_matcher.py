@@ -1,13 +1,9 @@
 from typing import Dict, Optional, Tuple
-
+import numpy as np
 import pandas as pd
 
-try:
-    from rapidfuzz import fuzz, process
-    USING_RAPIDFUZZ = True
-except ImportError:
-    from fuzzywuzzy import fuzz, process
-    USING_RAPIDFUZZ = False
+from rapidfuzz import fuzz, process
+USING_RAPIDFUZZ = True
 
 from src.database.repositories.categories import CategoryRepository
 from src.utils.logging import ContextLogger
@@ -215,44 +211,52 @@ class PartyMatcher:
 
         logger.debug(f"{len(unmatched)} unique names to fuzzy match after exact matches")
         
+
         if unmatched:
             logger.info(
                 f"Fuzzy matching {len(unmatched)} unique names "
                 f"against {len(self._alias_keys)} known aliases"
             )
-
             self._prime_unknown_type_cache()
 
+            if self._alias_keys:
+                ratio_scores   = process.cdist(unmatched, self._alias_keys, scorer=fuzz.ratio,         workers=-1)
+                partial_scores = process.cdist(unmatched, self._alias_keys, scorer=fuzz.partial_ratio, workers=-1)
+                scores = np.maximum(ratio_scores, partial_scores * 0.95)
+                best_idx = scores.argmax(axis=1)
+                best_score = scores.max(axis=1)
+            else:
+                best_score = np.full(len(unmatched), -1.0)
+                best_idx = None
+
+            needs_new_party: list[str] = []
+
             for idx, name in enumerate(unmatched):
-                self._intermittent_log(idx, len(unmatched), message="Fuzzy matching")
-
-                best = process.extractOne(
-                    name,
-                    self._alias_keys,
-                    scorer=self.custom_scorer
-                )
-
-                if best and best[1] >= self.similarity_threshold:
-                    matched_name, score = best[0], best[1]
+                if best_score[idx] >= self.similarity_threshold:
+                    matched_name = self._alias_keys[best_idx[idx]]
                     party_id = self.alias_mapping[matched_name]
-                    self._intermittent_log(idx, len(unmatched), message=f"Fuzzy matched '{name}' with '{matched_name}', ID {party_id}, score={score}")
-
-                    results[name] = (party_id, score)
-
-                    # Register as new alias so future exact lookups hit
+                    results[name] = (party_id, int(best_score[idx]))
                     if name not in self.alias_mapping:
                         self.alias_mapping[name] = party_id
                         self.new_aliases += 1
-                    continue
+                else:
+                    needs_new_party.append(name)       # defer, don't insert
 
-                # No match — create new party
-                party_id = self._add_unknown_party(name)
-                self._intermittent_log(idx, len(unmatched), message=f"No match for '{name}' — created new party with ID {party_id}")
-                self.alias_mapping[name] = party_id
-                self.new_parties += 1
-                results[name] = (party_id, 100)
+            # One transaction for all new parties
+            if needs_new_party:
+                logger.info(f"Creating {len(needs_new_party)} new parties in one transaction")
+                new_ids = self.db.bulk_add_parties_unknown_type(needs_new_party)
+                for name in needs_new_party:
+                    pid = new_ids.get(name)
+                    if pid is not None:
+                        results[name] = (pid, 100)
+                        self.alias_mapping[name] = pid
+                        self.new_parties += 1
+                    else:
+                        # Shouldn't happen, but don't leave a hole in results
+                        logger.warning(f"Bulk insert returned no id for {name!r}")
+                        results[name] = (None, 0)
 
-            # Refresh keys once at the end, not per iteration
             self._refresh_alias_keys()
 
         # Handle any blank/empty names that slipped through

@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field, asdict
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Sequence
 from enum import Enum
 from datetime import datetime, timezone
 import json
@@ -130,7 +130,7 @@ class ImportResult:
     data: List[Dict[str, Any]]
     upload_id: Optional[int] = None
     errors: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
+    warnings: Sequence[str|Dict[str, Any]] = field(default_factory=Sequence)
     imported_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def to_dict(self) -> Dict[str, Any]:

@@ -636,6 +636,54 @@ class CategoryRepository:
             logger.error(f"Failed to add party: {e}")
             raise DatabaseError(f"Failed to add party: {e}") from e
 
+    def bulk_add_parties_unknown_type(self, names: list[str]) -> dict[str, int]:
+        """
+        Insert many parties under the Unknown type in a single transaction.
+        Returns {name: party_id} for every name, whether newly inserted or
+        already present (INSERT OR IGNORE + SELECT handles both).
+        """
+        if not names:
+            return {}
+
+        type_id = self._ensure_unknown_hierarchy()
+        # Defensive dedupe — callers shouldn't pass dupes, but don't blow up if they do
+        unique_names = list(dict.fromkeys(names))
+
+        logger.info(f"Bulk inserting {len(unique_names)} parties under type {type_id}")
+
+        try:
+            with self.db.transaction() as conn:
+                cursor = conn.cursor()
+
+                # executemany keeps it to one round of Python→C marshalling
+                cursor.executemany(
+                    "INSERT OR IGNORE INTO parties (name, type_id, description) "
+                    "VALUES (?, ?, NULL)",
+                    [(n, type_id) for n in unique_names],
+                )
+                inserted = cursor.rowcount  # -1 on some drivers, but useful when it works
+
+                # Read back IDs for everything — new and pre-existing alike.
+                # SQLite's param limit is 32,766 (since 3.32.0); 900 is fine.
+                # Chunk if you ever expect >30k in one go.
+                placeholders = ",".join("?" * len(unique_names))
+                cursor.execute(
+                    f"SELECT name, id FROM parties "
+                    f"WHERE type_id = ? AND name IN ({placeholders})",
+                    [type_id, *unique_names],
+                )
+                result = dict(cursor.fetchall())
+
+            logger.info(
+                f"Bulk insert complete: {len(result)} ids returned "
+                f"({inserted if inserted >= 0 else '?'} newly inserted)"
+            )
+            return result
+
+        except Exception as e:
+            logger.error(f"Bulk party insert failed: {e}")
+            raise DatabaseError(f"Failed to bulk add parties: {e}") from e
+        
     def update_party(
         self,
         party_id: int,

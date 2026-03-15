@@ -80,7 +80,7 @@ class StatementConfig:
                 "AmountConfig must specify either credit_column/debit_column "
                 "or amount_column"
             )
-
+        
     @property
     def required_columns(self) -> list[str]:
         """All source columns this config expects to find in the input data."""
@@ -101,7 +101,16 @@ class StatementConfig:
     @property
     def display_name(self) -> str:
         return f"{self.bank_name} {self.account_type}"
+    
+@dataclass
+class ProcessingWarning:
+    """Non-fatal issue the user should be told about."""
+    code: str
+    message: str
+    details: dict[str, Any] = field(default_factory=dict)
 
+    def to_dict(self) -> dict[str, Any]:
+        return {'code': self.code, 'message': self.message, 'details': self.details}
 
 class StatementProcessor(ABC):
     """
@@ -129,15 +138,14 @@ class StatementProcessor(ABC):
     ]
 
     _DATE_FORMAT_FALLBACKS = [
-        '%d/%m/%Y',   # 15/09/2025  ← your data
-        '%d/%m/%y',   # 15/09/25
-        '%Y-%m-%d',   # 2025-09-15  (ISO 8601)
-        '%m/%d/%Y',   # 09/15/2025  (US format)
-        '%m/%d/%y',   # 09/15/25
-        '%d-%m-%Y',   # 15-09-2025
-        '%d.%m.%Y',   # 15.09.2025
-        '%Y/%m/%d',   # 2025/09/15
-        '%Y-%m-%dT%H:%M:%S',  # 2025-09-15T13:45:30 (ISO with time)
+        '%Y-%m-%dT%H:%M:%SZ',    # 2022-10-13T01:02:03Z   ← the format in your logs
+        '%Y-%m-%dT%H:%M:%S%z',   # 2022-10-13T01:02:03+00:00
+        '%Y-%m-%dT%H:%M:%S',     # 2022-10-13T01:02:03
+        '%Y-%m-%d',              # 2022-10-13
+        '%d/%m/%Y', '%d/%m/%y',  # European
+        '%m/%d/%Y', '%m/%d/%y',  # US
+        '%d-%m-%Y', '%d.%m.%Y',
+        '%Y/%m/%d',
     ]
 
     def __init__(
@@ -150,7 +158,8 @@ class StatementProcessor(ABC):
         self.upload_id = upload_id
         self.categorizer = categorizer or TransactionCategorizer()
         self.transactions: Optional[pd.DataFrame] = None
-        
+        self.warnings: list[ProcessingWarning] = []
+
         logger.debug(
             f"Initialized {self.__class__.__name__}: "
             f"account_id={account_id}, upload_id={upload_id}"
@@ -264,50 +273,55 @@ class StatementProcessor(ABC):
         return df
 
     def _parse_dates(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Parse transaction dates.
-
-        Attempts to parse using the configured format first, then falls back
-        through common bank export formats if the configured one fails.
-        The fallback behaviour guards against misconfigured format strings
-        causing silent data loss via errors='coerce'.
-        """
         date_cfg = self.config.date_config
         col = date_cfg.column
+        rows_before = len(df)
 
-        sample_values = df[col].dropna().head(3).tolist()
+        sample_values = df[col].dropna().astype(str).head(3).tolist()
         logger.debug(
-            f"Parsing dates: column='{col}', format={date_cfg.format!r}, "
-            f"dayfirst={date_cfg.dayfirst} | sample values: {sample_values}"
+            f"Parsing dates: column={col!r}, format={date_cfg.format!r}, "
+            f"dayfirst={date_cfg.dayfirst} | samples: {sample_values}"
         )
 
         parsed, used_format = self._attempt_date_parse(df[col], date_cfg)
         df['transaction_date'] = parsed
 
-        if used_format != date_cfg.format:
+        cfg_label = date_cfg.format or f'auto(dayfirst={date_cfg.dayfirst})'
+        if used_format != cfg_label:
             logger.warning(
-                f"Configured date format {date_cfg.format!r} failed. "
-                f"Successfully parsed using '{used_format}'. "
-                f"Update date_config.format to suppress this warning."
+                f"Configured format {date_cfg.format!r} didn't match this file. "
+                f"Used {used_format!r} instead."
             )
 
         invalid_mask = df['transaction_date'].isna()
-        invalid_count = invalid_mask.sum()
+        invalid_count = int(invalid_mask.sum())
 
         if invalid_count > 0:
-            # Show the actual values that couldn't be parsed so the user can
-            # inspect them — previously the log gave no actionable information
-            invalid_samples = df.loc[invalid_mask, col].head(5).tolist()
-            logger.warning(
-                f"Dropping {invalid_count} rows with unparseable dates "
-                f"(tried format: '{used_format}') | "
-                f"sample failures: {invalid_samples}"
+            invalid_samples = (
+                df.loc[invalid_mask, col].dropna().astype(str).head(5).tolist()
             )
-            df = df.dropna(subset=['transaction_date'])
+            logger.warning(
+                f"Dropping {invalid_count}/{rows_before} rows with unparseable "
+                f"dates (best format: {used_format!r}) | samples: {invalid_samples}"
+            )
 
-        logger.debug(
-            f"Date parsing complete: {len(df)} valid rows, "
-            f"{invalid_count} dropped, format used: '{used_format}'"
-        )
+            # ── This is the bit that was missing ──
+            self.warnings.append(ProcessingWarning(
+                code='DATES_UNPARSEABLE',
+                message=(
+                    f"{invalid_count} of {rows_before} rows were skipped because "
+                    f"the date in column '{col}' couldn't be parsed."
+                ),
+                details={
+                    'dropped': invalid_count,
+                    'total': rows_before,
+                    'column': col,
+                    'format_used': used_format,
+                    'sample_values': invalid_samples,
+                },
+            ))
+
+            df = df.dropna(subset=['transaction_date'])
 
         return df
 
@@ -315,68 +329,63 @@ class StatementProcessor(ABC):
     def _attempt_date_parse(
         self,
         series: pd.Series,
-        date_cfg,
+        date_cfg: DateConfig,
     ) -> tuple[pd.Series, str]:
         """
-        Try the configured format first, then fall back through common formats.
-
-        Returns the successfully parsed Series and the format that worked.
-        Raises AppError if no format produces any valid dates.
+        Try the configured format, then every fallback. Keep whichever
+        parses the MOST dates. Only short-circuit on 100% success —
+        partial success is not a reason to stop trying.
         """
-        result = pd.to_datetime(
-            series,
-            format=date_cfg.format,
-            dayfirst=date_cfg.dayfirst,
-            errors='coerce',
-        )
+        total = int(series.notna().sum())
+        if total == 0:
+            return pd.to_datetime(series, errors='coerce'), 'n/a (empty)'
 
-        valid_count = result.notna().sum()
-        total = len(series.dropna())
+        # Build an ordered list of (label, to_datetime kwargs) to try.
+        cfg_label = date_cfg.format or f'auto(dayfirst={date_cfg.dayfirst})'
+        attempts: list[tuple[str, dict]] = [
+            (cfg_label, {'format': date_cfg.format, 'dayfirst': date_cfg.dayfirst}),
+        ]
 
-        if valid_count == total:
-            return result, date_cfg.format or 'auto-detected'
+        # dayfirst=True mangles ISO-8601 when auto-detecting — try without it too.
+        if date_cfg.format is None and date_cfg.dayfirst:
+            attempts.append(('auto(dayfirst=False)', {'format': None, 'dayfirst': False}))
 
-        if valid_count > 0:
-            logger.debug(
-                f"Configured format {date_cfg.format!r} parsed "
-                f"{valid_count}/{total} dates"
-            )
-            return result, date_cfg.format or 'auto-detected'
-
-        logger.debug(
-            f"Configured format {date_cfg.format!r} parsed 0/{total} dates, "
-            f"trying {len(self._DATE_FORMAT_FALLBACKS)} fallback formats"
-        )
+        # pandas >= 2.0 has a flexible ISO8601 parser — the try/except
+        # in the loop below handles older versions gracefully.
+        attempts.append(('ISO8601', {'format': 'ISO8601'}))
 
         best_fmt = date_cfg.format or 'auto-detected'
 
         for fmt in self._DATE_FORMAT_FALLBACKS:
-            if fmt == date_cfg.format:
+            if fmt != date_cfg.format:
+                attempts.append((fmt, {'format': fmt}))
+
+        best_parsed: pd.Series | None = None
+        best_valid = -1
+        best_label = cfg_label
+
+        for label, kwargs in attempts:
+            try:
+                parsed = pd.to_datetime(series, errors='coerce', **kwargs)
+            except (ValueError, TypeError):
                 continue
 
-            attempt = pd.to_datetime(series, format=fmt, errors='coerce')
-            attempt_valid = attempt.notna().sum()
+            valid = int(parsed.notna().sum())
+            logger.debug(f"Date format {label!r}: {valid}/{total} parsed")
 
-            logger.debug(f"Tried '{fmt}': {attempt_valid}/{total} valid")
+            if valid > best_valid:
+                best_parsed, best_valid, best_label = parsed, valid, label
 
-            if attempt_valid == total:
-                return attempt, fmt
+            if valid == total:
+                return parsed, label          # perfect match — done
 
-            if attempt_valid > valid_count:
-                result = attempt
-                valid_count = attempt_valid
-                best_fmt = fmt
-
-        if valid_count == 0:
-            sample = series.dropna().head(3).tolist()
-            tried = [date_cfg.format] + self._DATE_FORMAT_FALLBACKS
+        if best_valid <= 0:
+            sample = series.dropna().astype(str).head(3).tolist()
             raise AppError(
                 code=ErrorCode.INVALID_FORMAT,
                 message=(
-                    f"Could not parse any dates in column "
-                    f"'{date_cfg.column}'. "
-                    f"Sample values: {sample}. "
-                    f"The file may use an unsupported date format."
+                    f"Could not parse any dates in column '{date_cfg.column}'. "
+                    f"Sample values: {sample}."
                 ),
                 status_code=422,
                 entity='Statement',
@@ -384,11 +393,11 @@ class StatementProcessor(ABC):
                 details={
                     'column': date_cfg.column,
                     'sample_values': sample,
-                    'formats_tried': [f for f in tried if f],
+                    'formats_tried': [lbl for lbl, _ in attempts],
                 },
             )
 
-        return result, best_fmt
+        return best_parsed, best_label
 
     def _parse_amounts(self, df: pd.DataFrame) -> pd.DataFrame:
         """Parse transaction amounts and determine credit/debit."""

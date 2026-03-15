@@ -114,6 +114,8 @@ def _process_as_statement(result, account_id: int, upload_id: int):
         f"for account {account_id} from upload {upload_id}"
     )
 
+    return statement.warnings
+
 
 def validate_upload_filters(args) -> dict:
     """
@@ -235,7 +237,9 @@ def import_file(temp_path: Path, file_info: FileValidationResult):
     result.file_name = original_filename
 
     if params.account_id:
-        _process_as_statement(result, params.account_id, upload_id)
+         warnings = _process_as_statement(result, params.account_id, upload_id)
+         if len(warnings) > 0:
+            result.warnings = [warning.to_dict() for warning in warnings]
     else:
         logger.debug("No account_id provided, skipping statement processing")
 
