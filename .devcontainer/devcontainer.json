@@ -1,7 +1,8 @@
 {
-  "name": "OCR Project",
+  "name": "Finance App",
   "image": "mcr.microsoft.com/devcontainers/python:3.12-bullseye",
   "postCreateCommand": "bash .devcontainer/postCreate.sh",
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
   "remoteUser": "vscode",
   "customizations": {
     "vscode": {
@@ -10,10 +11,12 @@
         "ms-toolsai.jupyter",
         "ms-toolsai.datawrangler",
         "mechatroner.rainbow-csv",
-        "charliermarsh.ruff"
+        "charliermarsh.ruff",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode"
       ],
       "settings": {
-        "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+        "python.defaultInterpreterPath": "${workspaceFolder}/backend/.venv/bin/python",
         "python.analysis.typeCheckingMode": "basic",
         "[python]": {
           "editor.defaultFormatter": "charliermarsh.ruff",
@@ -25,5 +28,5 @@
       }
     }
   },
-  "forwardPorts": [8888]
+  "forwardPorts": [5000, 5173, 8888]
 }

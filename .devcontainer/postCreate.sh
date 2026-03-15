@@ -7,24 +7,26 @@ if [ -d "$HOME/.ssh" ]; then
     chmod 644 "$HOME/.ssh/*.pub" 2>/dev/null || true
 fi
 
-# Install system dependencies
+# System dependencies
 sudo apt-get update
 sudo apt-get install -y tesseract-ocr poppler-utils keychain
 
 # Install uv
 curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Add uv to PATH for current session
 export PATH="$HOME/.cargo/bin:$PATH"
 
-# Install Python dependencies with uv
+# Backend setup
+cd backend
 uv sync --all-groups
-
-# Install the project itself as an editable package
 uv pip install -e .
-
-# Register Jupyter kernel
 source .venv/bin/activate
 python -m ipykernel install --user --name=financial-management
+cd ..
+
+# Frontend setup (optional - uncomment if you want hot-reload dev server)
+# cd frontend
+# npm install
+# cd ..
 
 echo 'eval $(keychain --eval --agents ssh --quiet id_ed25519 2>/dev/null)' >> "$HOME/.bashrc"
+echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$HOME/.bashrc"
