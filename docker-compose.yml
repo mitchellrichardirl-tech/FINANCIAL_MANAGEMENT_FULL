@@ -1,0 +1,20 @@
+services:
+  backend:
+    build: ./backend
+    container_name: finance-backend
+    volumes:
+      # Windows path - use forward slashes, works in Docker Desktop
+      - ./data:/app/data
+    environment:
+      - DATABASE_PATH=/app/data/financial_data.db
+      - UPLOAD_FOLDER=/app/data/uploads
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: finance-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
