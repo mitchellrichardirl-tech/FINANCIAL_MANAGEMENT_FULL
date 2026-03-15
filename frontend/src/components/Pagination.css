@@ -1,0 +1,24 @@
+.pagination {
+  flex-shrink: 0; /* Don't shrink */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 0;
+  background-color: #f5f6fa;
+}
+
+.pagination-button {
+  padding: 0.5em 1em;
+}
+
+.pagination-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  border-color: transparent;
+}
+
+.pagination-info {
+  font-size: 0.9em;
+  color: #888;
+}

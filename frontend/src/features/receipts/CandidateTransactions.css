@@ -1,0 +1,265 @@
+.candidate-transactions-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0; /* Important: allows flex child to shrink */
+  overflow: hidden;
+}
+
+.table-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  flex-shrink: 0; /* Prevent header from shrinking */
+}
+
+.table-header h2 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0;
+  color: #333;
+}
+
+.transaction-count {
+  color: #666;
+  font-size: 14px;
+}
+
+/* Table wrapper for scroll */
+.table-wrapper {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* Custom scrollbar styling */
+.table-wrapper::-webkit-scrollbar {
+  width: 8px;
+}
+
+.table-wrapper::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+.table-wrapper::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 4px;
+}
+
+.table-wrapper::-webkit-scrollbar-thumb:hover {
+  background: #a1a1a1;
+}
+
+.candidate-transactions-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
+}
+
+.candidate-transactions-table thead {
+  background-color: #f8f9fa;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.candidate-transactions-table th {
+  text-align: left;
+  padding: 12px;
+  font-weight: 600;
+  color: #495057;
+  border-bottom: 2px solid #dee2e6;
+  font-size: 14px;
+}
+
+.candidate-transactions-table tbody tr {
+  border-bottom: 1px solid #dee2e6;
+}
+
+.candidate-transactions-table td {
+  padding: 10px 12px;
+  color: #212529;
+  font-size: 14px;
+}
+
+/* Row hover and selection states */
+.transaction-row {
+  transition: background-color 0.2s ease;
+}
+
+.transaction-row:hover {
+  background-color: #f8f9fa;
+}
+
+.transaction-row.selected {
+  background-color: #e7f3ff;
+}
+
+/* All cells inherit left alignment */
+.transaction-row td {
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Description can wrap */
+.description-cell {
+  white-space: normal;
+  line-height: 1.4;
+  max-width: 300px;
+}
+
+/* View mode values */
+.view-value {
+  display: block;
+  padding: 4px 0;
+}
+
+/* Date cell */
+.date-cell {
+  white-space: nowrap;
+  font-weight: 500;
+  min-width: 100px;
+}
+
+/* Party cell */
+.party-cell {
+  font-weight: 500;
+  min-width: 120px;
+}
+
+/* Ensure amount stays right-aligned */
+.amount-cell {
+  text-align: right !important;
+  font-family: inherit !important;
+  font-weight: normal !important;
+  color: #212529;
+  min-width: 80px;
+}
+
+.amount-header {
+  text-align: right !important;
+}
+
+/* Center action buttons */
+.actions-cell {
+  text-align: center !important;
+}
+
+.actions-header {
+  text-align: center !important;
+}
+
+/* Select button styling */
+.btn-select {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.2s, opacity 0.2s;
+  background-color: #2196f3;
+  color: white;
+}
+
+.btn-select:hover {
+  background-color: #1976d2;
+}
+
+.btn-select:active {
+  transform: translateY(1px);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .candidate-transactions-table {
+    font-size: 13px;
+  }
+  
+  .candidate-transactions-table th,
+  .candidate-transactions-table td {
+    padding: 8px;
+  }
+  
+  .description-cell {
+    max-width: 150px;
+  }
+
+  .btn-select {
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+}
+
+/* Optional: Add subtle animation for new rows */
+.transaction-row {
+  animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Linked transaction row highlight */
+.transaction-row.linked {
+  background-color: #d4edda;
+  animation: highlightPulse 1s ease-in-out;
+}
+
+.transaction-row.linked:hover {
+  background-color: #c3e6cb;
+}
+
+@keyframes highlightPulse {
+  0% {
+    background-color: #28a745;
+  }
+  50% {
+    background-color: #d4edda;
+  }
+  100% {
+    background-color: #d4edda;
+  }
+}
+
+/* Linked indicator badge */
+.linked-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  background-color: #28a745;
+  color: white;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* Disabled button state */
+.btn-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background-color: #6c757d;
+}
+
+.btn-select:disabled:hover {
+  background-color: #6c757d;
+}
+
+/* No transactions message */
+.no-transactions {
+  padding: 20px;
+  text-align: center;
+  color: #666;
+  font-style: italic;
+}

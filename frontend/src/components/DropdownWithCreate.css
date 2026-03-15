@@ -1,0 +1,9 @@
+.dropdown-with-create {
+  width: 100%;
+}
+
+.dropdown-with-create option[value="__CREATE_NEW__"] {
+  font-style: italic;
+  color: #646cff;
+  font-weight: 600;
+}

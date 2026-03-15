@@ -1,0 +1,272 @@
+.import-result {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Header section */
+.import-result-header {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 16px;
+  gap: 20px;
+}
+
+.import-success-banner {
+  flex: 1;
+  padding: 16px 20px;
+  background-color: #d4edda;
+  border: 1px solid #c3e6cb;
+  border-radius: 4px;
+}
+
+.import-success-banner h2 {
+  margin: 0 0 8px 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #155724;
+}
+
+.import-details {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+
+.import-detail-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.detail-label {
+  color: #155724;
+  font-weight: 500;
+}
+
+.detail-value {
+  color: #155724;
+}
+
+.import-detail-divider {
+  color: #a3cfbb;
+}
+
+.upload-another-btn {
+  flex-shrink: 0;
+  padding: 10px 20px;
+  background-color: #2196f3;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.upload-another-btn:hover {
+  background-color: #1976d2;
+}
+
+/* Loading and error states */
+.import-loading {
+  text-align: center;
+  padding: 40px;
+  color: #1976d2;
+  font-size: 16px;
+}
+
+.import-error {
+  padding: 12px 16px;
+  background-color: #f8d7da;
+  border: 1px solid #f5c6cb;
+  border-radius: 4px;
+  color: #721c24;
+  margin-bottom: 16px;
+}
+
+/* Transactions section */
+.import-transactions-section {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.transactions-header {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.transactions-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+}
+
+.transactions-count {
+  font-size: 13px;
+  color: #666;
+}
+
+/* Table wrapper - scrollable */
+.import-table-wrapper {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  background: white;
+}
+
+/* Table styles */
+.import-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.import-table thead th {
+  position: sticky;
+  top: 0;
+  background-color: #f8f9fa;
+  border-bottom: 2px solid #dee2e6;
+  padding: 10px 12px;
+  text-align: left;
+  font-weight: 600;
+  color: #495057;
+  white-space: nowrap;
+  z-index: 1;
+}
+
+.import-table thead th.amount-header {
+  text-align: right;
+}
+
+.import-table tbody td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #e9ecef;
+  vertical-align: middle;
+}
+
+.import-table tbody tr:nth-child(even) {
+  background-color: #f8f9fa;
+}
+
+.import-table tbody tr:hover {
+  background-color: #e9ecef;
+}
+
+/* Cell styles */
+.date-cell {
+  width: 90px;
+  white-space: nowrap;
+}
+
+.description-cell {
+  max-width: 250px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.amount-cell {
+  width: 100px;
+  text-align: right;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.amount-cell.positive {
+  color: #28a745;
+}
+
+.amount-cell.negative {
+  color: #dc3545;
+}
+
+.amount-indicator {
+  margin-left: 4px;
+  font-size: 11px;
+}
+
+.party-cell,
+.type-cell {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.category-cell {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sub-category {
+  font-size: 11px;
+  color: #666;
+}
+
+/* Summary section */
+.import-summary {
+  flex-shrink: 0;
+  margin-top: 16px;
+  padding: 16px 20px;
+  background-color: #f8f9fa;
+  border-radius: 4px;
+  border: 1px solid #e9ecef;
+}
+
+.import-summary h4 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 20px;
+}
+
+.summary-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.summary-stat .stat-label {
+  font-size: 12px;
+  color: #666;
+  font-weight: 500;
+}
+
+.summary-stat .stat-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #333;
+}
+
+.summary-stat .stat-value.positive {
+  color: #28a745;
+}
+
+.summary-stat .stat-value.negative {
+  color: #dc3545;
+}

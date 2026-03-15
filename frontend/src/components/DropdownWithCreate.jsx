@@ -1,0 +1,54 @@
+import Dropdown from './Dropdown';
+import './DropdownWithCreate.css';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('DropdownWithCreate');
+
+export default function DropdownWithCreate({
+  value,
+  onChange,
+  options = [],
+  disabled = false,
+  placeholder = 'Select...',
+  valueKey = 'id',
+  labelKey = 'name',
+  includeEmpty = false,
+  emptyLabel = 'Please Select',
+  onCreateNew = null,
+  createLabel = 'Create New...'
+}) {
+  const handleDropdownChange = (newValue) => {
+    logger.debug('DropdownWithCreate: handleDropdownChange called with:', newValue);
+
+    if (newValue === '__CREATE_NEW__') {
+      logger.debug('DropdownWithCreate: Create new selected');
+      if (onCreateNew) {
+        onCreateNew();
+      }
+    } else {
+      onChange(newValue);
+    }
+  };
+
+  // Add create option to the list
+  const optionsWithCreate = onCreateNew ? [
+    ...options,
+    { [valueKey]: '__CREATE_NEW__', [labelKey]: createLabel }
+  ] : options;
+
+  return (
+    <div className="dropdown-with-create">
+      <Dropdown
+        value={value}
+        onChange={handleDropdownChange}
+        options={optionsWithCreate}
+        disabled={disabled && !onCreateNew} // Only disable if no create option
+        placeholder={placeholder}
+        valueKey={valueKey}
+        labelKey={labelKey}
+        includeEmpty={includeEmpty}
+        emptyLabel={emptyLabel}
+      />
+    </div>
+  );
+}

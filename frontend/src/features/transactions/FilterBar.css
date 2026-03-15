@@ -1,0 +1,84 @@
+.filter-bar {
+  background-color: rgba(100, 108, 255, 0.05);
+  padding: 1.5rem;
+  border-radius: 8px;
+  margin-bottom: 2rem;
+}
+
+.filter-bar h3 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+  font-size: 1.2em;
+}
+
+.filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.filter-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.filter-item label {
+  font-size: 0.9em;
+  font-weight: 500;
+  color: #888;
+}
+
+.filter-checkbox {
+  justify-content: center;
+  padding-top: 1.4rem; /* Align checkbox with other inputs */
+}
+
+.date-input,
+.text-input {
+  padding: 0.4em 0.8em;
+  border: 1px solid #444;
+  border-radius: 4px;
+  background-color: #1a1a1a;
+  color: rgba(255, 255, 255, 0.87);
+  font-size: 0.9em;
+  font-family: inherit;
+}
+
+.date-input:hover,
+.text-input:hover {
+  border-color: #646cff;
+}
+
+.date-input:focus,
+.text-input:focus {
+  outline: 2px solid #646cff;
+  outline-offset: 1px;
+}
+
+.text-input::placeholder {
+  color: #666;
+  font-style: italic;
+}
+
+.clear-filters-button {
+  margin-top: 0.5rem;
+}
+
+@media (prefers-color-scheme: light) {
+  .filter-bar {
+    background-color: rgba(100, 108, 255, 0.05);
+  }
+
+  .date-input,
+  .text-input {
+    background-color: #f9f9f9;
+    border-color: #ddd;
+    color: #213547;
+  }
+  
+  .text-input::placeholder {
+    color: #999;
+  }
+}

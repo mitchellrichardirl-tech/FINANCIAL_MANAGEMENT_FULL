@@ -1,0 +1,35 @@
+.editable-text-input {
+  padding: 0.4em 0.6em;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background-color: transparent;
+  color: inherit;
+  font-size: 0.9em;
+  width: 100%;
+  box-sizing: border-box;
+  transition: all 0.2s;
+}
+
+.editable-text-input:hover {
+  background-color: rgba(100, 108, 255, 0.1);
+  border-color: #646cff;
+}
+
+.editable-text-input:focus {
+  outline: none;
+  background-color: #1a1a1a;
+  border-color: #646cff;
+}
+
+.editable-text-readonly {
+  display: block;
+  padding: 0.4em 0.6em;
+  color: #888;
+  font-size: 0.9em;
+}
+
+@media (prefers-color-scheme: light) {
+  .editable-text-input:focus {
+    background-color: #ffffff;
+  }
+}
