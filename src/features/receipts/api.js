@@ -17,7 +17,6 @@ export async function processReceiptImage(file) {
  * Get receipt image
  */
 export async function getReceiptImage(receiptId) {
-  console.log('API url: ', `/receipts/${receiptId}/image`);
   return await apiCall(`/receipts/${receiptId}/image`);
 }
 
@@ -34,7 +33,6 @@ export const confirmReceipt = (receiptData) =>
  * Delete receipt
  */
 export const deleteReceipt = async(receiptId) => {
-  console.log('API url: ', `/receipts/${receiptId}/cancel`);
   return await apiCall(`/receipts/${receiptId}/cancel`, {
     method: 'POST'
   });

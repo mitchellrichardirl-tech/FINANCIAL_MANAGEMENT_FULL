@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import Dropdown from '@/components/Dropdown';
 import Checkbox from '@/components/Checkbox';
 import './FilterBar.css';
-
+import { createLogger } from '@/lib/logger';
+const logger = createLogger('FilterBar');
 export default function FilterBar({ 
   accounts = [],
   parties = [],
@@ -11,7 +12,7 @@ export default function FilterBar({
   types = [],  // NEW
   onFilterChange 
 }) {
-  console.log('FilterBar props:', { 
+  logger.debug('FilterBar props:', { 
     accounts: accounts.length, 
     parties: parties.length,
     categories: categories.length,

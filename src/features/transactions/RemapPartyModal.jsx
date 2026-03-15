@@ -2,54 +2,42 @@ import { useState, useEffect, useMemo } from 'react';
 import DropdownWithCreate from '@/components/DropdownWithCreate';
 import CreateCategoryModal from './CreateCategoryModal';
 import './RemapPartyModal.css';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('RemapPartyModal');
 
 export default function RemapPartyModal({
-  isOpen,
-  onClose,
-  onSave,
-  parties,
-  categories,
-  subCategories,
-  types,
-  onCategoryCreated,
-  onSubCategoryCreated,
-  onTypeCreated,
-  initialPartyId = null,   // new: pre-select a party when launched from a row
+  isOpen, onClose, onSave, parties, categories, subCategories, types,
+  onCategoryCreated, onSubCategoryCreated, onTypeCreated,
+  initialPartyId = null,
 }) {
   const [selectedPartyId, setSelectedPartyId] = useState(null);
   const [selectedCategoryId, setSelectedCategoryId] = useState(null);
   const [selectedSubCategoryId, setSelectedSubCategoryId] = useState(null);
   const [selectedTypeId, setSelectedTypeId] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(null);
+  // error state removed — parent handles all messaging
 
   const [createModalState, setCreateModalState] = useState({
-    isOpen: false,
-    type: null,
-    parentName: '',
-    parentId: null,
+    isOpen: false, type: null, parentName: '', parentId: null,
   });
 
-  // ── Reset when modal opens, honouring any pre-selected party ──
   useEffect(() => {
     if (isOpen) {
       setSelectedPartyId(initialPartyId);
       setSelectedCategoryId(null);
       setSelectedSubCategoryId(null);
       setSelectedTypeId(null);
-      setError(null);
       setSaving(false);
     }
   }, [isOpen, initialPartyId]);
 
-  // ── Derived data ──
-
+  // ── Derived data (unchanged) ──
   const selectedParty = useMemo(
     () => parties.find((p) => p.id === selectedPartyId) ?? null,
     [parties, selectedPartyId]
   );
 
-  // Resolve the full category path for the currently-selected party
   const currentMapping = useMemo(() => {
     if (!selectedParty) return null;
     const type = types.find((t) => t.id === selectedParty.type_id);
@@ -65,9 +53,6 @@ export default function RemapPartyModal({
     };
   }, [selectedParty, types, subCategories, categories]);
 
-  // Sorted parties, with uncategorised ones surfaced first via optgroup - but
-  // DropdownWithCreate doesn't support optgroups directly, so we just sort:
-  // "Unknown" type parties first, then alphabetically.
   const unknownTypeId = useMemo(
     () => types.find((t) => t.type === 'Unknown')?.id ?? null,
     [types]
@@ -83,7 +68,6 @@ export default function RemapPartyModal({
     return [...unknown, ...known];
   }, [parties, unknownTypeId]);
 
-  // Cascade-filtered subcategories / types
   const filteredSubCategories = useMemo(() => {
     if (!selectedCategoryId) return [];
     return [...subCategories]
@@ -103,14 +87,12 @@ export default function RemapPartyModal({
     [categories]
   );
 
-  // ── Change handlers (cascade clears) ──
-
+  // ── Change handlers (unchanged) ──
   const handlePartyChange = (partyId) => {
     setSelectedPartyId(partyId ? parseInt(partyId) : null);
     setSelectedCategoryId(null);
     setSelectedSubCategoryId(null);
     setSelectedTypeId(null);
-    setError(null);
   };
 
   const handleCategoryChange = (categoryId) => {
@@ -131,51 +113,31 @@ export default function RemapPartyModal({
   const handleTypeChange = (typeId) => {
     if (typeId) {
       const type = types.find((t) => t.id === parseInt(typeId));
-      const sc = type
-        ? subCategories.find((s) => s.id === type.sub_category_id)
-        : null;
+      const sc = type ? subCategories.find((s) => s.id === type.sub_category_id) : null;
       setSelectedSubCategoryId(type?.sub_category_id ?? selectedSubCategoryId);
       setSelectedCategoryId(sc?.category_id ?? selectedCategoryId);
     }
     setSelectedTypeId(typeId ? parseInt(typeId) : null);
   };
 
-  // ── Create-new handlers ──
-
+  // ── Create-new handlers — dead validation removed ──
   const handleCreateCategory = () => {
-    setCreateModalState({
-      isOpen: true,
-      type: 'category',
-      parentName: '',
-      parentId: null,
-    });
+    setCreateModalState({ isOpen: true, type: 'category', parentName: '', parentId: null });
   };
 
   const handleCreateSubCategory = () => {
     const cat = categories.find((c) => c.id === selectedCategoryId);
-    if (!cat) {
-      setError('Please select a category first');
-      return;
-    }
     setCreateModalState({
-      isOpen: true,
-      type: 'sub_category',
-      parentName: cat.category,
-      parentId: cat.id,
+      isOpen: true, type: 'sub_category',
+      parentName: cat.category, parentId: cat.id,
     });
   };
 
   const handleCreateType = () => {
     const sc = subCategories.find((s) => s.id === selectedSubCategoryId);
-    if (!sc) {
-      setError('Please select a sub-category first');
-      return;
-    }
     setCreateModalState({
-      isOpen: true,
-      type: 'type',
-      parentName: sc.sub_category,
-      parentId: sc.id,
+      isOpen: true, type: 'type',
+      parentName: sc.sub_category, parentId: sc.id,
     });
   };
 
@@ -201,17 +163,14 @@ export default function RemapPartyModal({
           break;
         case 'type':
           newItem = await onTypeCreated(name, parentId, description);
-          if (newItem?.id) {
-            setSelectedTypeId(newItem.id);
-          }
-          break;
-        default:
+          if (newItem?.id) setSelectedTypeId(newItem.id);
           break;
       }
       setCreateModalState({ isOpen: false, type: null, parentName: '', parentId: null });
       return newItem;
     } catch (err) {
-      console.error('Error creating item:', err);
+      // parent's create handlers already toast
+      logger.error('Error creating item:', err);
       throw err;
     }
   };
@@ -220,24 +179,15 @@ export default function RemapPartyModal({
     setCreateModalState({ isOpen: false, type: null, parentName: '', parentId: null });
   };
 
-  // ── Save ──
-
+  // ── Save — simplified, parent handles all messaging ──
   const handleSave = async () => {
     if (!selectedPartyId || !selectedTypeId) return;
     setSaving(true);
-    setError(null);
     try {
-      const result = await onSave(selectedPartyId, selectedTypeId);
-      if (result?.data?.action === 'merged') {
-        console.log(
-          `Party merged into existing party (id=${result.new_party_id}). ` +
-          `${result.transactions_moved} transactions moved.`
-        );
-      }
+      await onSave(selectedPartyId, selectedTypeId);
       handleClose();
-    } catch (err) {
-      setError(err.message || 'Failed to remap party');
-    } finally {
+    } catch {
+      // parent already toasted — just release the spinner
       setSaving(false);
     }
   };
@@ -248,7 +198,6 @@ export default function RemapPartyModal({
     setSelectedCategoryId(null);
     setSelectedSubCategoryId(null);
     setSelectedTypeId(null);
-    setError(null);
     onClose();
   };
 
@@ -258,55 +207,28 @@ export default function RemapPartyModal({
 
   if (!isOpen) return null;
 
-  const isChanged =
-    selectedTypeId !== null && selectedParty?.type_id !== selectedTypeId;
-
+  const isChanged = selectedTypeId !== null && selectedParty?.type_id !== selectedTypeId;
   const canSave = isChanged && !saving;
-
-  // Label for the party option: flag uncategorised ones
-  const partyLabel = (p) =>
-    p.type_id === unknownTypeId ? `⚠ ${p.name}` : p.name;
+  const partyLabel = (p) => (p.type_id === unknownTypeId ? `⚠ ${p.name}` : p.name);
 
   return (
     <>
       <div className="modal-overlay" onClick={handleBackdropClick}>
-        <div
-          className="modal-content remap-modal"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* ── Header ── */}
+        <div className="modal-content remap-modal" onClick={(e) => e.stopPropagation()}>
           <div className="modal-header">
             <h2>Remap Party</h2>
-            <button
-              className="modal-close-btn"
-              onClick={handleClose}
-              disabled={saving}
-              aria-label="Close modal"
-            >
-              ×
-            </button>
+            <button className="modal-close-btn" onClick={handleClose} disabled={saving} aria-label="Close modal">×</button>
           </div>
 
-          {error && (
-            <div className="modal-error">
-              {error}
-              <button onClick={() => setError(null)} aria-label="Dismiss error">
-                ×
-              </button>
-            </div>
-          )}
+          {/* error banner removed */}
 
-          {/* ── Body ── */}
           <div className="bulk-edit-form">
-
-            {/* Party picker */}
             <div className="form-section">
               <h3>Party</h3>
               <p className="form-hint">
                 Select the party whose category mapping you want to change.
                 Uncategorised parties are marked with ⚠.
               </p>
-
               <div className="form-field">
                 <label>Party</label>
                 <DropdownWithCreate
@@ -321,20 +243,16 @@ export default function RemapPartyModal({
                   disabled={saving}
                 />
               </div>
-
-              {/* Current mapping badge */}
               {currentMapping && (
                 <div className="current-mapping">
                   <span className="mapping-label">Currently mapped to:</span>
                   <span className="mapping-path">
-                    {currentMapping.category} → {currentMapping.subCategory} →{' '}
-                    {currentMapping.type}
+                    {currentMapping.category} → {currentMapping.subCategory} → {currentMapping.type}
                   </span>
                 </div>
               )}
             </div>
 
-            {/* New category hierarchy — only shown once a party is chosen */}
             {selectedPartyId && (
               <div className="form-section">
                 <h3>New Category</h3>
@@ -342,7 +260,6 @@ export default function RemapPartyModal({
                   Select at any level — parent levels will be set automatically.
                   Lower levels will be cleared when you change a higher level.
                 </p>
-
                 <div className="form-field">
                   <label>Category</label>
                   <DropdownWithCreate
@@ -358,7 +275,6 @@ export default function RemapPartyModal({
                     disabled={saving}
                   />
                 </div>
-
                 <div className="form-field">
                   <label>Sub-Category</label>
                   <DropdownWithCreate
@@ -368,17 +284,12 @@ export default function RemapPartyModal({
                     valueKey="id"
                     labelKey="sub_category"
                     includeEmpty
-                    emptyLabel={
-                      selectedCategoryId
-                        ? 'Select sub-category...'
-                        : 'Select a category first'
-                    }
+                    emptyLabel={selectedCategoryId ? 'Select sub-category...' : 'Select a category first'}
                     onCreateNew={selectedCategoryId ? handleCreateSubCategory : null}
                     createLabel="➕ Create New Sub-Category..."
                     disabled={saving || !selectedCategoryId}
                   />
                 </div>
-
                 <div className="form-field">
                   <label>Type</label>
                   <DropdownWithCreate
@@ -388,11 +299,7 @@ export default function RemapPartyModal({
                     valueKey="id"
                     labelKey="type"
                     includeEmpty
-                    emptyLabel={
-                      selectedSubCategoryId
-                        ? 'Select type...'
-                        : 'Select a sub-category first'
-                    }
+                    emptyLabel={selectedSubCategoryId ? 'Select type...' : 'Select a sub-category first'}
                     onCreateNew={selectedSubCategoryId ? handleCreateType : null}
                     createLabel="➕ Create New Type..."
                     disabled={saving || !selectedSubCategoryId}
@@ -402,26 +309,13 @@ export default function RemapPartyModal({
             )}
           </div>
 
-          {/* ── Footer ── */}
           <div className="modal-actions">
-            <button
-              className="cancel-button"
-              onClick={handleClose}
-              disabled={saving}
-              type="button"
-            >
-              Cancel
-            </button>
-            <button
-              className="save-button"
-              onClick={handleSave}
-              disabled={!canSave}
-              type="button"
-            >
+            <button className="cancel-button" onClick={handleClose} disabled={saving} type="button">Cancel</button>
+            <button className="save-button" onClick={handleSave} disabled={!canSave} type="button">
               {saving ? 'Remapping...' : 'Remap Party'}
             </button>
           </div>
-        </div>
+        </div>a
       </div>
 
       <CreateCategoryModal

@@ -1,5 +1,8 @@
 import Dropdown from './Dropdown';
 import './DropdownWithCreate.css';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('DropdownWithCreate');
 
 export default function DropdownWithCreate({
   value,
@@ -15,10 +18,10 @@ export default function DropdownWithCreate({
   createLabel = 'Create New...'
 }) {
   const handleDropdownChange = (newValue) => {
-    console.log('DropdownWithCreate: handleDropdownChange called with:', newValue);
-    
+    logger.debug('DropdownWithCreate: handleDropdownChange called with:', newValue);
+
     if (newValue === '__CREATE_NEW__') {
-      console.log('DropdownWithCreate: Create new selected');
+      logger.debug('DropdownWithCreate: Create new selected');
       if (onCreateNew) {
         onCreateNew();
       }

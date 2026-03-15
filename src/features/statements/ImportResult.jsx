@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react';
 import { getTransactions } from '@/features/transactions/api';
 import './ImportResult.css';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('ImportResult');
 
 export default function ImportResult({ result, onUploadAnother, showHeader = true }) {
   const [transactions, setTransactions] = useState(null);
@@ -26,7 +29,7 @@ export default function ImportResult({ result, onUploadAnother, showHeader = tru
       setTransactions(data.transactions || data);
     } catch (err) {
       setError('Failed to load transactions');
-      console.error('Error fetching transactions:', err);
+      logger.error('Error fetching transactions:', err);
     } finally {
       setLoading(false);
     }

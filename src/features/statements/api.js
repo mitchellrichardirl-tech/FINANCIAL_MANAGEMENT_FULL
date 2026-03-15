@@ -1,5 +1,8 @@
 import { apiCall, unwrap } from '@/lib/apiClient';
+import { AppError } from '@/lib/errors';
+import { createLogger } from '@/lib/logger';
 
+const logger = createLogger('statements:api');
 /**
  * Get all accounts
  */
@@ -36,15 +39,33 @@ export async function previewFile(file, numRows = 20) {
 }
 
 export async function importFile(file, startRow, accountId) {
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('start_row', startRow.toString());
-  formData.append('account_id', parseInt(accountId).toString());
-  formData.append('has_header', 'true');
-  formData.append('skip_empty_rows', 'true');
-  formData.append('strip_whitespace', 'true');
-  formData.append('original_filename', file.name);
-  return apiCall('/tabular/import', { method: 'POST', body: formData });
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('start_row', startRow.toString());
+    formData.append('account_id', parseInt(accountId).toString());
+    formData.append('has_header', 'true');
+    formData.append('skip_empty_rows', 'true');
+    formData.append('strip_whitespace', 'true');
+    formData.append('original_filename', file.name);
+
+    logger.debug('Importing file with parameters:', {
+      fileName: file.name,
+      fileSize: file.size,
+      startRow,
+      accountId,
+    });
+    return apiCall('/tabular/import', { method: 'POST', body: formData });
+  } catch (err) {
+    throw err instanceof AppError
+      ? Object.assign(err, { context: 'importing statement' })
+      : new AppError({
+          message: err.message,
+          userMessage: 'Failed to import the statement.',
+          context: 'importing statement',
+          cause: err,
+        });
+  }
 }
 
 export async function getUploads() {

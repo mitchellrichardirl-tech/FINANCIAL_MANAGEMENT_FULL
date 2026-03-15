@@ -1,6 +1,10 @@
 import { createPortal } from 'react-dom';
 import { useState, useEffect } from 'react';
+import { ErrorCode } from '@/lib/apiErrors';
 import './CreateCategoryModal.css';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('CreateCategoryModal');
 
 const TYPE_CONFIG = {
   category: {
@@ -29,6 +33,13 @@ const TYPE_CONFIG = {
   },
 };
 
+// Error codes that relate to the name input specifically.
+// These get attached to the field rather than shown as a general banner.
+const NAME_FIELD_CODES = new Set([
+  ErrorCode.DUPLICATE_NAME,
+  ErrorCode.REQUIRED_FIELD,
+]);
+
 export default function CreateCategoryModal({
   isOpen,
   onClose,
@@ -40,14 +51,18 @@ export default function CreateCategoryModal({
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-  const [error, setError] = useState(null);
 
-  // Reset form when modal opens/closes or type changes
+  // General error (shown in banner at top of form)
+  const [error, setError] = useState(null);
+  // Field-specific error (shown inline under the name input)
+  const [nameError, setNameError] = useState(null);
+
   useEffect(() => {
     if (isOpen) {
       setName('');
       setDescription('');
       setError(null);
+      setNameError(null);
     }
   }, [isOpen, type]);
 
@@ -55,36 +70,57 @@ export default function CreateCategoryModal({
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     if (!name.trim()) {
-      setError('Name is required');
+      setNameError('Name is required');
       return;
     }
 
     setIsSaving(true);
     setError(null);
+    setNameError(null);
 
     try {
       await onSave(name.trim(), parentId, description.trim());
-      // Modal will be closed by parent after successful save
+      // Parent closes modal on success
     } catch (err) {
-      console.error('Error creating item:', err);
-      setError(err.message || 'Failed to create item');
+      logger.error('Error creating item:', err);
+
+      // Prefer the pre-formatted userMessage from ApiError
+      const message = err.userMessage || err.message || 'Failed to create item';
+
+      // Route the error to the right place:
+      // - DUPLICATE_NAME, REQUIRED_FIELD on `name` → inline under the input
+      // - err.field === 'name' (or the entity's name column) → inline
+      // - Everything else → general banner
+      const isNameField =
+        NAME_FIELD_CODES.has(err.code) ||
+        err.field === 'name' ||
+        err.field === type ||          // backend sends field='category', 'type', etc.
+        err.field === 'sub_category';
+
+      if (isNameField) {
+        setNameError(message);
+      } else {
+        setError(message);
+      }
     } finally {
       setIsSaving(false);
     }
   };
 
+  const handleNameChange = (e) => {
+    setName(e.target.value);
+    // Clear field error as soon as user starts typing
+    if (nameError) setNameError(null);
+  };
+
   const handleClose = () => {
-    if (!isSaving) {
-      onClose();
-    }
+    if (!isSaving) onClose();
   };
 
   const handleBackdropClick = (e) => {
-    if (e.target === e.currentTarget && !isSaving) {
-      onClose();
-    }
+    if (e.target === e.currentTarget && !isSaving) onClose();
   };
 
   if (!isOpen) return null;
@@ -94,10 +130,11 @@ export default function CreateCategoryModal({
       <div className="modal-content create-modal">
         <div className="modal-header">
           <h2>{config.title}</h2>
-          <button 
-            className="modal-close" 
+          <button
+            className="modal-close"
             onClick={handleClose}
             disabled={isSaving}
+            aria-label="Close"
           >
             ×
           </button>
@@ -106,7 +143,7 @@ export default function CreateCategoryModal({
         <form onSubmit={handleSubmit}>
           <div className="modal-body">
             {error && (
-              <div className="modal-error">
+              <div className="modal-error" role="alert">
                 {error}
               </div>
             )}
@@ -118,17 +155,24 @@ export default function CreateCategoryModal({
               </div>
             )}
 
-            <div className="form-group">
+            <div className={`form-group ${nameError ? 'has-error' : ''}`}>
               <label htmlFor="item-name">{config.nameLabel} *</label>
               <input
                 id="item-name"
                 type="text"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={handleNameChange}
                 placeholder={config.namePlaceholder}
                 disabled={isSaving}
                 autoFocus
+                aria-invalid={!!nameError}
+                aria-describedby={nameError ? 'item-name-error' : undefined}
               />
+              {nameError && (
+                <span id="item-name-error" className="field-error" role="alert">
+                  {nameError}
+                </span>
+              )}
             </div>
 
             <div className="form-group">

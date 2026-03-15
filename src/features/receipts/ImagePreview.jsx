@@ -3,6 +3,10 @@ import { Document, Page, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 import './ImagePreview.css';
+import { createLogger } from '@/lib/logger';
+import { parseApiError, isNotFound } from '@/lib/apiErrors';
+
+const logger = createLogger('ImagePreview');
 
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
@@ -35,7 +39,12 @@ function ImagePreview({
     fetch(src, { method: 'HEAD' })
       .then(response => {
         if (!response.ok) {
-          throw new Error(`Failed to fetch file: ${response.status}`);
+          const parsed = parseApiError(response);
+          throw new Error(
+            isNotFound(parsed)
+            ? 'File not found (it may have been deleted)'
+            : 'Unable to load file preview'
+          );
         }
         
         const contentType = response.headers.get('Content-Type');
@@ -70,7 +79,7 @@ function ImagePreview({
   };
 
   const onDocumentLoadError = (error) => {
-    console.error('Error loading PDF:', error);
+    logger.error('Error loading PDF:', error);
     setError('Failed to load PDF');
     setIsLoading(false);
   };

@@ -1,5 +1,19 @@
 import { useState } from 'react';
 import { createAccount } from './api';
+import { ErrorCode } from '@/lib/apiErrors';
+
+// Map backend field names to our input IDs
+const FIELD_MAP = {
+  account_name: 'accountName',
+  account_type: 'accountType',
+  statement_format: 'statementFormat',
+};
+
+// Codes that should highlight the name field specifically
+const NAME_FIELD_CODES = new Set([
+  ErrorCode.DUPLICATE_NAME,
+  ErrorCode.REQUIRED_FIELD,
+]);
 
 function AccountSelector({
   accounts,
@@ -7,14 +21,26 @@ function AccountSelector({
   onAccountChange,
   onAccountCreated,
   disabled,
-  statementFormats = [],  // <-- new prop
+  statementFormats = [],
 }) {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newAccountName, setNewAccountName] = useState('');
   const [newAccountType, setNewAccountType] = useState('bank');
-  const [newStatementFormat, setNewStatementFormat] = useState('');  // <-- new
+  const [newStatementFormat, setNewStatementFormat] = useState('');
   const [creating, setCreating] = useState(false);
-  const [error, setError] = useState('');
+
+  // Field-level errors: { accountName: '...', accountType: '...', _general: '...' }
+  const [fieldErrors, setFieldErrors] = useState({});
+
+  const clearFieldError = (field) => {
+    if (fieldErrors[field]) {
+      setFieldErrors((prev) => {
+        const next = { ...prev };
+        delete next[field];
+        return next;
+      });
+    }
+  };
 
   const handleChange = (e) => {
     const value = e.target.value;
@@ -29,10 +55,11 @@ function AccountSelector({
 
   const handleCreateAccount = async (e) => {
     e.preventDefault();
-    setError('');
+    setFieldErrors({});
 
+    // Client-side validation (instant feedback)
     if (!newAccountName.trim()) {
-      setError('Account name is required');
+      setFieldErrors({ accountName: 'Account name is required' });
       return;
     }
 
@@ -41,7 +68,7 @@ function AccountSelector({
       const newAccount = await createAccount(
         newAccountName,
         newAccountType,
-        newStatementFormat || null,  // <-- send null if not selected
+        newStatementFormat || null,
       );
 
       onAccountCreated(newAccount);
@@ -53,10 +80,31 @@ function AccountSelector({
       setNewAccountType('bank');
       setNewStatementFormat('');
     } catch (err) {
-      setError(err.message || 'Failed to create account');
+      const message = err.userMessage || err.message || 'Failed to create account';
+
+      // Route to the correct field
+      const mappedField = err.field ? FIELD_MAP[err.field] : null;
+
+      if (mappedField) {
+        setFieldErrors({ [mappedField]: message });
+      } else if (NAME_FIELD_CODES.has(err.code)) {
+        // DUPLICATE_NAME / REQUIRED_FIELD without explicit field → assume name
+        setFieldErrors({ accountName: message });
+      } else {
+        // Generic error at top of form
+        setFieldErrors({ _general: message });
+      }
     } finally {
       setCreating(false);
     }
+  };
+
+  const handleCancel = () => {
+    setShowCreateForm(false);
+    setFieldErrors({});
+    setNewAccountName('');
+    setNewAccountType('bank');
+    setNewStatementFormat('');
   };
 
   const getFormatName = (formatKey) => {
@@ -67,50 +115,86 @@ function AccountSelector({
 
   if (showCreateForm) {
     return (
-      <div style={{
-        marginTop: '20px',
-        padding: '20px',
-        border: '1px solid #ddd',
-        borderRadius: '4px',
-        backgroundColor: '#f9f9f9'
-      }}>
+      <div
+        style={{
+          marginTop: '20px',
+          padding: '20px',
+          border: '1px solid #ddd',
+          borderRadius: '4px',
+          backgroundColor: '#f9f9f9',
+        }}
+      >
         <h3 style={{ marginTop: 0 }}>Create New Account</h3>
 
         <form onSubmit={handleCreateAccount}>
+          {/* General error (doesn't map to a specific field) */}
+          {fieldErrors._general && (
+            <div style={{ color: '#dc2626', marginBottom: '15px' }} role="alert">
+              {fieldErrors._general}
+            </div>
+          )}
+
           <div style={{ marginBottom: '15px' }}>
-            <label style={{ display: 'block', marginBottom: '5px' }}>
+            <label
+              htmlFor="accountName"
+              style={{ display: 'block', marginBottom: '5px' }}
+            >
               Account Name:
             </label>
             <input
+              id="accountName"
               type="text"
               value={newAccountName}
-              onChange={(e) => setNewAccountName(e.target.value)}
+              onChange={(e) => {
+                setNewAccountName(e.target.value);
+                clearFieldError('accountName');
+              }}
               placeholder="e.g., My Checking Account"
               disabled={creating}
+              aria-invalid={!!fieldErrors.accountName}
+              aria-describedby={fieldErrors.accountName ? 'accountName-error' : undefined}
               style={{
                 padding: '8px',
                 width: '100%',
                 maxWidth: '400px',
-                border: '1px solid #ccc',
-                borderRadius: '4px'
+                border: `1px solid ${fieldErrors.accountName ? '#dc2626' : '#ccc'}`,
+                borderRadius: '4px',
+                backgroundColor: fieldErrors.accountName ? '#fef2f2' : 'white',
               }}
             />
+            {fieldErrors.accountName && (
+              <span
+                id="accountName-error"
+                style={{ display: 'block', marginTop: '4px', color: '#dc2626', fontSize: '14px' }}
+                role="alert"
+              >
+                {fieldErrors.accountName}
+              </span>
+            )}
           </div>
 
           <div style={{ marginBottom: '15px' }}>
-            <label style={{ display: 'block', marginBottom: '5px' }}>
+            <label
+              htmlFor="accountType"
+              style={{ display: 'block', marginBottom: '5px' }}
+            >
               Account Type:
             </label>
             <select
+              id="accountType"
               value={newAccountType}
-              onChange={(e) => setNewAccountType(e.target.value)}
+              onChange={(e) => {
+                setNewAccountType(e.target.value);
+                clearFieldError('accountType');
+              }}
               disabled={creating}
+              aria-invalid={!!fieldErrors.accountType}
               style={{
                 padding: '8px',
                 width: '100%',
                 maxWidth: '400px',
-                border: '1px solid #ccc',
-                borderRadius: '4px'
+                border: `1px solid ${fieldErrors.accountType ? '#dc2626' : '#ccc'}`,
+                borderRadius: '4px',
               }}
             >
               <option value="bank">Bank Account</option>
@@ -119,22 +203,38 @@ function AccountSelector({
               <option value="investment">Investment</option>
               <option value="other">Other</option>
             </select>
+            {fieldErrors.accountType && (
+              <span
+                style={{ display: 'block', marginTop: '4px', color: '#dc2626', fontSize: '14px' }}
+                role="alert"
+              >
+                {fieldErrors.accountType}
+              </span>
+            )}
           </div>
 
           <div style={{ marginBottom: '15px' }}>
-            <label style={{ display: 'block', marginBottom: '5px' }}>
+            <label
+              htmlFor="statementFormat"
+              style={{ display: 'block', marginBottom: '5px' }}
+            >
               Statement Format:
             </label>
             <select
+              id="statementFormat"
               value={newStatementFormat}
-              onChange={(e) => setNewStatementFormat(e.target.value)}
+              onChange={(e) => {
+                setNewStatementFormat(e.target.value);
+                clearFieldError('statementFormat');
+              }}
               disabled={creating}
+              aria-invalid={!!fieldErrors.statementFormat}
               style={{
                 padding: '8px',
                 width: '100%',
                 maxWidth: '400px',
-                border: '1px solid #ccc',
-                borderRadius: '4px'
+                border: `1px solid ${fieldErrors.statementFormat ? '#dc2626' : '#ccc'}`,
+                borderRadius: '4px',
               }}
             >
               <option value="">-- None (configure later) --</option>
@@ -144,16 +244,18 @@ function AccountSelector({
                 </option>
               ))}
             </select>
+            {fieldErrors.statementFormat && (
+              <span
+                style={{ display: 'block', marginTop: '4px', color: '#dc2626', fontSize: '14px' }}
+                role="alert"
+              >
+                {fieldErrors.statementFormat}
+              </span>
+            )}
             <small style={{ display: 'block', marginTop: '4px', color: '#666' }}>
               Required for importing bank statements. Can be set later.
             </small>
           </div>
-
-          {error && (
-            <div style={{ color: 'red', marginBottom: '15px' }}>
-              {error}
-            </div>
-          )}
 
           <div style={{ display: 'flex', gap: '10px' }}>
             <button
@@ -166,14 +268,14 @@ function AccountSelector({
                 border: 'none',
                 borderRadius: '4px',
                 cursor: creating ? 'not-allowed' : 'pointer',
-                opacity: creating ? 0.6 : 1
+                opacity: creating ? 0.6 : 1,
               }}
             >
               {creating ? 'Creating...' : 'Create Account'}
             </button>
             <button
               type="button"
-              onClick={() => setShowCreateForm(false)}
+              onClick={handleCancel}
               disabled={creating}
               style={{
                 padding: '8px 20px',
@@ -181,7 +283,7 @@ function AccountSelector({
                 color: 'white',
                 border: 'none',
                 borderRadius: '4px',
-                cursor: 'pointer'
+                cursor: 'pointer',
               }}
             >
               Cancel
@@ -206,7 +308,7 @@ function AccountSelector({
         width: '100%',
         height: '42px',
         cursor: disabled ? 'not-allowed' : 'pointer',
-        backgroundColor: disabled ? '#f5f5f5' : 'white'
+        backgroundColor: disabled ? '#f5f5f5' : 'white',
       }}
     >
       <option value="">-- Select an account to import into --</option>

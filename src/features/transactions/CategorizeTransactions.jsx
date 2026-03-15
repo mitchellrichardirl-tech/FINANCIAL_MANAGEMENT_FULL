@@ -1,30 +1,24 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useToast } from '@/components/ToastContext';
 import {
-  getTransactions,
-  updateTransaction,
-  bulkUpdateTransactions,
-  getCategories,
-  getSubCategories,
-  getTypes,
-  getParties,
-  getUploads,
-  createCategory,
-  createSubCategory,
-  createType,
-  createParty,
-  remapParty
+  getTransactions, updateTransaction, bulkUpdateTransactions,
+  getCategories, getSubCategories, getTypes, getParties, getUploads,
+  createCategory, createSubCategory, createType, createParty, remapParty
 } from './api';
 import { getAccounts } from '@/features/statements/api';
 import TransactionTable from './TransactionTable';
-import FilterBar from './FilterBar';
 import Pagination from '@/components/Pagination';
 import BulkEditModal from './BulkEditModal';
 import RemapPartyModal from './RemapPartyModal';
 import './CategorizeTransactions.css';
+import { createLogger } from '@/lib/logger';
 
+const logger = createLogger('CategorizeTransactions');
 const ITEMS_PER_PAGE = 100;
 
 export default function CategorizeTransactions() {
+  const { addToast } = useToast();
+
   // Data state
   const [transactions, setTransactions] = useState([]);
   const [accounts, setAccounts] = useState([]);
@@ -34,9 +28,8 @@ export default function CategorizeTransactions() {
   const [parties, setParties] = useState([]);
   const [uploads, setUploads] = useState([]);
 
-  // UI state
+  // UI state — `error` removed
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalTransactions, setTotalTransactions] = useState(0);
   const [filters, setFilters] = useState({});
@@ -44,9 +37,8 @@ export default function CategorizeTransactions() {
   const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
   const [sortField, setSortField] = useState('transaction_date');
   const [sortDir, setSortDir] = useState('desc');
-  // RemapParty modal: null = closed, number = pre-selected party id,
-  // true = open with no pre-selection (launched from header button)
   const [remapPartyId, setRemapPartyId] = useState(null);
+  const [remapTargetTypeId, setRemapTargetTypeId] = useState(null);
 
   const isRemapOpen = remapPartyId !== null;
 
@@ -57,22 +49,11 @@ export default function CategorizeTransactions() {
 
   const loadReferenceData = async () => {
     try {
-      const [
-        accountsData,
-        categoriesData,
-        subCategoriesData,
-        typesData,
-        partiesData,
-        uploadsData
-      ] = await Promise.all([
-        getAccounts(),
-        getCategories(),
-        getSubCategories(),
-        getTypes(),
-        getParties(),
-        getUploads()
-      ]);
-
+      const [accountsData, categoriesData, subCategoriesData, typesData, partiesData, uploadsData] =
+        await Promise.all([
+          getAccounts(), getCategories(), getSubCategories(),
+          getTypes(), getParties(), getUploads()
+        ]);
       setAccounts(accountsData);
       setCategories(categoriesData);
       setSubCategories(subCategoriesData);
@@ -80,38 +61,27 @@ export default function CategorizeTransactions() {
       setParties(partiesData);
       setUploads(uploadsData.data || uploadsData);
     } catch (err) {
-      setError('Failed to load reference data: ' + err.message);
+      logger.error('Error loading reference data:', err);
+      addToast({ message: `Failed to load reference data: ${err.userMessage || err.message}`, type: 'error' });
     }
   };
 
-  const handleFilterChange = useCallback((newFilters) => {
-    setFilters(newFilters);
-    setCurrentPage(1);
-  }, []);
-
   const loadTransactions = async () => {
     setLoading(true);
-    setError(null);
-
     try {
       const cleanFilters = Object.entries(filters).reduce((acc, [key, value]) => {
-        if (value !== null && value !== undefined && value !== '') {
-          acc[key] = value;
-        }
+        if (value !== null && value !== undefined && value !== '') acc[key] = value;
         return acc;
       }, {});
 
       cleanFilters.limit = ITEMS_PER_PAGE;
       cleanFilters.offset = (currentPage - 1) * ITEMS_PER_PAGE;
-
-      // Add sort params
       if (sortField) {
         cleanFilters.sort_by = sortField;
         cleanFilters.sort_dir = sortDir;
       }
 
       const data = await getTransactions(cleanFilters);
-
       setTransactions(data);
       setTotalTransactions(
         data.length === ITEMS_PER_PAGE
@@ -119,23 +89,27 @@ export default function CategorizeTransactions() {
           : (currentPage - 1) * ITEMS_PER_PAGE + data.length
       );
     } catch (err) {
-      console.error('Error loading transactions:', err);
-      setError('Failed to load transactions: ' + err.message);
+      logger.error('Error loading transactions:', err);
+      addToast({ message: `Failed to load transactions: ${err.userMessage || err.message}`, type: 'error' });
       setTransactions([]);
     } finally {
       setLoading(false);
     }
   };
 
+  // ── Mutations ──
+
   const handleTransactionUpdate = async (transactionId, updates) => {
     try {
-      const updatedTransaction = await updateTransaction(transactionId, updates);
+      const updated = await updateTransaction(transactionId, updates);
       setTransactions(prev =>
-        prev.map(t => t.id === transactionId ? { ...t, ...updatedTransaction } : t)
+        prev.map(t => t.id === transactionId ? { ...t, ...updated } : t)
       );
-      return updatedTransaction;
+      // Optional: this fires on every inline cell edit, so keep it short & quick
+      // addToast({ message: 'Saved', type: 'success', duration: 1500 });
+      return updated;
     } catch (err) {
-      setError('Failed to update transaction: ' + err.message);
+      addToast({ message: `Failed to update transaction: ${err.userMessage || err.message}`, type: 'error' });
       throw err;
     }
   };
@@ -143,139 +117,129 @@ export default function CategorizeTransactions() {
   const handleBulkUpdate = async (updates) => {
     if (selectedTransactions.length === 0) throw new Error('No transactions selected');
 
+    const count = selectedTransactions.length;
     setLoading(true);
-    setError(null);
     try {
       await bulkUpdateTransactions(selectedTransactions, updates);
       await loadTransactions();
       setSelectedTransactions([]);
       setIsBulkEditOpen(false);
+      addToast({
+        message: `Updated ${count} transaction${count === 1 ? '' : 's'}`,
+        type: 'success',
+        duration: 3000,
+      });
     } catch (err) {
       const msg = err.message || 'Failed to update transactions';
-      setError(msg);
+      addToast({ message: msg.userMessage || msg.message || 'Failed to update transactions', type: 'error' });
       throw new Error(msg);
     } finally {
       setLoading(false);
     }
   };
 
-  const handlePageChange = (page) => {
-    setCurrentPage(page);
-    setSelectedTransactions([]);
-  };
-
-  // ── Remap Party ──
-
   const handleRemapParty = async (partyId, newTypeId) => {
     try {
       const result = await remapParty(partyId, newTypeId);
       const [partiesData] = await Promise.all([getParties(), loadTransactions()]);
       setParties(partiesData);
+
+      const merged = result?.data?.action === 'merged';
+      addToast({
+        message: merged
+          ? `Party merged into existing — ${result.transactions_moved ?? result.data.transactions_moved} transactions moved`
+          : 'Party remapped successfully',
+        type: 'success',
+        duration: merged ? 5000 : 3000,  // give merge info a bit longer
+      });
       return result;
     } catch (err) {
-      setError('Failed to remap party: ' + err.message);
+      addToast({ message: `Failed to remap party: ${err.userMessage || err.message}`, type: 'error' });
       throw err;
     }
   };
 
-  /**
-   * Find an existing party with `name` under `typeId`, or create one.
-   * Returns the party id.
-   */
-  const handleFindOrCreateParty = useCallback(async (name, typeId) => {
-    // Check if a party with this name already exists under this type
-    const existing = parties.find(
-      (p) => p.name.toLowerCase() === name.toLowerCase() && p.type_id === typeId
-    );
-    if (existing) return existing.id;
+  // ── Create handlers ──
+  const makeCreateHandler = useCallback(
+    (label, createFn, refetchFn, setFn, findFn) =>
+      async (...args) => {
+        try {
+          const response = await createFn(...args);
+          const fresh = await refetchFn();
+          setFn(fresh);
+          addToast({
+            message: `${label} "${args[0]}" created`,
+            type: 'success',
+            duration: 2500,
+          });
+          return findFn(fresh, ...args) || response;
+        } catch (err) {
+          // Don't toast — let CreateCategoryModal show inline error
+          throw err;
+        }
+      },
+    [addToast]
+  );
 
-    // Create a new one
-    const newParty = await handlePartyCreated(name, typeId, '');
-    return newParty.id;
-  }, [parties]);
+  const handleCategoryCreated = makeCreateHandler(
+    'Category', createCategory, getCategories, setCategories,
+    (list, name) => list.find(c => c.category === name)
+  );
 
-  /**
-   * Open the remap modal, optionally pre-selecting both party and target type.
-   * The second argument lets TransactionRow pass the type the user already
-   * chose, so RemapPartyModal can pre-fill it.
-   */
-  const handleOpenRemap = useCallback((partyId = null, targetTypeId = null) => {
-    setRemapPartyId(partyId ?? true);
-    setRemapTargetTypeId(targetTypeId);   // new state (see below)
+  const handleSubCategoryCreated = makeCreateHandler(
+    'Sub-category', createSubCategory, getSubCategories, setSubCategories,
+    (list, name, categoryId) =>
+      list.find(sc => sc.sub_category === name && sc.category_id === categoryId)
+  );
+
+  const handleTypeCreated = makeCreateHandler(
+    'Type', createType, getTypes, setTypes,
+    (list, name, subCategoryId) =>
+      list.find(t => t.type === name && t.sub_category_id === subCategoryId)
+  );
+
+  const handlePartyCreated = makeCreateHandler(
+    'Party', createParty, getParties, setParties,
+    (list, name, typeId) =>
+      list.find(p => p.name === name && p.type_id === typeId)
+  );
+
+  // ── Remaining handlers (unchanged) ──
+
+  const handleFilterChange = useCallback((newFilters) => {
+    setFilters(newFilters);
+    setCurrentPage(1);
   }, []);
 
-  // Add alongside remapPartyId:
-  const [remapTargetTypeId, setRemapTargetTypeId] = useState(null);
-
-  // Clear it when the modal closes:
-  const handleCloseRemap = () => {
-    setRemapPartyId(null);
-    setRemapTargetTypeId(null);
-  };
-  
-  // ── Create handlers ──
-
-  const handleCategoryCreated = async (name, description) => {
-    try {
-      const response = await createCategory(name, description);
-      const categoriesData = await getCategories();
-      setCategories(categoriesData);
-      return categoriesData.find(c => c.category === name) || response;
-    } catch (err) {
-      setError('Failed to create category: ' + err.message);
-      throw err;
-    }
-  };
-
-  const handleSubCategoryCreated = async (name, categoryId, description) => {
-    try {
-      const response = await createSubCategory(name, categoryId, description);
-      const subCategoriesData = await getSubCategories();
-      setSubCategories(subCategoriesData);
-      return subCategoriesData.find(
-        sc => sc.sub_category === name && sc.category_id === categoryId
-      ) || response;
-    } catch (err) {
-      setError('Failed to create sub-category: ' + err.message);
-      throw err;
-    }
-  };
-
-  const handleTypeCreated = async (name, subCategoryId, description) => {
-    try {
-      const response = await createType(name, subCategoryId, description);
-      const typesData = await getTypes();
-      setTypes(typesData);
-      return typesData.find(
-        t => t.type === name && t.sub_category_id === subCategoryId
-      ) || response;
-    } catch (err) {
-      setError('Failed to create type: ' + err.message);
-      throw err;
-    }
-  };
-
-  const handlePartyCreated = async (name, typeId, description) => {
-    try {
-      const response = await createParty(name, typeId, description);
-      const partiesData = await getParties();
-      setParties(partiesData);
-      return partiesData.find(
-        p => p.name === name && p.type_id === typeId
-      ) || response;
-    } catch (err) {
-      setError('Failed to create party: ' + err.message);
-      throw err;
-    }
+  const handlePageChange = (page) => {
+    setCurrentPage(page);
+    setSelectedTransactions([]);
   };
 
   const handleSortChange = useCallback((field, dir) => {
     setSortField(field);
     setSortDir(dir);
-    setCurrentPage(1); // reset to first page on sort change
+    setCurrentPage(1);
   }, []);
 
-  // ── Helpers ──
+  const handleFindOrCreateParty = useCallback(async (name, typeId) => {
+    const existing = parties.find(
+      (p) => p.name.toLowerCase() === name.toLowerCase() && p.type_id === typeId
+    );
+    if (existing) return existing.id;
+    const newParty = await handlePartyCreated(name, typeId, '');
+    return newParty.id;
+  }, [parties, handlePartyCreated]);
+
+  const handleOpenRemap = useCallback((partyId = null, targetTypeId = null) => {
+    setRemapPartyId(partyId ?? true);
+    setRemapTargetTypeId(targetTypeId);
+  }, []);
+
+  const handleCloseRemap = () => {
+    setRemapPartyId(null);
+    setRemapTargetTypeId(null);
+  };
 
   const formatUploadDate = (dateString) => {
     if (!dateString) return 'Unknown date';
@@ -287,8 +251,6 @@ export default function CategorizeTransactions() {
     return `${day} ${month}; ${hours}:${minutes}`;
   };
 
-  // Derive the numeric initialPartyId to pass to the modal.
-  // When opened from the header button there's no pre-selection (null).
   const initialPartyId = typeof remapPartyId === 'number' ? remapPartyId : null;
 
   return (
@@ -297,22 +259,14 @@ export default function CategorizeTransactions() {
         <h1>Categorize Transactions</h1>
         <div className="header-actions">
           {selectedTransactions.length > 0 && (
-            <button
-              onClick={() => setIsBulkEditOpen(true)}
-              className="bulk-edit-button"
-            >
+            <button onClick={() => setIsBulkEditOpen(true)} className="bulk-edit-button">
               Bulk Edit ({selectedTransactions.length})
             </button>
           )}
         </div>
       </div>
 
-      {error && (
-        <div className="error-message">
-          {error}
-          <button onClick={() => setError(null)}>×</button>
-        </div>
-      )}
+      {/* error banner removed — replaced by toasts */}
 
       <div className="filters-section">
         <div className="filter-group">
@@ -322,10 +276,7 @@ export default function CategorizeTransactions() {
             value={filters.upload_id || ''}
             onChange={(e) => {
               const value = e.target.value;
-              handleFilterChange({
-                ...filters,
-                upload_id: value ? parseInt(value) : null,
-              });
+              handleFilterChange({ ...filters, upload_id: value ? parseInt(value) : null });
             }}
           >
             <option value="">All Uploads</option>
@@ -354,7 +305,6 @@ export default function CategorizeTransactions() {
         onSelectionChange={setSelectedTransactions}
         filters={filters}
         onFilterChange={handleFilterChange}
-        // NEW: lets any row open the remap modal pre-filled with its party
         onRemapParty={handleOpenRemap}
         onFindOrCreateParty={handleFindOrCreateParty}
         sortField={sortField}

@@ -1,6 +1,10 @@
 import { useState, useRef } from "react";
 import FilePreview from "@/components/FilePreview";
 import './BulkUploadReceipts.css';
+import { createLogger } from "@/lib/logger";
+import { AppError } from "@/lib/errors";
+
+const logger = createLogger('BulkUploadReceipts');
 
 function BulkUploadReceipts({
   onReceiptProcessed,
@@ -13,8 +17,8 @@ function BulkUploadReceipts({
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const fileInputRef = useRef(null);
-  // Track processed receipt IDs to avoid double-counting
   const processedIdsRef = useRef(new Set());
+  const failedRef = useRef([]);
 
   const handleFileSelect = (event) => {
     const selectedFiles = Array.from(event.target.files);
@@ -54,6 +58,7 @@ function BulkUploadReceipts({
     if (files.length === 0) return;
 
     const totalFiles = files.length;
+    failedRef.current = [];
     setIsProcessing(true);
     setProgress({ current: 0, total: totalFiles });
     processedIdsRef.current = new Set(); // Reset tracking
@@ -61,18 +66,23 @@ function BulkUploadReceipts({
 
     const formData = new FormData();
     files.forEach((file) => {
-      console.log(`Adding file ${file.name} to payload`);
+      logger.debug(`Adding file ${file.name} to payload`);
       formData.append('files', file);
     });
 
     try {
-      const response = await fetch('/api/receipts/upload-stream', {
-        method: 'POST',
-        body: formData,
-      });
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/receipts/upload-stream`,
+        { method: 'POST', body: formData }
+      );
 
       if (!response.ok) {
-        throw new Error(`Upload failed: ${response.status} ${response.statusText}`);
+        const errorBody = await response.json().catch(() => null);
+        throw new AppError({
+          message: `Upload failed: ${response.status} ${response.statusText}`,
+          userMessage: errorBody?.user_message,  // falls back to status map
+          status: response.status,
+        });
       }
 
       const reader = response.body.getReader();
@@ -95,7 +105,7 @@ function BulkUploadReceipts({
             try {
               const jsonStr = trimmedLine.slice(6);
               const result = JSON.parse(jsonStr);
-              console.log('Receipt result:', result);
+              logger.debug('Receipt result:', result);
               
               // Only process each receipt_id once
               if (result.receipt_id && !processedIdsRef.current.has(result.receipt_id)) {
@@ -103,6 +113,9 @@ function BulkUploadReceipts({
                 
                 if (result.status === 'success') {
                   onReceiptProcessed?.(result);
+                } else {
+                  failedRef.current.push(result);
+                  logger.warn(`Receipt ${result.receipt_id} failed to process:`, result);
                 }
                 
                 // Update progress based on unique receipts processed
@@ -112,7 +125,7 @@ function BulkUploadReceipts({
                 }));
               }
             } catch (parseError) {
-              console.error('Failed to parse SSE data:', parseError, trimmedLine);
+              logger.error('Failed to parse SSE data:', parseError, trimmedLine);
             }
           }
         }
@@ -130,15 +143,19 @@ function BulkUploadReceipts({
             }
           }
         } catch (parseError) {
-          console.error('Failed to parse final SSE data:', parseError);
+          logger.error('Failed to parse final SSE data:', parseError);
         }
       }
 
-      onProcessingComplete?.();
+      onProcessingComplete?.({
+        succeeded: processedIdsRef.current.size - failedRef.current.length,
+        failed: failedRef.current.length,
+        failures: failedRef.current,
+      });
       clearFiles();
     } catch (error) {
-      console.error('Bulk upload error:', error);
-      onError?.(error.message || 'Failed to process receipts');
+      logger.error('Bulk upload error:', error);
+      onError?.(error.userMessage || error.message || 'Failed to process receipts');
     } finally {
       setIsProcessing(false);
       setProgress({ current: 0, total: 0 });

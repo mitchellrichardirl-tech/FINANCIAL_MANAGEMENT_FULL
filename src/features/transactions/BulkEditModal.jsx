@@ -3,6 +3,9 @@ import DropdownWithCreate from '@/components/DropdownWithCreate';
 import Checkbox from '@/components/Checkbox';
 import CreateCategoryModal from './CreateCategoryModal';
 import './BulkEditModal.css';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('BulkEditModal');
 
 export default function BulkEditModal({ 
   isOpen,
@@ -18,6 +21,7 @@ export default function BulkEditModal({
   onTypeCreated,
   onPartyCreated
 }) {
+  
   const [updates, setUpdates] = useState({
     category_id: null,
     sub_category_id: null,
@@ -29,7 +33,7 @@ export default function BulkEditModal({
   });
 
   const [isSaving, setIsSaving] = useState(false);
-  const [error, setError] = useState(null);
+  const [validationError, setValidationError] = useState(null);
 
   const [createModalState, setCreateModalState] = useState({
     isOpen: false,
@@ -38,7 +42,6 @@ export default function BulkEditModal({
     parentId: null
   });
 
-  // Memoized sorted and filtered arrays
   const sortedCategories = useMemo(() => 
     [...categories].sort((a, b) => a.category.localeCompare(b.category)),
     [categories]
@@ -46,17 +49,14 @@ export default function BulkEditModal({
 
   const filteredSubCategories = useMemo(() => {
     let filtered = [...subCategories];
-    
     if (updates.category_id) {
       filtered = filtered.filter(sc => sc.category_id === updates.category_id);
     }
-    
     return filtered.sort((a, b) => a.sub_category.localeCompare(b.sub_category));
   }, [subCategories, updates.category_id]);
 
   const filteredTypes = useMemo(() => {
     let filtered = [...types];
-    
     if (updates.sub_category_id) {
       filtered = filtered.filter(t => t.sub_category_id === updates.sub_category_id);
     } else if (updates.category_id) {
@@ -65,13 +65,11 @@ export default function BulkEditModal({
         .map(sc => sc.id);
       filtered = filtered.filter(t => subCatIds.includes(t.sub_category_id));
     }
-    
     return filtered.sort((a, b) => a.type.localeCompare(b.type));
   }, [types, subCategories, updates.sub_category_id, updates.category_id]);
 
   const filteredParties = useMemo(() => {
     let filtered = [...parties];
-    
     if (updates.type_id) {
       filtered = filtered.filter(p => p.type_id === updates.type_id);
     } else if (updates.sub_category_id) {
@@ -88,11 +86,9 @@ export default function BulkEditModal({
         .map(t => t.id);
       filtered = filtered.filter(p => typeIds.includes(p.type_id));
     }
-    
     return filtered.sort((a, b) => a.name.localeCompare(b.name));
   }, [parties, types, subCategories, updates.type_id, updates.sub_category_id, updates.category_id]);
 
-  // Reset state when modal opens
   useEffect(() => {
     if (isOpen) {
       setUpdates({
@@ -104,7 +100,7 @@ export default function BulkEditModal({
         is_kids: null,
         is_one_off: null
       });
-      setError(null);
+      setValidationError(null);
       setIsSaving(false);
     }
   }, [isOpen]);
@@ -174,7 +170,6 @@ export default function BulkEditModal({
       if (party) {
         const type = types.find(t => t.id === party.type_id);
         const subCategory = type ? subCategories.find(sc => sc.id === type.sub_category_id) : null;
-        
         setUpdates(prev => ({
           ...prev,
           category_id: subCategory ? subCategory.category_id : prev.category_id,
@@ -185,11 +180,7 @@ export default function BulkEditModal({
         }));
       }
     } else {
-      setUpdates(prev => ({
-        ...prev,
-        party_id: null,
-        party_name: ''
-      }));
+      setUpdates(prev => ({ ...prev, party_id: null, party_name: '' }));
     }
   };
 
@@ -207,56 +198,32 @@ export default function BulkEditModal({
   };
 
   const handleCreateSubCategory = () => {
-    const currentCategory = updates.category_id 
-      ? categories.find(c => c.id === updates.category_id)
-      : null;
-    
-    if (!currentCategory) {
-      setError('Please select a category first');
-      return;
-    }
-      
+    const category = categories.find(c => c.id === updates.category_id);
     setCreateModalState({
       isOpen: true,
       type: 'sub_category',
-      parentName: currentCategory.category,
-      parentId: currentCategory.id
+      parentName: category.category,
+      parentId: category.id
     });
   };
 
   const handleCreateType = () => {
-    const currentSubCategory = updates.sub_category_id
-      ? subCategories.find(sc => sc.id === updates.sub_category_id)
-      : null;
-    
-    if (!currentSubCategory) {
-      setError('Please select a sub-category first');
-      return;
-    }
-      
+    const subCategory = subCategories.find(sc => sc.id === updates.sub_category_id);
     setCreateModalState({
       isOpen: true,
       type: 'type',
-      parentName: currentSubCategory.sub_category,
-      parentId: currentSubCategory.id
+      parentName: subCategory.sub_category,
+      parentId: subCategory.id
     });
   };
 
   const handleCreateParty = () => {
-    const currentType = updates.type_id
-      ? types.find(t => t.id === updates.type_id)
-      : null;
-    
-    if (!currentType) {
-      setError('Please select a type first');
-      return;
-    }
-      
+    const type = types.find(t => t.id === updates.type_id);
     setCreateModalState({
       isOpen: true,
       type: 'party',
-      parentName: currentType.type,
-      parentId: currentType.id
+      parentName: type.type,
+      parentId: type.id
     });
   };
 
@@ -320,49 +287,43 @@ export default function BulkEditModal({
       setCreateModalState({ isOpen: false, type: null, parentName: '', parentId: null });
       return newItem;
     } catch (err) {
-      console.error('Error creating item:', err);
+      // Parent's create handlers already toast errors
+      logger.error('Error creating item:', err);
       throw err;
     }
   };
 
   const handleSave = async () => {
-    console.log('BulkEditModal: handleSave called');
-    setError(null);
+    logger.debug('BulkEditModal: handleSave called');
+    setValidationError(null);
     setIsSaving(true);
     
     try {
       const finalUpdates = {};
       
-      if (updates.party_id) {
-        finalUpdates.party_id = updates.party_id;
-      }
-      
-      if (updates.is_kids !== null) {
-        finalUpdates.is_kids = updates.is_kids;
-      }
-      
-      if (updates.is_one_off !== null) {
-        finalUpdates.is_one_off = updates.is_one_off;
-      }
+      if (updates.party_id) finalUpdates.party_id = updates.party_id;
+      if (updates.is_kids !== null) finalUpdates.is_kids = updates.is_kids;
+      if (updates.is_one_off !== null) finalUpdates.is_one_off = updates.is_one_off;
 
-      console.log('BulkEditModal: Prepared updates:', finalUpdates);
+      logger.debug('BulkEditModal: Prepared updates:', finalUpdates);
 
       if (Object.keys(finalUpdates).length === 0) {
-        setError('No changes to save');
+        // This is a VALIDATION error — keep inline
+        setValidationError('No changes to save');
         setIsSaving(false);
         return;
       }
 
-      console.log('BulkEditModal: Calling onSave...');
+      logger.debug('BulkEditModal: Calling onSave...');
       await onSave(finalUpdates);
-      console.log('BulkEditModal: onSave completed successfully');
-      
-      setIsSaving(false);
+      logger.debug('BulkEditModal: onSave completed successfully');
+      // Parent handles success toast and closes modal
       
     } catch (err) {
-      console.error('BulkEditModal: Save failed:', err);
-      setError(err.message || 'Failed to save changes');
+      // Parent already shows error toast — just stop the spinner
+      logger.error('BulkEditModal: Save failed:', err);
       setIsSaving(false);
+      // No setError() here — avoid duplicate messaging
     }
   };
 
@@ -376,7 +337,7 @@ export default function BulkEditModal({
       is_kids: null,
       is_one_off: null
     });
-    setError(null);
+    setValidationError(null);
     setIsSaving(false);
     onClose();
   };
@@ -420,14 +381,16 @@ export default function BulkEditModal({
             </button>
           </div>
           
-          {error && (
+          {/* Only shows validation errors now */}
+          {validationError && (
             <div className="modal-error">
-              {error}
-              <button onClick={() => setError(null)} aria-label="Dismiss error">×</button>
+              {validationError}
+              <button onClick={() => setValidationError(null)} aria-label="Dismiss error">×</button>
             </div>
           )}
           
           <div className="bulk-edit-form">
+            {/* ... form content unchanged ... */}
             <div className="form-section">
               <h3>Category Hierarchy</h3>
               <p className="form-hint">

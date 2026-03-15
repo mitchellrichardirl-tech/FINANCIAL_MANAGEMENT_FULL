@@ -16,8 +16,6 @@ export async function getTransactions(filters = {}) {
   const queryString = params.toString();
   const url = `/transactions${queryString ? '?' + queryString : ''}`;
   
-  console.log('Get Transactions URL:', url);
-  
   const response = await apiCall(url);
   
   return unwrap(response, 'transactions') || [];
@@ -47,7 +45,7 @@ export async function createAccount(accountName, accountType, statementFormat = 
 export async function updateTransaction(transactionId, updates) {
   const response = await apiCall(`/transactions/${transactionId}`, {
     method: 'PUT',
-    updates
+    body: updates
   });
   return unwrap(response, 'transaction') || response; // Return the updated transaction
 }

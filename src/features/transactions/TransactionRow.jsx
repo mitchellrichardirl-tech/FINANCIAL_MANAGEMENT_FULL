@@ -3,6 +3,10 @@ import DropdownWithCreate from '@/components/DropdownWithCreate';
 import Checkbox from '@/components/Checkbox';
 import RemapPartyPrompt from './RemapPartyPrompt';
 import './TransactionRow.css';
+import { createLogger } from '@/lib/logger';
+import { useToast } from '@/components/ToastContext';
+
+const logger = createLogger('TransactionRow');
 
 export default function TransactionRow({
   transaction,
@@ -18,6 +22,7 @@ export default function TransactionRow({
   onRemapParty,
   onFindOrCreateParty,
 }) {
+  const { addToast } = useToast();
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -221,9 +226,10 @@ export default function TransactionRow({
       setIsEditing(false);
       setDraft(null);
       setReuseParty(null);
-    } catch (err) {
-      console.error('Failed to save:', err);
-      setError('Failed to save changes');
+    } catch {
+      // Parent already toasted the message.
+      // Just mark the row so user knows WHICH one failed.
+      setError(true);  // boolean is enough — no message needed
     } finally {
       setIsSaving(false);
     }
@@ -238,7 +244,6 @@ export default function TransactionRow({
     if (reuseParty) {
       const targetTypeId = draft.type_id ?? reuseParty.typeId;
       if (!targetTypeId) {
-        // Nowhere to put the party — just save without one
         await persistSave(null);
         return;
       }
@@ -250,8 +255,9 @@ export default function TransactionRow({
         );
         await persistSave(targetPartyId);
       } catch (err) {
-        console.error('Failed to find/create party:', err);
-        setError('Failed to reassign party');
+        logger.error('Failed to find/create party:', err);
+        addToast({ message: `Failed to reassign party: ${err.userMessage || err.message}`, type: 'error' });
+        setError(true);  // mark the row
         setIsSaving(false);
       }
       return;
@@ -312,8 +318,7 @@ export default function TransactionRow({
   };
 
   const handleCreateSubCategory = () => {
-    const category = allCategories.find((c) => c.id === draft?.category_id);
-    if (!category) { setError('Please select a category first'); return; }
+    const category = allCategories.find((c) => c.id === draft.category_id);
     onOpenCreateModal('sub_category', category.id, category.category, (newSC) => {
       if (newSC?.id) {
         setDraft((prev) => ({
@@ -327,10 +332,7 @@ export default function TransactionRow({
   };
 
   const handleCreateType = () => {
-    const subCategory = allSubCategories.find(
-      (sc) => sc.id === draft?.sub_category_id
-    );
-    if (!subCategory) { setError('Please select a sub-category first'); return; }
+    const subCategory = allSubCategories.find((sc) => sc.id === draft.sub_category_id);
     onOpenCreateModal('type', subCategory.id, subCategory.sub_category, (newType) => {
       if (newType?.id) {
         setDraft((prev) => ({ ...prev, type_id: newType.id, party_id: null }));
@@ -339,12 +341,11 @@ export default function TransactionRow({
   };
 
   const handleCreateParty = () => {
-    const type = allTypes.find((t) => t.id === draft?.type_id);
-    if (!type) { setError('Please select a type first'); return; }
+    const type = allTypes.find((t) => t.id === draft.type_id);
     onOpenCreateModal('party', type.id, type.type, (newParty) => {
       if (newParty?.id) {
         setDraft((prev) => ({ ...prev, party_id: newParty.id }));
-        setReuseParty(null); // explicit new party chosen — clear reuse intent
+        setReuseParty(null);
       }
     });
   };
@@ -577,7 +578,7 @@ export default function TransactionRow({
         {/* Actions */}
         <td className="actions-cell">
           {error && (
-            <span className="row-error" title={error}>
+            <span className="row-error" title="Save failed — see notification">
               ⚠
             </span>
           )}

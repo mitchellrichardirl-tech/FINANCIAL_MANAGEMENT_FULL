@@ -1,13 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
+import { parseApiError, getUserMessage, isNotFound } from '@/lib/apiErrors';
+import { createLogger } from '@/lib/logger';
 
+const logger = createLogger('ReceiptThumbnail');
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
-
-const thumbnailStates = {
-  loading: 'LOADING',
-  loaded: 'LOADED',
-  error: 'ERROR'
-};
 
 function ReceiptThumbnail({
   src,
@@ -27,26 +24,33 @@ function ReceiptThumbnail({
       return;
     }
 
-    setError(null)
+    setError(null);
     setIsLoading(true);
 
     fetch(src, { method: 'HEAD' })
-      .then(response => {
+      .then(async (response) => {
         if (!response.ok) {
-          throw new Error(`Failed to fetch file: ${response.status}`);
+          // Try to parse structured error from API
+          const parsed = await parseApiError(response);
+          
+          if (isNotFound(parsed)) {
+            throw new Error('Image no longer available');
+          }
+          
+          throw new Error(getUserMessage(parsed, 'Loading thumbnail'));
         }
 
         const contentType = response.headers.get('Content-Type');
 
         if (!contentType) {
-          throw new Error('No content type specified');
+          throw new Error('Unknown file type');
         }
 
         const isImage = contentType.startsWith('image/');
         const isPDF = contentType.includes('application/pdf');
 
         if (!isImage && !isPDF) {
-          throw new Error(`Unsupported file type: ${contentType}`);
+          throw new Error('Unsupported file type');
         }
 
         setFileType(isImage ? 'image' : 'pdf');
@@ -57,6 +61,7 @@ function ReceiptThumbnail({
         }
       })
       .catch(err => {
+        logger.warn('Thumbnail load failed:', err.message);
         setError(err.message);
         setIsLoading(false);
       });
@@ -67,14 +72,14 @@ function ReceiptThumbnail({
   };
 
   const onDocumentLoadError = (error) => {
-    console.error('Error loading PDF:', error);
+    logger.error('Error loading PDF:', error);
     setError('Failed to load PDF');
     setIsLoading(false);
   };
 
   const handleImageLoad = () => setIsLoading(false);
   const handleImageError = (error) => {
-    console.error('Error loading image:', error);
+    logger.error('Error loading image:', error);
     setError('Failed to load image');
     setIsLoading(false);
   };

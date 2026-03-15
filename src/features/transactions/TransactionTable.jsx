@@ -2,6 +2,8 @@ import { useState, useMemo } from 'react';
 import TransactionRow from './TransactionRow';
 import CreateCategoryModal from './CreateCategoryModal';
 import './TransactionTable.css';
+import { createLogger } from '@/lib/logger';
+const logger = createLogger('TransactionTable');
 
 export default function TransactionTable({ 
   transactions,
@@ -36,12 +38,6 @@ export default function TransactionTable({
   });
 
   const transactionArray = Array.isArray(transactions) ? transactions : [];
-
-  const sortedAccounts = useMemo(() => 
-    [...accounts]
-      .sort((a, b) => a.account_name.localeCompare(b.account_name)),
-    [accounts]
-  );
 
   const sortedCategories = useMemo(() => 
     [...categories]
@@ -126,7 +122,7 @@ export default function TransactionTable({
 
   // Filter change handler - properly preserves existing filters
   const handleFilterFieldChange = (field, value) => {
-    console.log('Filter change:', field, value, 'Current filters:', filters);
+    logger.debug('Filter change:', field, value, 'Current filters:', filters);
     
     const newFilters = { ...filters };
     
@@ -153,13 +149,13 @@ export default function TransactionTable({
       delete newFilters.party_id;
     }
     
-    console.log('New filters:', newFilters);
+    logger.debug('New filters:', newFilters);
     onFilterChange(newFilters);
   };
 
   // Clear all filters
   const handleClearFilters = () => {
-    console.log('Clearing all filters');
+    logger.debug('Clearing all filters');
     onFilterChange({});
   };
 
@@ -169,7 +165,7 @@ export default function TransactionTable({
 
   // Unified create handler - called by TransactionRow
   const handleOpenCreateModal = (type, parentId, parentName, onSuccess) => {
-    console.log('Opening create modal:', { type, parentId, parentName });
+    logger.debug('Opening create modal:', { type, parentId, parentName });
     setCreateModalState({
       isOpen: true,
       type,
@@ -212,7 +208,7 @@ export default function TransactionTable({
           throw new Error(`Unknown type: ${type}`);
       }
       
-      console.log('Created new item:', newItem);
+      logger.debug('Created new item:', newItem);
       
       if (onSuccess && newItem) {
         onSuccess(newItem);
@@ -221,7 +217,7 @@ export default function TransactionTable({
       handleCloseModal();
       return newItem;
     } catch (error) {
-      console.error('Error creating item:', error);
+      logger.error('Error creating item:', error);
       throw error;
     }
   };
@@ -242,10 +238,6 @@ export default function TransactionTable({
       )}
     </th>
   );
-
-  console.log('Current filters state:', filters);
-  console.log('is_kids filter:', filters.is_kids, typeof filters.is_kids);
-  console.log('is_one_off filter:', filters.is_one_off, typeof filters.is_one_off);
 
   return (
     <>
@@ -447,7 +439,7 @@ export default function TransactionTable({
             </tr>
           </thead>
           <tbody>
-            {transactions.map(transaction => (
+            {transactionArray.map(transaction => (
               <TransactionRow
                 key={transaction.id}
                 transaction={transaction}
