@@ -17,6 +17,7 @@ build/
 dist/
 wheels/
 data/
+data-dev/
 *.egg-info
 *.egg
 
@@ -66,6 +67,7 @@ data/
 *.png
 *.jpeg
 notebooks
+tree.txt
 
 # Temporary files
 tmp/
