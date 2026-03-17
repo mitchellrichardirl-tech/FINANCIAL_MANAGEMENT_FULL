@@ -23,10 +23,8 @@ source .venv/bin/activate
 python -m ipykernel install --user --name=financial-management
 cd ..
 
-# Frontend setup (optional - uncomment if you want hot-reload dev server)
-# cd frontend
-# npm install
-# cd ..
+# Frontend setup
+cd "$PWD/frontend" && npm install
 
 echo 'eval $(keychain --eval --agents ssh --quiet id_ed25519 2>/dev/null)' >> "$HOME/.bashrc"
 echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$HOME/.bashrc"

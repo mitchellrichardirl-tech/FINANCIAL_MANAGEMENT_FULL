@@ -1,8 +1,17 @@
 {
   "name": "Finance App",
   "image": "mcr.microsoft.com/devcontainers/python:3.12-bullseye",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "20"
+    }
+  },
   "postCreateCommand": "bash .devcontainer/postCreate.sh",
   "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+  "containerEnv": {
+    "DATABASE_PATH": "${containerWorkspaceFolder}/backend/data-dev/financial_data.db",
+    "UPLOAD_FOLDER": "${containerWorkspaceFolder}/backend/data-dev/uploads"
+  },
   "remoteUser": "vscode",
   "customizations": {
     "vscode": {
@@ -28,5 +37,8 @@
       }
     }
   },
-  "forwardPorts": [5000, 5173, 8888]
+  "forwardPorts": [5000, 5173, 8888],
+  "mounts": [
+    "source=C:/Users/User/OneDrive/Receipts,target=/workspace/receipts,type=bind"
+  ]
 }
