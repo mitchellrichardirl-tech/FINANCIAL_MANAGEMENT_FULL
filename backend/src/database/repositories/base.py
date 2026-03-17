@@ -1,3 +1,12 @@
+"""
+Base repository with shared SQL execution helpers.
+
+Currently thin — just `insert_query` and `select_query` wrappers that add
+logging and translate sqlite3 exceptions into `DatabaseError`. Individual
+repositories (`accounts.py`, `transactions.py`, etc.) mostly write their
+own SQL rather than building on this; consolidating that is on the backlog.
+"""
+
 from typing import Optional, Tuple, Any
 
 from src.database.connection import get_manager, DatabaseError
@@ -8,17 +17,37 @@ logger = ContextLogger(__name__)
 
 
 class BaseRepository:
-    """Base repository with common database operations."""
+    """
+    Shared DB access helpers for repository subclasses.
+
+    Provides connection acquisition (via the global manager) and two
+    execution wrappers that handle logging and exception translation.
+    Subclasses are expected to compose their own queries and call
+    `insert_query` / `select_query` rather than touching `self.db` directly —
+    though in practice many still do. Tightening that contract is future work.
+    """
 
     def __init__(self):
         self.db = get_manager()
 
     def insert_query(self, query: str, values: Tuple) -> int:
         """
-        Execute an INSERT query and return the last row ID.
-        
-        Note: Uses transaction() which auto-commits, so the explicit
-        conn.commit() is redundant and has been removed.
+        Execute an INSERT inside a transaction and return the new row id.
+
+        Runs inside `self.db.transaction()`, which commits on success and
+        rolls back on exception — no manual commit needed.
+
+        Args:
+            query: Parameterized INSERT statement.
+            values: Values to bind. Must match the placeholders in `query`.
+
+        Returns:
+            `lastrowid` of the inserted row.
+
+        Raises:
+            DatabaseError: On any failure. UNIQUE constraint violations get
+                a "Record already exists" message; everything else is wrapped
+                generically.
         """
         logger.debug(f"Executing insert: {query[:50]}...")
 
@@ -42,6 +71,7 @@ class BaseRepository:
             logger.error(f"Insert failed: {e}")
             raise DatabaseError(f"Failed to add record: {e}") from e
 
+    # TODO: Maybe split into `fetch_one` and `fetch_all` for clarity
     def select_query(
         self,
         query: str,
@@ -49,15 +79,19 @@ class BaseRepository:
         all_rows: bool = False
     ) -> Any:
         """
-        Execute a SELECT query and return results.
-        
+        Execute a SELECT and return the result.
+
         Args:
-            query: SQL query string
-            params: Query parameters (should be a tuple)
-            all_rows: If True, return all rows; otherwise return first row
-            
+            query: Parameterized SELECT statement.
+            params: Values to bind, or None for a parameterless query.
+            all_rows: If True, `fetchall()`; if False, `fetchone()`.
+
         Returns:
-            Single row, list of rows, or None
+            - `all_rows=True` → list of `sqlite3.Row` (possibly empty)
+            - `all_rows=False` → single `sqlite3.Row`, or `None` if no match
+
+        Raises:
+            DatabaseError: On any query failure.
         """
         logger.debug(f"Executing select: {query[:50]}... | all_rows={all_rows}")
 

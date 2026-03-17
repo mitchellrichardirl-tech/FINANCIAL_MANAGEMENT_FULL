@@ -1,3 +1,23 @@
+"""
+Statement processing: base classes and configuration dataclasses.
+
+Defines the contract for turning a bank's CSV/Excel export into a normalized
+transaction DataFrame. Each bank format is described declaratively by a
+`StatementConfig`; the `StatementProcessor` pipeline consumes that config.
+
+Two ways to support a bank:
+  - Config only (common) — write a `StatementConfig` in `configs/<bank>.py`,
+    the registry wraps it in `ConfigurableStatementProcessor`. No subclassing.
+  - Custom processor (rare) — subclass `StatementProcessor` and override
+    individual pipeline steps. Needed when the export requires row-level
+    transformations config can't express (e.g. Revolut).
+
+Pipeline overview — see `StatementProcessor.process_statement()`:
+    raw rows → skip header/footer → validate columns → filter junk
+    → parse dates → parse amounts → extract description → defaults
+    → categorizer (assign party) → stamp ids → enforce output shape
+"""
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Optional, Callable, Any
@@ -10,7 +30,7 @@ from src.api.utils.errors import AppError, ErrorCode
 
 logger = ContextLogger(__name__)
 
-
+# TODO: Maybe delete this - I don't think it's actually used
 @dataclass
 class ColumnMapping:
     """Maps source column(s) to a target field."""
@@ -22,7 +42,26 @@ class ColumnMapping:
 
 @dataclass
 class AmountConfig:
-    """Configuration for parsing transaction amounts."""
+    """
+    How to extract a signed amount + credit/debit flag from source columns.
+
+    Banks represent amounts one of three ways. Configure **exactly one**:
+
+      1. **Split columns** — separate Credit and Debit columns, each positive.
+         → set `credit_column` and `debit_column`
+
+      2. **Signed column** — one column, sign indicates direction
+         (negative = debit).
+         → set `amount_column` and `signed_amount=True`
+
+      3. **Amount + indicator** — one unsigned column plus a "CR"/"DR" flag.
+         → set `amount_column`, `credit_indicator_column`,
+           `credit_indicator_value`
+
+    Output convention regardless of input: debits are negative, credits
+    positive (`debit_is_negative=True`). Flip that if your downstream
+    expects the opposite.
+    """
     # Option 1: Separate credit/debit columns
     credit_column: Optional[str] = None
     debit_column: Optional[str] = None
@@ -52,7 +91,45 @@ class DateConfig:
 
 @dataclass
 class StatementConfig:
-    """Complete configuration for a bank statement format."""
+    """
+    Declarative description of one bank's statement export format.
+
+    One instance per (bank, account type) combination, living in
+    `configs/<bank>.py`. Tells the processor which columns to read,
+    how to parse them, and which rows to skip.
+
+    Minimal example::
+
+        StatementConfig(
+            bank_name="AIB",
+            account_type="Current Account",
+            date_config=DateConfig(column="Date", format="%d/%m/%Y"),
+            amount_config=AmountConfig(
+                credit_column="Credit",
+                debit_column="Debit",
+            ),
+            description_column="Description",
+        )
+
+    Attributes:
+        bank_name: Human-readable bank name ("AIB", "Revolut").
+        account_type: Variant ("Current Account", "Credit Card").
+            Combined with bank_name to form `display_name`.
+        date_config: Which column holds the date and how to parse it.
+        amount_config: Which column(s) hold the amount — see `AmountConfig`
+            for the three supported shapes.
+        description_column: Source column with the transaction narrative.
+        balance_column: Optional running balance. Not used in processing;
+            reserved for future reconciliation.
+        reference_column: Optional reference/memo column.
+        skip_rows_start: Leading rows to discard (title rows, logos).
+        skip_rows_end: Trailing rows to discard (totals, disclaimers).
+        exclude_patterns: Regexes matched against the description column.
+            Matching rows are dropped — use for "OPENING BALANCE" lines etc.
+        defaults: Overrides for standard output fields, applied to every
+            row from this config. E.g. `{"is_kids": True}` for payments related
+            to children.
+    """
     bank_name: str
     account_type: str
 
@@ -114,11 +191,31 @@ class ProcessingWarning:
 
 class StatementProcessor(ABC):
     """
-    Abstract base class for processing bank statements.
-    
-    Subclasses can either:
-    1. Just provide a config (most cases) - use ConfigurableStatementProcessor
-    2. Override methods for custom logic (complex cases)
+    Abstract pipeline for parsing statement rows into normalized transactions.
+
+    The pipeline lives in `process_statement()`. Each stage is a separate
+    private method, so subclasses can override one step without
+    reimplementing the whole thing.
+
+    **You usually don't subclass this.** If the bank's format fits a
+    `StatementConfig`, the registry uses `ConfigurableStatementProcessor`
+    automatically. Subclass only for banks that need transformations
+    config can't express — row merging, multi-currency normalization, etc.
+
+    Instance state:
+        account_id: Stamped onto every output row.
+        upload_id: Stamped onto every output row.
+        categorizer: Assigns `party_id` and `confidence` per description.
+            Injectable for testing; defaults to a fresh TransactionCategorizer.
+        transactions: Output DataFrame — populated by `process_statement()`.
+        warnings: Non-fatal issues (e.g. some dates unparseable) collected
+            during processing. The caller should surface these to the user.
+
+    Class attributes:
+        OUTPUT_COLUMNS: Exact column set the repository layer expects.
+            `_finalize_columns()` guarantees this shape.
+        _DATE_FORMAT_FALLBACKS: Formats tried when the configured date
+            format fails. Ordered roughly by likelihood for Irish/EU banks.
     """
     
     # Standard output columns expected by the database
@@ -173,10 +270,26 @@ class StatementProcessor(ABC):
 
     def process_statement(self, transactions: list[dict]) -> pd.DataFrame:
         """
-        Main entry point: process raw statement data into categorized transactions.
+        Run the full pipeline on raw statement rows.
+
+        Args:
+            transactions: Rows as dicts, keys = source file column headers.
+                Typically produced by `utils/tabular_files/readers.py`.
+
+        Returns:
+            DataFrame with exactly `OUTPUT_COLUMNS`, one row per transaction.
+            Also stored on `self.transactions`.
 
         Raises:
-            AppError: if input columns don't match the config, or dates can't be parsed.
+            AppError (INVALID_FORMAT): Required columns are missing, or no
+                dates are parseable by any known format. The error's `details`
+                dict is structured for direct display — the frontend's
+                ColumnMismatchPanel consumes it.
+
+        Side effects:
+            Appends `ProcessingWarning` entries to `self.warnings` for
+            partial failures (e.g. 5 of 200 dates unparseable → those rows
+            are dropped, a warning is recorded). Caller must surface these.
         """
         logger.info(
             f"Processing {self.config.display_name} statement: "
@@ -332,9 +445,22 @@ class StatementProcessor(ABC):
         date_cfg: DateConfig,
     ) -> tuple[pd.Series, str]:
         """
-        Try the configured format, then every fallback. Keep whichever
-        parses the MOST dates. Only short-circuit on 100% success —
-        partial success is not a reason to stop trying.
+        Best-effort date parsing across multiple format candidates.
+
+        Tries the configured format, then every fallback, and keeps whichever
+        parses the **most** rows. Only short-circuits on 100% — a format that
+        parses 80% might still lose to one that parses 95%, so we try them all.
+
+        Why this is lenient: banks change export formats without warning, and
+        users often open files in Excel first which silently reformats dates.
+        A fuzzy parse + warning beats failing the whole import.
+
+        Returns:
+            Tuple of (parsed series, label of winning format). The label is
+            for logging and for the `ProcessingWarning` shown to the user.
+
+        Raises:
+            AppError (INVALID_FORMAT): Zero rows parsed by any candidate.
         """
         total = int(series.notna().sum())
         if total == 0:
@@ -527,9 +653,12 @@ class StatementProcessor(ABC):
 
 class ConfigurableStatementProcessor(StatementProcessor):
     """
-    A statement processor that's fully driven by configuration.
-    
-    Use this when no custom logic is needed—just provide a config.
+    Config-driven processor with no custom logic. The default.
+
+    Used for any bank whose export is fully described by a `StatementConfig`.
+    The registry (`statements/registry.py`) instantiates this automatically
+    when a config is registered without a custom processor — you rarely
+    construct it by hand.
     """
     
     def __init__(
