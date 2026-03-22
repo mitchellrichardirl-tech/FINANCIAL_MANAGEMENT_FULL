@@ -1,3 +1,18 @@
+"""
+Repository for transaction data access.
+
+Provides the `TransactionRepository` class, which handles CRUD, bulk
+operations, filtered queries, and receipt-linking against the
+`transactions` table.
+
+Return types vary by method:
+    - Write operations and simple reads return `Transaction` model
+      instances.
+    - Hierarchy-aware reads (anything that joins through
+      parties → types → sub_categories → categories) return plain dicts,
+      since the extra columns don't fit the `Transaction` model.
+"""
+
 from typing import Optional, Dict, List, Any
 import pandas as pd
 
@@ -5,17 +20,44 @@ from src.database.connection import get_manager, DatabaseError
 from src.models.transaction import Transaction
 from src.utils.logging import ContextLogger
 from src.api.utils.errors import not_found
+
 logger = ContextLogger(__name__)
 
 
 class TransactionRepository:
-    """Repository for transaction CRUD operations."""
+    """Data-access layer for the `transactions` table.
+
+    Covers single-row and bulk inserts, filtered listing with full
+    category hierarchy joins, partial updates, and receipt-matching
+    queries used by the receipt-linking workflow.
+
+    Attributes:
+        db: The default `ConnectionManager` instance.
+    """
 
     def __init__(self):
+        """Initialize with the default connection manager.
+
+        Raises:
+            DatabaseError: If the connection manager has not been
+                initialized via `connection.init()` / `init_app()`.
+        """
         self.db = get_manager()
 
     def add_transaction(self, transaction: Transaction) -> int:
-        """Add a new financial transaction."""
+        """Insert a single transaction from a `Transaction` model instance.
+
+        Args:
+            transaction: Populated `Transaction` model. `party_id` and
+                `upload_id` are required by the schema.
+
+        Returns:
+            The `id` of the newly created transaction row.
+
+        Raises:
+            DatabaseError: On foreign-key violations, constraint failures,
+                or any other database error.
+        """
         logger.debug(
             f"Adding transaction: {transaction.description[:50]}... "
             f"| amount={transaction.amount}"
@@ -48,14 +90,30 @@ class TransactionRepository:
             raise DatabaseError(f"Failed to add transaction: {e}") from e
 
     def bulk_add_transactions(self, df: pd.DataFrame) -> List[int]:
-        """
-        Bulk insert transactions from a pandas DataFrame.
-        
+        """Bulk insert transactions from a pandas DataFrame.
+
+        Validates that required columns are present, fills missing
+        optional columns with defaults, normalises dates to ISO format,
+        and inserts all rows in a single transaction.
+
         Args:
-            df: DataFrame with columns matching transaction fields
-            
+            df: DataFrame with at least `transaction_date`, `amount`,
+                and `description` columns. Optional columns
+                (`cleaned_description`, `is_credit`, `is_kids`,
+                `is_one_off`, `account_id`, `upload_id`, `party_id`,
+                `receipt_id`) default to None/False if absent.
+
         Returns:
-            List of inserted transaction IDs
+            List of auto-generated `id` values for the inserted rows.
+
+        Raises:
+            ValueError: If any required columns are missing.
+            DatabaseError: On any database failure (entire batch is
+                rolled back).
+
+        Note:
+            IDs are inferred from `MAX(id)` after insert, which assumes
+            no concurrent inserts to the same table.
         """
         logger.info(f"Bulk inserting {len(df)} transactions from DataFrame")
 
@@ -118,14 +176,26 @@ class TransactionRepository:
             raise DatabaseError(f"Failed to bulk add transactions: {e}") from e
 
     def bulk_add_transactions_from_objects(self, transactions: List[Transaction]) -> List[int]:
-        """
-        Bulk insert transactions from a list of Transaction objects.
-        
+        """Bulk insert transactions from a list of `Transaction` objects.
+
+        Similar to `bulk_add_transactions()` but accepts model instances
+        instead of a DataFrame. Preferred for statement-import pipelines
+        that already construct `Transaction` objects.
+
         Args:
-            transactions: List of Transaction objects
-            
+            transactions: List of `Transaction` model instances.
+
         Returns:
-            List of inserted transaction IDs
+            List of auto-generated `id` values for the inserted rows.
+            Empty list if `transactions` is empty.
+
+        Raises:
+            DatabaseError: On any database failure (entire batch is
+                rolled back).
+
+        Note:
+            IDs are inferred from `lastrowid`, which assumes no
+            concurrent inserts to the same table.
         """
         if not transactions:
             logger.debug("No transactions to insert")
@@ -167,7 +237,22 @@ class TransactionRepository:
             raise DatabaseError(f"Failed to bulk add transactions: {e}") from e
 
     def get_transactions(self, limit: Optional[int] = None) -> List[Transaction]:
-        """Get transactions with optional limit."""
+        """Fetch transactions as `Transaction` model instances.
+
+        Joins to `accounts`, `parties`, and `receipts` to populate
+        `account_name`, `related_party_name`, and `receipt_filename`.
+        Ordered by date descending (most recent first).
+
+        Args:
+            limit: Maximum rows to return. None for all.
+
+        Returns:
+            List of `Transaction` instances. Empty list if the table
+            is empty.
+
+        Raises:
+            DatabaseError: On query failure.
+        """
         try:
             with self.db.get_connection() as conn:
                 cursor = conn.cursor()
@@ -199,7 +284,20 @@ class TransactionRepository:
             raise DatabaseError(f"Failed to get transactions: {e}") from e
 
     def get_transaction_by_id(self, transaction_id: int) -> Optional[Transaction]:
-        """Get a single transaction by its ID."""
+        """Fetch a single transaction by primary key.
+
+        Joins to `accounts`, `parties`, and `receipts` for context
+        fields.
+
+        Args:
+            transaction_id: The transaction's `id` column value.
+
+        Returns:
+            A `Transaction` instance, or None if no match.
+
+        Raises:
+            DatabaseError: On query failure.
+        """
         try:
             with self.db.get_connection() as conn:
                 cursor = conn.cursor()
@@ -234,18 +332,31 @@ class TransactionRepository:
         date_tolerance_days: int = 7,
         include_matched: bool = False
     ) -> List[Transaction]:
-        """
-        Find candidate transactions that could match a receipt.
-        
+        """Find transactions that could match a given receipt.
+
+        Used by the receipt-linking workflow. Searches for transactions
+        whose amount and date are within the given tolerances, optionally
+        excluding transactions that already have a receipt linked.
+
+        Results are ordered by date proximity first, then amount
+        proximity, so the best match appears first.
+
         Args:
-            amount: The receipt amount to match
-            transaction_date: The receipt date (YYYY-MM-DD format)
-            amount_tolerance: Maximum difference in amount
-            date_tolerance_days: Maximum difference in days
-            include_matched: If True, include transactions with existing receipts
-            
+            amount: Receipt amount to match against.
+            transaction_date: Receipt date in YYYY-MM-DD format.
+            amount_tolerance: Maximum absolute difference in amount.
+                Defaults to 0.01.
+            date_tolerance_days: Maximum difference in days between
+                receipt date and transaction date. Defaults to 7.
+            include_matched: If True, include transactions that already
+                have a receipt linked. Defaults to False.
+
         Returns:
-            List of matching Transaction objects ordered by closest date
+            List of `Transaction` instances ordered by match quality
+            (closest first). Empty list if no candidates found.
+
+        Raises:
+            DatabaseError: On query failure.
         """
         logger.debug(
             f"Finding receipt match candidates: amount={amount}, "
@@ -316,8 +427,51 @@ class TransactionRepository:
         sort_by: Optional[str] = None,
         sort_dir: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """Get transactions with full party hierarchy information."""
-        
+        """Fetch transactions with full category hierarchy and optional filters.
+
+        The primary query method for the transaction listing UI. Joins
+        through the full chain (accounts, parties → types →
+        sub_categories → categories, receipts) and supports filtering
+        at every level plus sortable columns.
+
+        All filter arguments are optional and ANDed together. Returns
+        dicts rather than `Transaction` instances because the joined
+        columns don't fit the model.
+
+        Args:
+            limit: Maximum rows to return. None for all.
+            offset: Rows to skip for pagination. Defaults to 0.
+            start_date: Include transactions on or after this date
+                (YYYY-MM-DD).
+            end_date: Include transactions on or before this date
+                (YYYY-MM-DD).
+            party_id: Filter by exact party.
+            account_id: Filter by exact account.
+            upload_id: Filter by import batch.
+            description: Substring match on raw description.
+            cleaned_description: Substring match on cleaned description.
+            is_kids: Filter by kids flag.
+            is_one_off: Filter by one-off flag.
+            is_credit: Filter by credit/debit direction.
+            category_id: Filter by category (via hierarchy join).
+            sub_category_id: Filter by subcategory (via hierarchy join).
+            type_id: Filter by type (via hierarchy join).
+            sort_by: Column name to sort by. Must be in the whitelist
+                (e.g. "transaction_date", "amount", "party_name").
+                Defaults to "transaction_date". Unrecognised values
+                fall back to the default.
+            sort_dir: "asc" or "desc". Defaults to "desc".
+
+        Returns:
+            List of transaction dicts, each including `account_name`,
+            `account_type`, `party_name`, `type_name`,
+            `sub_category_name`, `category_name`, and receipt fields.
+            Empty list if no matches.
+
+        Raises:
+            DatabaseError: On query failure.
+        """
+
         # Whitelist of allowed sort columns to prevent SQL injection
         # Keys are the API field names, values are the actual SQL column references
         SORTABLE_COLUMNS = {
@@ -334,7 +488,7 @@ class TransactionRepository:
             'sub_category_name': 'sc.sub_category',
             'category_name': 'c.category',
         }
-        
+
         try:
             with self.db.get_connection() as conn:
                 cursor = conn.cursor()
@@ -402,7 +556,7 @@ class TransactionRepository:
                 # Build ORDER BY clause safely
                 sort_column = SORTABLE_COLUMNS.get(sort_by, 't.transaction_date')
                 sort_direction = 'ASC' if sort_dir == 'asc' else 'DESC'
-                
+
                 # Add secondary sort by id for stable ordering
                 order_clause = f"ORDER BY {sort_column} {sort_direction}, t.id DESC"
 
@@ -457,7 +611,22 @@ class TransactionRepository:
             raise DatabaseError(f"Failed to get transactions: {e}") from e
 
     def get_transaction_with_hierarchy(self, transaction_id: int) -> Optional[Dict[str, Any]]:
-        """Get a single transaction with full party hierarchy information."""
+        """Fetch a single transaction with full category hierarchy.
+
+        Same joins as `get_transactions_with_hierarchy()` but for one
+        row. Used after updates to return the refreshed state to the
+        caller.
+
+        Args:
+            transaction_id: Primary key of the transaction.
+
+        Returns:
+            Transaction dict with all hierarchy and receipt fields,
+            or None if the transaction doesn't exist.
+
+        Raises:
+            DatabaseError: On query failure.
+        """
         try:
             with self.db.get_connection() as conn:
                 cursor = conn.cursor()
@@ -505,15 +674,26 @@ class TransactionRepository:
         transaction_id: int,
         **kwargs
     ) -> Optional[Dict[str, Any]]:
-        """
-        Update a transaction's fields.
-        
+        """Update one or more fields on a transaction.
+
+        Accepts arbitrary keyword arguments but only applies fields
+        from an internal allowlist: `amount`, `description`,
+        `cleaned_description`, `is_credit`, `is_kids`, `is_one_off`,
+        `party_id`, `receipt_id`, `transaction_date`. Unrecognised
+        keys are silently ignored.
+
         Args:
-            transaction_id: The transaction ID
-            **kwargs: Fields to update
-            
+            transaction_id: Primary key of the transaction to update.
+            **kwargs: Field names and new values. Only allowlisted
+                fields are applied.
+
         Returns:
-            Updated transaction with hierarchy or None if not found
+            The updated transaction dict with full hierarchy, or None
+            if the transaction doesn't exist.
+
+        Raises:
+            DatabaseError: On any database failure including FK
+                violations.
         """
         try:
             with self.db.transaction() as conn:
@@ -560,15 +740,29 @@ class TransactionRepository:
         transaction_ids: List[int],
         **kwargs
     ) -> Dict[str, Any]:
-        """
-        Bulk update multiple transactions with the same values.
-        
+        """Apply the same field updates to multiple transactions.
+
+        Useful for batch operations like "mark selected as kids" or
+        "reassign party". Uses a single `UPDATE ... WHERE id IN (...)`
+        statement for efficiency.
+
         Args:
-            transaction_ids: List of transaction IDs to update
-            **kwargs: Fields to update
-            
+            transaction_ids: Primary keys of the transactions to update.
+            **kwargs: Field names and new values. Only allowlisted
+                fields are applied (same list as `update_transaction()`).
+
         Returns:
-            Dict with updated_count and updated_ids
+            Dict with:
+                - `updated_count`: Number of rows actually changed.
+                - `updated_ids`: The input ID list (echoed back).
+                - `fields_updated`: List of field names that were applied.
+
+            Returns `{'updated_count': 0, 'updated_ids': []}` if
+            `transaction_ids` is empty or no valid fields were provided.
+
+        Raises:
+            DatabaseError: On any database failure (entire batch is
+                rolled back).
         """
         if not transaction_ids:
             return {'updated_count': 0, 'updated_ids': []}
@@ -614,7 +808,7 @@ class TransactionRepository:
                 f"Bulk updated {updated_count} transactions "
                 f"(requested {len(transaction_ids)}): {updated_fields}"
             )
-            
+
             return {
                 'updated_count': updated_count,
                 'updated_ids': transaction_ids,
@@ -624,7 +818,7 @@ class TransactionRepository:
         except Exception as e:
             logger.error(f"Failed to bulk update transactions: {e}")
             raise DatabaseError(f"Failed to bulk update transactions: {e}") from e
-    
+
     def find_matching_transactions(
         self,
         amount: Optional[float] = None,
@@ -635,20 +829,36 @@ class TransactionRepository:
         include_matched: bool = True,
         limit: int = 50
     ) -> List[Dict[str, Any]]:
-        """
-        Find transactions matching given parameters.
-        
+        """Find transactions matching given criteria with fuzzy tolerances.
+
+        More flexible than `find_receipt_match_candidates()` — supports
+        party-name matching and returns full hierarchy dicts. Used by
+        the receipt-linking UI search.
+
+        All search parameters are optional but at least one must be
+        provided.
+
         Args:
-            amount: Amount to match
-            transaction_date: Date to match (YYYY-MM-DD)
-            party_name: Party name to match (partial match)
-            amount_tolerance: Maximum difference in amount
-            date_tolerance_days: Maximum difference in days
-            include_matched: If True, include transactions with receipts
-            limit: Maximum number of results
-            
+            amount: Target amount. Matches within `amount_tolerance`.
+            transaction_date: Target date (YYYY-MM-DD). Matches within
+                `date_tolerance_days`.
+            party_name: Substring match against both `parties.name` and
+                `transactions.cleaned_description` (case-insensitive).
+            amount_tolerance: Maximum absolute amount difference.
+                Defaults to 0.01.
+            date_tolerance_days: Maximum date difference in days.
+                Defaults to 7.
+            include_matched: If True, include transactions that already
+                have a receipt. Defaults to True.
+            limit: Maximum results to return. Defaults to 50.
+
         Returns:
-            List of matching transactions with hierarchy
+            List of transaction dicts with hierarchy, ordered by date
+            descending. Empty list if no matches.
+
+        Raises:
+            ValueError: If no search parameters are provided.
+            DatabaseError: On query failure.
         """
         logger.debug(
             f"Finding matching transactions: amount={amount}, "
@@ -731,18 +941,24 @@ class TransactionRepository:
         transaction_id: int,
         receipt_id: int
     ) -> Optional[Dict[str, Any]]:
-        """
-        Link a receipt to a transaction.
-        
+        """Link a receipt to a transaction by setting `receipt_id`.
+
+        Validates that the receipt exists before updating. A transaction
+        can only be linked to one receipt at a time; calling this
+        replaces any existing link.
+
         Args:
-            transaction_id: The transaction ID
-            receipt_id: The receipt ID to link
-            
+            transaction_id: Primary key of the transaction.
+            receipt_id: Primary key of the receipt to link.
+
         Returns:
-            Updated transaction with hierarchy or None if transaction not found
-            
+            The updated transaction dict with full hierarchy, or None
+            if the transaction doesn't exist.
+
         Raises:
-            ValueError: If receipt does not exist
+            not_found: (HTTP 404 via `api.utils.errors`) if the receipt
+                does not exist.
+            DatabaseError: On any other database failure.
         """
         logger.debug(f"Linking receipt {receipt_id} to transaction {transaction_id}")
 

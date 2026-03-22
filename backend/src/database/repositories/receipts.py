@@ -1,3 +1,16 @@
+"""
+Repository for receipt data access.
+
+Provides the `ReceiptRepository` class, which handles CRUD and aggregate
+queries against the `receipts` table. Receipts store extracted metadata
+from uploaded receipt images (vendor, amount, date, confidence) along
+with the raw OCR output.
+
+Unlike other repositories, `update()` uses a sentinel-based API so that
+callers can explicitly set a field to None (e.g. clear an incorrect
+vendor extraction) rather than None meaning "don't change".
+"""
+
 from typing import Optional, Dict, List, Any
 from datetime import datetime
 import sqlite3
@@ -7,19 +20,51 @@ from src.database.connection import get_manager, DatabaseError
 from src.models.receipt import Receipt
 from src.utils.logging import ContextLogger
 
+# Sentinel for update(): distinguishes "not provided" from "set to None".
 _UNSET = object()
 
 logger = ContextLogger(__name__)
 
 
 class ReceiptRepository:
-    """Repository for receipt CRUD operations."""
+    """Data-access layer for the `receipts` table.
+
+    Accepts `Receipt` model instances on save and returns plain dicts
+    on read. The `metadata` column is stored as JSON and automatically
+    serialized/deserialized. Date strings are parsed back into
+    `datetime` objects on read.
+
+    Attributes:
+        db: The default `ConnectionManager` instance.
+    """
 
     def __init__(self):
+        """Initialize with the default connection manager.
+
+        Raises:
+            DatabaseError: If the connection manager has not been
+                initialized via `connection.init()` / `init_app()`.
+        """
         self.db = get_manager()
 
     def save(self, receipt: Receipt) -> int | None:
-        """Save receipt to database."""
+        """Insert a new receipt row from a `Receipt` model instance.
+
+        Serializes `selected_method` and `page_number` into the
+        `metadata` JSON column, and normalises the date to ISO format.
+
+        Args:
+            receipt: Populated `Receipt` model. The `stored_filename`
+                must be unique.
+
+        Returns:
+            The `id` of the newly created receipt row.
+
+        Raises:
+            DatabaseError: If `stored_filename` already exists, a
+                required field is missing, or on any other database
+                failure.
+        """
         logger.debug(f"Saving receipt: {receipt.original_filename}")
 
         try:
@@ -89,7 +134,28 @@ class ReceiptRepository:
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None
     ) -> List[Dict[str, Any]]:
-        """Get receipts with optional filters."""
+        """Fetch receipts with optional filtering and pagination.
+
+        All filter arguments are optional and ANDed together. Results
+        are ordered by `created_at` descending (newest first).
+
+        Args:
+            limit: Maximum rows to return. Defaults to 50.
+            offset: Rows to skip for pagination. Defaults to 0.
+            vendor: Substring match against vendor name (SQL LIKE,
+                case-insensitive on most SQLite builds).
+            min_confidence: Only return receipts with confidence >= this
+                value (0–3).
+            start_date: Only return receipts dated on or after this date.
+            end_date: Only return receipts dated on or before this date.
+
+        Returns:
+            List of receipt dicts with `metadata` parsed from JSON and
+            `date` as a `datetime`. Empty list if no matches.
+
+        Raises:
+            DatabaseError: On query failure.
+        """
         try:
             with self.db.get_connection() as conn:
                 cursor = conn.cursor()
@@ -140,7 +206,18 @@ class ReceiptRepository:
             raise DatabaseError(f"Failed to get receipts: {e}") from e
 
     def get_by_id(self, receipt_id: int) -> Optional[Dict[str, Any]]:
-        """Get a specific receipt."""
+        """Fetch a single receipt by primary key.
+
+        Args:
+            receipt_id: The receipt's `id` column value.
+
+        Returns:
+            The receipt as a dict with `metadata` parsed from JSON and
+            `date` as a `datetime`, or None if no match.
+
+        Raises:
+            DatabaseError: On query failure.
+        """
         try:
             with self.db.get_connection() as conn:
                 cursor = conn.cursor()
@@ -166,7 +243,30 @@ class ReceiptRepository:
         confidence: Optional[int] = _UNSET,  # type: ignore
         raw_text: Optional[str] = _UNSET  # type: ignore
     ) -> Optional[Dict[str, Any]]:
-        """Update receipt data."""
+        """Update one or more fields on an existing receipt.
+
+        Uses a sentinel default (`_UNSET`) so that `None` is a valid
+        value to write. This lets callers explicitly clear a field —
+        e.g. `update(id, vendor=None)` nulls the vendor — while omitted
+        arguments are left unchanged.
+
+        Args:
+            id: Primary key of the receipt to update.
+            vendor: New vendor name. Pass None to clear.
+            amount: New amount. Pass None to clear.
+            date: New receipt date. Pass None to clear.
+            confidence: New confidence score (0–3). Pass None to clear.
+            raw_text: New OCR text. Pass None to clear.
+
+        Returns:
+            The updated receipt as a dict, or None if `id` does not
+            exist.
+
+        Raises:
+            DatabaseError: On any database failure, including check
+                constraint violations (e.g. amount < 0, confidence
+                outside 0–3).
+        """
         try:
             with self.db.transaction() as conn:
                 cursor = conn.cursor()
@@ -225,7 +325,23 @@ class ReceiptRepository:
             raise DatabaseError(f"Failed to update receipt: {e}") from e
 
     def delete(self, receipt_id: int) -> Optional[Dict[str, Any]]:
-        """Delete a receipt and return the deleted record."""
+        """Delete a receipt and return the deleted row.
+
+        Fetches the row before deleting so callers (e.g. the API layer)
+        can report what was removed. Linked transactions have their
+        `receipt_id` set to NULL via the `ON DELETE SET NULL` foreign
+        key — deleting a receipt never orphans or blocks on transactions.
+
+        Args:
+            receipt_id: Primary key of the receipt to delete.
+
+        Returns:
+            The deleted receipt as a dict, or None if `receipt_id` did
+            not exist.
+
+        Raises:
+            DatabaseError: On any database failure.
+        """
         try:
             # Fetch before delete (outside transaction is fine for read)
             receipt_to_delete = self.get_by_id(receipt_id)
@@ -246,7 +362,23 @@ class ReceiptRepository:
             raise DatabaseError(f"Failed to delete receipt: {e}") from e
 
     def get_stats(self) -> Dict[str, Any]:
-        """Get receipt statistics."""
+        """Compute aggregate statistics across all receipts.
+
+        Returns:
+            Dict with these keys:
+                - `total_receipts`: Row count.
+                - `total_amount`: Sum of all amounts.
+                - `avg_amount`: Mean amount.
+                - `avg_confidence`: Mean extraction confidence.
+                - `unique_vendors`: Count of distinct vendor names.
+                - `earliest_date`, `latest_date`: Date range (as strings).
+                - `high_confidence_count`: Receipts with confidence = 3.
+                - `top_vendors`: Up to 10 dicts of `{vendor, count, total}`
+                  ordered by receipt count descending.
+
+        Raises:
+            DatabaseError: On query failure.
+        """
         try:
             with self.db.get_connection() as conn:
                 cursor = conn.cursor()
@@ -284,7 +416,18 @@ class ReceiptRepository:
             raise DatabaseError(f"Failed to get receipt stats: {e}") from e
 
     def _row_to_dict(self, row: sqlite3.Row) -> Dict[str, Any]:
-        """Convert SQLite Row to dictionary with proper type handling."""
+        """Convert a `sqlite3.Row` to a dict with deserialized fields.
+
+        Parses the `metadata` column from JSON (falling back to an empty
+        dict on parse failure) and converts the `date` column from ISO
+        string back to `datetime` (leaving it as-is on parse failure).
+
+        Args:
+            row: Row from a `SELECT * FROM receipts` query.
+
+        Returns:
+            Dict representation of the row. Empty dict if `row` is None.
+        """
         if not row:
             return {}
 
