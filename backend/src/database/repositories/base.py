@@ -83,7 +83,8 @@ class BaseRepository:
 
         Args:
             query: Parameterized SELECT statement.
-            params: Values to bind, or None for a parameterless query.
+            params: Sequence of values to bind, or None for a parameterless
+                query. Must be a tuple or list — do not pass a bare string.
             all_rows: If True, `fetchall()`; if False, `fetchone()`.
 
         Returns:
@@ -93,6 +94,12 @@ class BaseRepository:
         Raises:
             DatabaseError: On any query failure.
         """
+        if params is not None and isinstance(params, str):
+            logger.warning(
+                "Params should be a tuple, but got a string. "
+                "This may lead to unexpected behavior."
+                f"Did you mean params=({params!r},)?"
+            )
         logger.debug(f"Executing select: {query[:50]}... | all_rows={all_rows}")
 
         try:
