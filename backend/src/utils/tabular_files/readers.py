@@ -1,3 +1,16 @@
+"""
+Multi-format tabular file reading.
+
+Provides the `FileReader` class, which reads CSV, TSV, Excel, Parquet,
+and JSON files into pandas DataFrames with automatic encoding/delimiter
+detection and graceful fallback for common encoding mismatches.
+
+The core value-add over calling `pd.read_*` directly is the encoding
+fallback chain for text files — financial exports from banks frequently
+claim to be ASCII or UTF-8 but are actually Windows-1252, and this
+class handles that transparently.
+"""
+
 from pathlib import Path
 from typing import Optional, List, Union
 import pandas as pd
@@ -17,7 +30,28 @@ logger = ContextLogger(__name__)
 
 
 class FileReader:
-    """Reads tabular files into pandas DataFrames."""
+    """Reads tabular files of various formats into pandas DataFrames.
+
+    Dispatches to the appropriate pandas reader based on `FileType`
+    and handles format-specific concerns: Excel engine selection,
+    text-file encoding detection with fallback, and helpful error
+    messages for missing optional dependencies.
+
+    Encoding and delimiter can be overridden at construction; otherwise
+    they're auto-detected per file.
+
+    Class Attributes:
+        EXCEL_ENGINE_MAP: Maps Excel `FileType` members to the pandas
+            engine name required to read them. Each engine is a
+            separate pip dependency.
+
+    Attributes:
+        encoding: Override encoding for text files. If None, each file
+            is auto-detected.
+        delimiter: Override delimiter for text files. If None, inferred
+            from file type (TSV → tab, CSV → comma) or auto-detected
+            for TXT.
+    """
 
     # Engine selection for Excel formats
     EXCEL_ENGINE_MAP = {
@@ -33,6 +67,14 @@ class FileReader:
         encoding: Optional[str] = None,
         delimiter: Optional[str] = None
     ):
+        """Initialize with optional encoding and delimiter overrides.
+
+        Args:
+            encoding: Force this encoding for all text files. If None,
+                each file is detected independently via `chardet`.
+            delimiter: Force this delimiter for all text files. If
+                None, inferred from `FileType` or auto-detected.
+        """
         self.encoding = encoding
         self.delimiter = delimiter
 
@@ -48,7 +90,37 @@ class FileReader:
         sheet_name: Union[str, int] = 0,
         **kwargs
     ) -> pd.DataFrame:
-        """Read a file into a DataFrame."""
+        """Read a tabular file into a DataFrame.
+
+        Dispatches to the format-specific reader based on `file_type`.
+        Most parameters mirror the pandas `read_*` APIs and are passed
+        through as-is.
+
+        Args:
+            file_path: Path to the file.
+            file_type: Detected `FileType` — determines which reader
+                is used.
+            nrows: Maximum number of rows to read. None for all.
+            skiprows: Rows to skip at the start. Can be a count (int)
+                or a list of specific row indices.
+            usecols: Subset of columns to read, by index or name.
+            header: Row index to use as column names. 0 for first row,
+                None if the file has no header.
+            names: Explicit column names to use. If provided alongside
+                `header=0`, the header row is consumed but replaced.
+            sheet_name: For Excel files, which sheet to read (by name
+                or zero-based index). Ignored for other formats.
+            **kwargs: Additional arguments passed directly to the
+                underlying pandas reader.
+
+        Returns:
+            The loaded DataFrame.
+
+        Raises:
+            UnsupportedFileTypeError: If `file_type` is not supported.
+            FileReadError: If reading fails for any reason (missing
+                engine, encoding issues, malformed file, etc.).
+        """
         logger.debug(
             f"Reading {file_path.name}: type={file_type.value}, "
             f"nrows={nrows}, skiprows={skiprows}, usecols={usecols}"
@@ -88,7 +160,26 @@ class FileReader:
         sheet_name: Union[str, int],
         **kwargs
     ) -> pd.DataFrame:
-        """Read Excel file formats."""
+        """Read an Excel-family file with the appropriate engine.
+
+        Selects the engine from `EXCEL_ENGINE_MAP` and calls
+        `pd.read_excel()`. Missing-engine `ImportError`s are caught
+        and re-raised with a pip install hint.
+
+        Args:
+            file_path: Path to the file.
+            file_type: Specific Excel variant — determines the engine.
+            nrows, skiprows, usecols, header, names, sheet_name:
+                Passed through to `pd.read_excel()`.
+            **kwargs: Additional `pd.read_excel()` arguments.
+
+        Returns:
+            The loaded DataFrame.
+
+        Raises:
+            FileReadError: If the required engine is not installed or
+                the file cannot be read.
+        """
         file_path_str = str(file_path)
         engine = self.EXCEL_ENGINE_MAP.get(file_type, 'openpyxl')
 
@@ -136,21 +227,28 @@ class FileReader:
 
     @staticmethod
     def _build_encoding_fallback_chain(detected: str) -> list[str]:
-        """
-        Build an ordered list of encodings to attempt.
+        """Build an ordered list of encodings to try when reading text.
 
         The order matters:
-        1. Whatever the detector returned (trust it first)
-        2. utf-8 — the modern default, covers most files
-        3. utf-8-sig — handles Windows UTF-8 files with BOM
-        4. cp1252 — extremely common for bank/financial exports on Windows,
-            and a superset of latin-1 for printable characters
-        5. latin-1 — never raises UnicodeDecodeError (maps every byte 0-255),
-            so it acts as a guaranteed last resort, though it may decode
-            some characters incorrectly
+            1. Whatever the detector returned — trust it first.
+            2. utf-8 — the modern default, covers most files.
+            3. utf-8-sig — handles Windows UTF-8 files with BOM.
+            4. cp1252 — extremely common for bank/financial exports
+               from Windows, and a superset of latin-1 for printable
+               characters.
+            5. latin-1 — never raises `UnicodeDecodeError` (maps every
+               byte 0–255), so it's a guaranteed last resort, though
+               it may decode some characters incorrectly.
 
-        Duplicates are removed while preserving order so we don't waste
-        time retrying the same encoding.
+        Duplicates are removed (with normalisation, so "UTF-8" and
+        "utf8" collapse) while preserving order, so we don't retry
+        the same encoding.
+
+        Args:
+            detected: The encoding returned by `detect_encoding()`.
+
+        Returns:
+            Ordered, deduplicated list of encoding names to try.
         """
         candidates = [
             detected,
@@ -183,7 +281,29 @@ class FileReader:
         names: Optional[List[str]],
         **kwargs
     ) -> pd.DataFrame:
-        """Read text-based files (CSV, TSV, TXT)."""
+        """Read a delimited text file (CSV, TSV, TXT) with encoding fallback.
+
+        Determines encoding and delimiter (using instance overrides,
+        file-type defaults, or auto-detection), then attempts
+        `pd.read_csv()` with each encoding in the fallback chain until
+        one succeeds. Only encoding errors trigger fallback — other
+        exceptions (missing file, malformed structure) fail
+        immediately since a different encoding won't fix them.
+
+        Args:
+            file_path: Path to the file.
+            file_type: CSV, TSV, or TXT — determines default delimiter.
+            nrows, skiprows, usecols, header, names: Passed through to
+                `pd.read_csv()`.
+            **kwargs: Additional `pd.read_csv()` arguments.
+
+        Returns:
+            The loaded DataFrame.
+
+        Raises:
+            FileReadError: If all encodings fail, or if a non-encoding
+                error occurs.
+        """
         encoding = self.encoding or detect_encoding(file_path)
 
         if self.delimiter:
@@ -267,15 +387,25 @@ class FileReader:
             f"Last error: {str(last_error)}"
         )
 
-
-
     def _read_parquet(
         self,
         file_path: Path,
         usecols: Optional[List[str]],
         **kwargs
     ) -> pd.DataFrame:
-        """Read Parquet files."""
+        """Read a Parquet file.
+
+        Args:
+            file_path: Path to the file.
+            usecols: Optional column subset to read.
+            **kwargs: Additional `pd.read_parquet()` arguments.
+
+        Returns:
+            The loaded DataFrame.
+
+        Raises:
+            FileReadError: If reading fails.
+        """
         logger.debug(f"Reading Parquet: {file_path.name}")
 
         try:
@@ -290,7 +420,23 @@ class FileReader:
         nrows: Optional[int],
         **kwargs
     ) -> pd.DataFrame:
-        """Read JSON files."""
+        """Read a JSON file.
+
+        `pd.read_json()` doesn't support `nrows`, so it's applied
+        after loading via `.head()`.
+
+        Args:
+            file_path: Path to the file.
+            nrows: If provided, truncate to this many rows after
+                loading.
+            **kwargs: Additional `pd.read_json()` arguments.
+
+        Returns:
+            The loaded (possibly truncated) DataFrame.
+
+        Raises:
+            FileReadError: If reading fails.
+        """
         logger.debug(f"Reading JSON: {file_path.name}")
 
         try:
@@ -303,7 +449,15 @@ class FileReader:
             raise FileReadError(f"Failed to read JSON file: {str(e)}")
 
     def get_sheet_names(self, file_path: Path) -> List[str]:
-        """Get sheet names for Excel files."""
+        """List sheet names in an Excel workbook.
+
+        Args:
+            file_path: Path to the Excel file.
+
+        Returns:
+            List of sheet names in file order. Empty list if the file
+            cannot be read (logged as a warning, not raised).
+        """
         try:
             excel_file = pd.ExcelFile(file_path)
             sheet_names = excel_file.sheet_names
@@ -320,7 +474,22 @@ class FileReader:
         file_type: FileType,
         has_header: bool = True
     ) -> int:
-        """Count total rows in a file (excluding header)."""
+        """Count data rows in a file without loading it fully.
+
+        For text files, counts lines directly (with encoding fallback),
+        which is much faster than loading into a DataFrame for large
+        files. Other formats are loaded and measured with `len()`.
+
+        Args:
+            file_path: Path to the file.
+            file_type: Determines which counting strategy to use.
+            has_header: If True, subtract one from the line count for
+                text files. Ignored for non-text formats since pandas
+                handles the header there.
+
+        Returns:
+            Number of data rows (header excluded if `has_header=True`).
+        """
         logger.debug(f"Counting rows in {file_path.name}")
 
         if file_type in TEXT_TYPES:
