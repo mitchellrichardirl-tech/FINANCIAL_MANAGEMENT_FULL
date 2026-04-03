@@ -1,20 +1,51 @@
+/**
+ * @file AccountSelector.jsx
+ * Dropdown for selecting an existing account or creating a new one
+ * inline.
+ *
+ * When "Create new account…" is selected, the dropdown is replaced by
+ * a form. On success, the new account is appended to the list and
+ * auto-selected.
+ */
+
 import { useState } from 'react';
 import { createAccount } from './api';
 import { ErrorCode } from '@/lib/apiErrors';
 
-// Map backend field names to our input IDs
+/**
+ * Maps backend field names to form input ids for error routing.
+ * @type {Record<string, string>}
+ */
 const FIELD_MAP = {
   account_name: 'accountName',
   account_type: 'accountType',
   statement_format: 'statementFormat',
 };
 
-// Codes that should highlight the name field specifically
-const NAME_FIELD_CODES = new Set([
-  ErrorCode.DUPLICATE_NAME,
-  ErrorCode.REQUIRED_FIELD,
-]);
+/** Error codes that should highlight the name field specifically. */
+const NAME_FIELD_CODES = new Set([ErrorCode.DUPLICATE_NAME, ErrorCode.REQUIRED_FIELD]);
 
+/**
+ * Account selector with inline create form.
+ *
+ * @component
+ * @param {Object} props
+ *
+ * @param {Array<Object>} props.accounts
+ *        List of existing accounts.
+ * @param {number|string} props.selectedAccountId
+ *        Currently selected account id (empty string = none).
+ * @param {(id: number|string) => void} props.onAccountChange
+ *        Called when selection changes.
+ * @param {(account: Object) => void} props.onAccountCreated
+ *        Called after a new account is created so the parent can
+ *        append it to the list.
+ * @param {boolean} [props.disabled=false]
+ * @param {Array<{key: string, name: string}>} [props.statementFormats=[]]
+ *        Available statement format presets.
+ *
+ * @returns {JSX.Element}
+ */
 function AccountSelector({
   accounts,
   selectedAccountId,
@@ -29,9 +60,17 @@ function AccountSelector({
   const [newStatementFormat, setNewStatementFormat] = useState('');
   const [creating, setCreating] = useState(false);
 
-  // Field-level errors: { accountName: '...', accountType: '...', _general: '...' }
+  /**
+   * Field-level errors.
+   * `_general` holds errors that don't map to a specific field.
+   * @type {[Record<string, string>, Function]}
+   */
   const [fieldErrors, setFieldErrors] = useState({});
 
+  /**
+   * Clear a single field error (called as user types).
+   * @param {string} field
+   */
   const clearFieldError = (field) => {
     if (fieldErrors[field]) {
       setFieldErrors((prev) => {
@@ -42,6 +81,10 @@ function AccountSelector({
     }
   };
 
+  /**
+   * Handle dropdown change. If "CREATE_NEW" is selected, switch to
+   * the inline form.
+   */
   const handleChange = (e) => {
     const value = e.target.value;
     if (value === 'CREATE_NEW') {
@@ -53,11 +96,13 @@ function AccountSelector({
     }
   };
 
+  /**
+   * Submit the create-account form.
+   */
   const handleCreateAccount = async (e) => {
     e.preventDefault();
     setFieldErrors({});
 
-    // Client-side validation (instant feedback)
     if (!newAccountName.trim()) {
       setFieldErrors({ accountName: 'Account name is required' });
       return;
@@ -68,7 +113,7 @@ function AccountSelector({
       const newAccount = await createAccount(
         newAccountName,
         newAccountType,
-        newStatementFormat || null,
+        newStatementFormat || null
       );
 
       onAccountCreated(newAccount);
@@ -82,16 +127,13 @@ function AccountSelector({
     } catch (err) {
       const message = err.userMessage || err.message || 'Failed to create account';
 
-      // Route to the correct field
       const mappedField = err.field ? FIELD_MAP[err.field] : null;
 
       if (mappedField) {
         setFieldErrors({ [mappedField]: message });
       } else if (NAME_FIELD_CODES.has(err.code)) {
-        // DUPLICATE_NAME / REQUIRED_FIELD without explicit field → assume name
         setFieldErrors({ accountName: message });
       } else {
-        // Generic error at top of form
         setFieldErrors({ _general: message });
       }
     } finally {
@@ -99,6 +141,7 @@ function AccountSelector({
     }
   };
 
+  /** Cancel and return to the dropdown. */
   const handleCancel = () => {
     setShowCreateForm(false);
     setFieldErrors({});
@@ -107,11 +150,17 @@ function AccountSelector({
     setNewStatementFormat('');
   };
 
+  /**
+   * Resolve a format key to its display name.
+   * @param {?string} formatKey
+   */
   const getFormatName = (formatKey) => {
     if (!formatKey) return null;
     const format = statementFormats.find((f) => f.key === formatKey);
     return format ? format.name : formatKey;
   };
+
+  // ── Render: create form ───────────────────────────────────────────
 
   if (showCreateForm) {
     return (
@@ -127,18 +176,15 @@ function AccountSelector({
         <h3 style={{ marginTop: 0 }}>Create New Account</h3>
 
         <form onSubmit={handleCreateAccount}>
-          {/* General error (doesn't map to a specific field) */}
           {fieldErrors._general && (
             <div style={{ color: '#dc2626', marginBottom: '15px' }} role="alert">
               {fieldErrors._general}
             </div>
           )}
 
+          {/* Account Name */}
           <div style={{ marginBottom: '15px' }}>
-            <label
-              htmlFor="accountName"
-              style={{ display: 'block', marginBottom: '5px' }}
-            >
+            <label htmlFor="accountName" style={{ display: 'block', marginBottom: '5px' }}>
               Account Name:
             </label>
             <input
@@ -173,11 +219,9 @@ function AccountSelector({
             )}
           </div>
 
+          {/* Account Type */}
           <div style={{ marginBottom: '15px' }}>
-            <label
-              htmlFor="accountType"
-              style={{ display: 'block', marginBottom: '5px' }}
-            >
+            <label htmlFor="accountType" style={{ display: 'block', marginBottom: '5px' }}>
               Account Type:
             </label>
             <select
@@ -213,11 +257,9 @@ function AccountSelector({
             )}
           </div>
 
+          {/* Statement Format */}
           <div style={{ marginBottom: '15px' }}>
-            <label
-              htmlFor="statementFormat"
-              style={{ display: 'block', marginBottom: '5px' }}
-            >
+            <label htmlFor="statementFormat" style={{ display: 'block', marginBottom: '5px' }}>
               Statement Format:
             </label>
             <select
@@ -293,6 +335,8 @@ function AccountSelector({
       </div>
     );
   }
+
+  // ── Render: dropdown ──────────────────────────────────────────────
 
   return (
     <select

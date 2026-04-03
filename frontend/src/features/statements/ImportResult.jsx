@@ -1,11 +1,38 @@
+/**
+ * @file ImportResult.jsx
+ * Post-import summary: header with counts, table of imported
+ * transactions, and income/expense totals.
+ *
+ * Fetches transactions by `upload_id` on mount so the user can review
+ * exactly what was imported.
+ */
+
 import { useState, useEffect } from 'react';
 import { getTransactions } from '@/features/transactions/api';
 import './ImportResult.css';
 import { createLogger } from '@/lib/logger';
 
+/** @type {import('@/lib/logger').Logger} */
 const logger = createLogger('ImportResult');
 
+/**
+ * Import success view.
+ *
+ * @component
+ * @param {Object} props
+ *
+ * @param {Object} props.result
+ *        Response from `/tabular/import`. Expected shape:
+ *        `{ upload_id, file_name, rows_imported, warnings, … }`.
+ * @param {() => void} props.onUploadAnother
+ *        Callback to reset the page for a new file.
+ * @param {boolean} [props.showHeader=true]
+ *        Show the success banner and "Upload Another" button.
+ *
+ * @returns {JSX.Element|null}
+ */
 export default function ImportResult({ result, onUploadAnother, showHeader = true }) {
+  /** Fetched transactions for this upload. */
   const [transactions, setTransactions] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -18,14 +45,16 @@ export default function ImportResult({ result, onUploadAnother, showHeader = tru
     }
   }, [result?.upload_id]);
 
+  /**
+   * Load transactions matching this upload.
+   */
   const fetchTransactions = async () => {
     try {
       setLoading(true);
-      const data = await getTransactions({ 
+      const data = await getTransactions({
         upload_id: result.upload_id,
-        limit: 500
+        limit: 500,
       });
-      // Handle different response structures
       setTransactions(data.transactions || data);
     } catch (err) {
       setError('Failed to load transactions');
@@ -35,6 +64,10 @@ export default function ImportResult({ result, onUploadAnother, showHeader = tru
     }
   };
 
+  /**
+   * Format ISO date as `DD-MM-YYYY`.
+   * @param {?string} dateString
+   */
   const formatDate = (dateString) => {
     if (!dateString) return '-';
     const date = new Date(dateString);
@@ -46,18 +79,21 @@ export default function ImportResult({ result, onUploadAnother, showHeader = tru
 
   if (!result) return null;
 
-  // Calculate summary stats
+  // ── Summary stats ─────────────────────────────────────────────────
+
   const totalIncome = transactions
-    ? transactions.filter(t => t.amount > 0).reduce((sum, t) => sum + parseFloat(t.amount), 0)
+    ? transactions.filter((t) => t.amount > 0).reduce((sum, t) => sum + parseFloat(t.amount), 0)
     : 0;
-  
+
   const totalExpenses = transactions
-    ? Math.abs(transactions.filter(t => t.amount < 0).reduce((sum, t) => sum + parseFloat(t.amount), 0))
+    ? Math.abs(
+        transactions.filter((t) => t.amount < 0).reduce((sum, t) => sum + parseFloat(t.amount), 0)
+      )
     : 0;
-  
-  const categorizedCount = transactions
-    ? transactions.filter(t => t.party_id).length
-    : 0;
+
+  const categorizedCount = transactions ? transactions.filter((t) => t.party_id).length : 0;
+
+  // ── Render ────────────────────────────────────────────────────────
 
   return (
     <div className="import-result">
@@ -89,21 +125,10 @@ export default function ImportResult({ result, onUploadAnother, showHeader = tru
         </div>
       )}
 
-      {/* Loading state */}
-      {loading && (
-        <div className="import-loading">
-          Loading transactions...
-        </div>
-      )}
+      {loading && <div className="import-loading">Loading transactions...</div>}
 
-      {/* Error state */}
-      {error && (
-        <div className="import-error">
-          {error}
-        </div>
-      )}
+      {error && <div className="import-error">{error}</div>}
 
-      {/* Transactions table */}
       {transactions && !loading && (
         <div className="import-transactions-section">
           <div className="transactions-header">
@@ -126,9 +151,7 @@ export default function ImportResult({ result, onUploadAnother, showHeader = tru
               <tbody>
                 {transactions.map((txn) => (
                   <tr key={txn.id}>
-                    <td className="date-cell">
-                      {formatDate(txn.transaction_date)}
-                    </td>
+                    <td className="date-cell">{formatDate(txn.transaction_date)}</td>
                     <td className="description-cell" title={txn.description}>
                       {txn.description}
                     </td>
@@ -136,9 +159,7 @@ export default function ImportResult({ result, onUploadAnother, showHeader = tru
                       €{Math.abs(parseFloat(txn.amount)).toFixed(2)}
                       <span className="amount-indicator">{txn.amount > 0 ? '↑' : '↓'}</span>
                     </td>
-                    <td className="party-cell">
-                      {txn.party_name || '-'}
-                    </td>
+                    <td className="party-cell">{txn.party_name || '-'}</td>
                     <td className="category-cell">
                       {txn.category_name ? (
                         <>
@@ -147,11 +168,11 @@ export default function ImportResult({ result, onUploadAnother, showHeader = tru
                             <span className="sub-category"> → {txn.sub_category_name}</span>
                           )}
                         </>
-                      ) : '-'}
+                      ) : (
+                        '-'
+                      )}
                     </td>
-                    <td className="type-cell">
-                      {txn.type_name || '-'}
-                    </td>
+                    <td className="type-cell">{txn.type_name || '-'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -172,7 +193,9 @@ export default function ImportResult({ result, onUploadAnother, showHeader = tru
               </div>
               <div className="summary-stat">
                 <span className="stat-label">Categorized</span>
-                <span className="stat-value">{categorizedCount} / {transactions.length}</span>
+                <span className="stat-value">
+                  {categorizedCount} / {transactions.length}
+                </span>
               </div>
             </div>
           </div>
