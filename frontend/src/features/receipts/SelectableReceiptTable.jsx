@@ -1,29 +1,63 @@
+/**
+ * @file SelectableReceiptTable.jsx
+ * Sortable list of receipts in the current processing session.
+ *
+ * Each row shows a thumbnail, status icon, filename, and the
+ * OCR-extracted vendor/date/amount. Clicking a row selects it for the
+ * detail panel; the ✕ button removes a pending receipt from the list
+ * (local only — does not call the API).
+ */
+
 import { useState } from 'react';
 import ReceiptThumbnail from '@/components/Thumbnail';
 import './SelectableReceiptTable.css';
 
+/**
+ * Receipt session table.
+ *
+ * Sorting is client-side over the `receipts` array, using values from
+ * `extracted_data` for vendor/date/amount. Rows carry CSS hooks for
+ * selection and status (`selected`, `status-<x>`, `processed`).
+ *
+ * @component
+ * @param {Object} props
+ * @param {Array<import('./ProcessReceipts').LocalReceipt>} [props.receipts=[]]
+ *        Receipts in the current session.
+ * @param {?number|string} props.selectedReceiptId
+ *        Id of the receipt currently shown in the detail panel.
+ * @param {(receiptId: number|string) => void} props.onSelectReceipt
+ *        Called when a row is clicked.
+ * @param {(receiptId: number|string) => void} props.onRemoveReceipt
+ *        Called when the ✕ button is clicked for a pending receipt.
+ * @param {boolean} [props.disabled=false]
+ *        Disable row clicks and the ✕ button (e.g. while saving).
+ * @returns {JSX.Element}
+ */
 export default function SelectableReceiptTable({
   receipts = [],
   selectedReceiptId,
   onSelectReceipt,
   onRemoveReceipt,
-  disabled = false
+  disabled = false,
 }) {
+  /** Active sort column + direction. */
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
 
+  /** Toggle sort direction or switch column (defaults to asc). */
   const handleSort = (key) => {
-    setSortConfig(prev => ({
+    setSortConfig((prev) => ({
       key,
-      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
+      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc',
     }));
   };
 
+  /** Receipts sorted by `sortConfig`. */
   const sortedReceipts = [...receipts].sort((a, b) => {
     const aData = a.extracted_data || {};
     const bData = b.extracted_data || {};
-    
+
     let aVal, bVal;
-    
+
     switch (sortConfig.key) {
       case 'filename':
         aVal = a.filename || '';
@@ -48,25 +82,32 @@ export default function SelectableReceiptTable({
       default:
         return 0;
     }
-    
+
     if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
     if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
     return 0;
   });
 
+  // ── Display helpers ───────────────────────────────────────────────
+
+  /** Locale-formatted date, or `-`. */
   const formatDate = (dateString) => {
     if (!dateString) return '-';
     return new Date(dateString).toLocaleDateString();
   };
 
+  /** `$12.34`-style amount, or `-`. */
   const formatAmount = (amount) => {
     if (amount == null) return '-';
     return `$${parseFloat(amount).toFixed(2)}`;
   };
 
+  /**
+   * Truncate long filenames to ~20 chars while preserving the
+   * extension for recognizability.
+   */
   const formatFilename = (filename) => {
     if (!filename) return '-';
-    // Truncate long filenames but show extension
     if (filename.length > 20) {
       const ext = filename.split('.').pop();
       return `${filename.substring(0, 15)}...${ext}`;
@@ -74,24 +115,27 @@ export default function SelectableReceiptTable({
     return filename;
   };
 
+  /** Status → glyph for the narrow status column. */
   const getStatusIcon = (status) => {
     switch (status) {
-      case 'saved': return '✓';
-      case 'linked': return '🔗';
-      default: return '○';
+      case 'saved':
+        return '✓';
+      case 'linked':
+        return '🔗';
+      default:
+        return '○';
     }
   };
 
+  /**
+   * Clickable column header with asc/desc indicator.
+   * @param {{field: string, children: React.ReactNode}} props
+   */
   const SortableHeader = ({ field, children }) => (
-    <th
-      onClick={() => handleSort(field)}
-      className="sortable-header"
-    >
+    <th onClick={() => handleSort(field)} className="sortable-header">
       {children}
       {sortConfig.key === field && (
-        <span className="sort-indicator">
-          {sortConfig.direction === 'asc' ? ' ↑' : ' ↓'}
-        </span>
+        <span className="sort-indicator">{sortConfig.direction === 'asc' ? ' ↑' : ' ↓'}</span>
       )}
     </th>
   );
@@ -122,15 +166,17 @@ export default function SelectableReceiptTable({
           </tr>
         </thead>
         <tbody>
-          {sortedReceipts.map(receipt => {
+          {sortedReceipts.map((receipt) => {
             const isSelected = receipt.receipt_id === selectedReceiptId;
             const isProcessed = receipt.status === 'saved' || receipt.status === 'linked';
             const extracted = receipt.extracted_data || {};
-            
+
             return (
               <tr
                 key={receipt.receipt_id}
-                className={`receipt-row ${isSelected ? 'selected' : ''} status-${receipt.status || 'pending'} ${isProcessed ? 'processed' : ''}`}
+                className={`receipt-row ${isSelected ? 'selected' : ''} status-${
+                  receipt.status || 'pending'
+                } ${isProcessed ? 'processed' : ''}`}
                 onClick={() => !disabled && onSelectReceipt(receipt.receipt_id)}
               >
                 <td className="thumbnail-col">
@@ -142,7 +188,7 @@ export default function SelectableReceiptTable({
                   />
                 </td>
                 <td className="status-col">
-                  <span 
+                  <span
                     className={`status-icon status-${receipt.status || 'pending'}`}
                     title={receipt.status || 'pending'}
                   >
@@ -159,12 +205,8 @@ export default function SelectableReceiptTable({
                     {extracted.vendor || 'Unknown'}
                   </span>
                 </td>
-                <td className="date-col">
-                  {formatDate(extracted.date)}
-                </td>
-                <td className="amount-col">
-                  {formatAmount(extracted.amount)}
-                </td>
+                <td className="date-col">{formatDate(extracted.date)}</td>
+                <td className="amount-col">{formatAmount(extracted.amount)}</td>
                 <td className="actions-col">
                   {receipt.status === 'pending' && (
                     <button

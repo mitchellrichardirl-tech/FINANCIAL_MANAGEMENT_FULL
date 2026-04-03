@@ -1,37 +1,97 @@
-import { useState, useRef } from "react";
-import FilePreview from "@/components/FilePreview";
-import './BulkUploadReceipts.css';
-import { createLogger } from "@/lib/logger";
-import { AppError } from "@/lib/errors";
+/**
+ * @file BulkUploadReceipts.jsx
+ * Multi-file receipt uploader with drag-and-drop and streaming progress.
+ *
+ * Unlike the generic {@link module:components/FileDropzone}, this
+ * component:
+ *  - Accepts **multiple** files (images + PDFs) in one batch.
+ *  - Talks to `/receipts/upload-stream` directly via `fetch` (bypassing
+ *    `apiClient`) so it can read the response as an SSE-style stream
+ *    and emit per-receipt events as the backend finishes each file.
+ *  - Shows a live progress bar driven by unique `receipt_id`s seen in
+ *    the stream.
+ *
+ * The parent ({@link ProcessReceipts}) is notified via callbacks:
+ *  - `onProcessingStart()` — batch has begun.
+ *  - `onReceiptProcessed(result)` — one receipt succeeded.
+ *  - `onProcessingComplete({succeeded, failed, failures})` — batch done.
+ *  - `onError(message)` — transport-level failure (non-2xx, network).
+ */
 
+import { useState, useRef } from 'react';
+import FilePreview from '@/components/FilePreview';
+import './BulkUploadReceipts.css';
+import { createLogger } from '@/lib/logger';
+import { AppError } from '@/lib/errors';
+
+/** @type {import('@/lib/logger').Logger} */
 const logger = createLogger('BulkUploadReceipts');
 
+/**
+ * Bulk receipt uploader with streaming progress.
+ *
+ * @component
+ * @param {Object} props
+ * @param {(result: Object) => void} [props.onReceiptProcessed]
+ *        Fired once per receipt that the server successfully parsed.
+ *        `result` contains `receipt_id`, `filename`, `extracted_data`,
+ *        etc., and is consumed verbatim by {@link ProcessReceipts}.
+ * @param {() => void} [props.onProcessingStart]
+ *        Fired when the user clicks "Process" and the request begins.
+ * @param {(summary: {succeeded: number, failed: number, failures: Object[]}) => void} [props.onProcessingComplete]
+ *        Fired after the stream closes. `failures` holds the raw stream
+ *        events for receipts that reported a non-success status.
+ * @param {(message: string) => void} [props.onError]
+ *        Fired for transport-level failures (network error, non-2xx
+ *        before the stream starts). Per-receipt failures are reported
+ *        via `onProcessingComplete`, not here.
+ * @param {boolean} [props.compact=false]
+ *        Render in compact mode (hides {@link FilePreview} list and
+ *        shortens copy) for use in the sidebar.
+ * @returns {JSX.Element}
+ */
 function BulkUploadReceipts({
   onReceiptProcessed,
   onProcessingStart,
   onProcessingComplete,
   onError,
-  compact = false
+  compact = false,
 }) {
+  /** Files queued for upload but not yet submitted. */
   const [files, setFiles] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  /** Progress for the bar: `{ current, total }`. */
   const [progress, setProgress] = useState({ current: 0, total: 0 });
+
+  /** Ref to the hidden `<input type="file">` so we can reset its value. */
   const fileInputRef = useRef(null);
+  /**
+   * Tracks `receipt_id`s already emitted, so duplicate SSE lines (or
+   * multi-page PDFs that echo the same id) don't double-count.
+   */
   const processedIdsRef = useRef(new Set());
+  /** Collects stream events whose `status !== 'success'`. */
   const failedRef = useRef([]);
 
+  // ── File selection ────────────────────────────────────────────────
+
+  /** Append files chosen via the native picker. */
   const handleFileSelect = (event) => {
     const selectedFiles = Array.from(event.target.files);
-    setFiles(prev => [...prev, ...selectedFiles]);
+    setFiles((prev) => [...prev, ...selectedFiles]);
   };
 
+  /**
+   * Handle drag-and-drop. Only image/* and PDF types are accepted;
+   * others are silently ignored.
+   */
   const handleDrop = (event) => {
     event.preventDefault();
     event.currentTarget.classList.remove('drag-over');
     const droppedFiles = Array.from(event.dataTransfer.files).filter(
-      file => file.type.startsWith('image/') || file.type === 'application/pdf'
+      (file) => file.type.startsWith('image/') || file.type === 'application/pdf'
     );
-    setFiles(prev => [...prev, ...droppedFiles]);
+    setFiles((prev) => [...prev, ...droppedFiles]);
   };
 
   const handleDragOver = (event) => {
@@ -43,10 +103,12 @@ function BulkUploadReceipts({
     event.currentTarget.classList.remove('drag-over');
   };
 
+  /** Remove a single queued file by index. */
   const removeFile = (index) => {
-    setFiles(prev => prev.filter((_, i) => i !== index));
+    setFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
+  /** Clear the queue and reset the native input so the same file can be re-picked. */
   const clearFiles = () => {
     setFiles([]);
     if (fileInputRef.current) {
@@ -54,6 +116,22 @@ function BulkUploadReceipts({
     }
   };
 
+  // ── Upload + stream parse ─────────────────────────────────────────
+
+  /**
+   * POST all queued files to `/receipts/upload-stream` and parse the
+   * streamed response line-by-line.
+   *
+   * The server sends SSE-style lines: `data: {json}\n`. Each JSON
+   * object has at least `{ receipt_id, status }`. We:
+   *  - De-duplicate by `receipt_id` via `processedIdsRef`.
+   *  - Call `onReceiptProcessed` for successes.
+   *  - Collect failures into `failedRef` for the summary callback.
+   *  - Update the progress bar as unique ids arrive.
+   *
+   * Uses raw `fetch` (not `apiClient`) because `apiClient` calls
+   * `response.json()`, which would block until the stream ends.
+   */
   const processReceipts = async () => {
     if (files.length === 0) return;
 
@@ -61,7 +139,7 @@ function BulkUploadReceipts({
     failedRef.current = [];
     setIsProcessing(true);
     setProgress({ current: 0, total: totalFiles });
-    processedIdsRef.current = new Set(); // Reset tracking
+    processedIdsRef.current = new Set();
     onProcessingStart?.();
 
     const formData = new FormData();
@@ -80,7 +158,7 @@ function BulkUploadReceipts({
         const errorBody = await response.json().catch(() => null);
         throw new AppError({
           message: `Upload failed: ${response.status} ${response.statusText}`,
-          userMessage: errorBody?.user_message,  // falls back to status map
+          userMessage: errorBody?.user_message, // falls back to STATUS_MESSAGES via AppError
           status: response.status,
         });
       }
@@ -89,15 +167,15 @@ function BulkUploadReceipts({
       const decoder = new TextDecoder();
       let buffer = '';
 
+      // Stream loop: accumulate chunks, split on newline, parse each `data:` line.
       while (true) {
         const { done, value } = await reader.read();
-
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-        
+
         const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
+        buffer = lines.pop() || ''; // keep the trailing partial line
 
         for (const line of lines) {
           const trimmedLine = line.trim();
@@ -106,22 +184,20 @@ function BulkUploadReceipts({
               const jsonStr = trimmedLine.slice(6);
               const result = JSON.parse(jsonStr);
               logger.debug('Receipt result:', result);
-              
-              // Only process each receipt_id once
+
               if (result.receipt_id && !processedIdsRef.current.has(result.receipt_id)) {
                 processedIdsRef.current.add(result.receipt_id);
-                
+
                 if (result.status === 'success') {
                   onReceiptProcessed?.(result);
                 } else {
                   failedRef.current.push(result);
                   logger.warn(`Receipt ${result.receipt_id} failed to process:`, result);
                 }
-                
-                // Update progress based on unique receipts processed
-                setProgress(prev => ({ 
-                  ...prev, 
-                  current: Math.min(processedIdsRef.current.size, totalFiles)
+
+                setProgress((prev) => ({
+                  ...prev,
+                  current: Math.min(processedIdsRef.current.size, totalFiles),
                 }));
               }
             } catch (parseError) {
@@ -131,7 +207,7 @@ function BulkUploadReceipts({
         }
       }
 
-      // Process any remaining data in buffer
+      // Flush any trailing `data:` line left in the buffer
       if (buffer.trim().startsWith('data: ')) {
         try {
           const jsonStr = buffer.trim().slice(6);
@@ -165,7 +241,7 @@ function BulkUploadReceipts({
 
   return (
     <div className={`bulk-upload-receipts ${compact ? 'compact' : ''}`}>
-      <div 
+      <div
         className={`dropzone ${isProcessing ? 'disabled' : ''}`}
         onDrop={handleDrop}
         onDragOver={handleDragOver}
@@ -187,11 +263,7 @@ function BulkUploadReceipts({
             <span className="dropzone-text">
               {compact ? 'Drop files or click to select' : 'Drop files here or click to select'}
             </span>
-            {!compact && (
-              <span className="dropzone-hint">
-                Supports JPG, PNG, PDF
-              </span>
-            )}
+            {!compact && <span className="dropzone-hint">Supports JPG, PNG, PDF</span>}
           </div>
         </label>
       </div>
@@ -199,29 +271,24 @@ function BulkUploadReceipts({
       {files.length > 0 && (
         <div className="selected-files-section">
           <div className="selected-files-header">
-            <span className="file-count">{files.length} file{files.length !== 1 ? 's' : ''}</span>
-            <button 
-              onClick={clearFiles} 
-              className="btn-clear-files"
-              disabled={isProcessing}
-            >
+            <span className="file-count">
+              {files.length} file{files.length !== 1 ? 's' : ''}
+            </span>
+            <button onClick={clearFiles} className="btn-clear-files" disabled={isProcessing}>
               Clear
             </button>
           </div>
-          
-          {!compact && (
-            <FilePreview files={files} onRemove={removeFile} disabled={isProcessing} />
-          )}
-          
+
+          {!compact && <FilePreview files={files} onRemove={removeFile} disabled={isProcessing} />}
+
           <button
             onClick={processReceipts}
             disabled={isProcessing || files.length === 0}
             className="btn-process"
           >
-            {isProcessing 
+            {isProcessing
               ? `Processing ${progress.current}/${progress.total}...`
-              : `Process ${files.length} Receipt${files.length !== 1 ? 's' : ''}`
-            }
+              : `Process ${files.length} Receipt${files.length !== 1 ? 's' : ''}`}
           </button>
         </div>
       )}
@@ -229,9 +296,11 @@ function BulkUploadReceipts({
       {isProcessing && (
         <div className="processing-progress">
           <div className="progress-bar">
-            <div 
+            <div
               className="progress-fill"
-              style={{ width: `${progress.total > 0 ? (progress.current / progress.total) * 100 : 0}%` }}
+              style={{
+                width: `${progress.total > 0 ? (progress.current / progress.total) * 100 : 0}%`,
+              }}
             />
           </div>
         </div>
