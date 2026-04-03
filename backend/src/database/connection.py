@@ -24,10 +24,11 @@ Typical usage (Flask):
     rows = db.execute("SELECT ...").fetchall()
 """
 
-from pathlib import Path
-from typing import Union, Optional
-from contextlib import contextmanager
+import os
 import sqlite3
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Optional, Union
 
 from flask import current_app, g
 
@@ -44,6 +45,7 @@ class DatabaseError(Exception):
     (e.g. backup I/O errors) with a consistent exception type so callers
     can catch a single error class.
     """
+
     pass
 
 
@@ -75,7 +77,7 @@ class ConnectionManager:
                 Flask app config is unavailable. Defaults to "data.db".
         """
         try:
-            self.db_path = Path(current_app.config['DATABASE_PATH'])
+            self.db_path = Path(current_app.config["DATABASE_PATH"])
         except Exception:
             logger.info(f"No app config found, using default db path: {db_path}")
             self.db_path = Path(db_path)
@@ -89,7 +91,7 @@ class ConnectionManager:
         No-op if the database path has no parent component (i.e. lives in
         the current working directory).
         """
-        if self.db_path.parent != Path('.'):
+        if self.db_path.parent != Path("."):
             created = not self.db_path.parent.exists()
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             if created:
@@ -234,6 +236,13 @@ def get_manager() -> ConnectionManager:
     Raises:
         DatabaseError: If neither `init()` nor `init_app()` has been called.
     """
+    if os.environ.get("PDOC_GENERATING"):
+        from unittest.mock import MagicMock
+
+        logger.warning(
+            "PDOC_GENERATING detected, returning MagicMock for ConnectionManager"
+        )
+        return MagicMock(spec=ConnectionManager)
     if _default_manager is None:
         logger.error("Connection manager accessed before initialization")
         raise DatabaseError("Connection manager not initialized. Call init() first.")
@@ -256,6 +265,7 @@ def close_manager():
 # Flask Integration
 # =============================================================================
 
+
 def init_app(app, create_tables=True):
     """Bind the database layer to a Flask application.
 
@@ -276,7 +286,7 @@ def init_app(app, create_tables=True):
     Returns:
         The initialized `ConnectionManager`.
     """
-    db_path = app.config.get('DATABASE_PATH', 'data/app.db')
+    db_path = app.config.get("DATABASE_PATH", "data/app.db")
     logger.info(f"Initializing database for Flask app: {db_path}")
 
     manager = init(db_path)
@@ -285,6 +295,7 @@ def init_app(app, create_tables=True):
 
     if create_tables:
         from src.database.schema import SchemaManager
+
         schema_manager = SchemaManager(manager)
         schema_manager.init_db()
         logger.debug("Database schema initialized")
@@ -307,7 +318,7 @@ def teardown_db(exception=None):
         exception: The unhandled exception that ended the request, if any.
             Passed by Flask; unused here.
     """
-    db = g.pop('db', None)
+    db = g.pop("db", None)
     if db is not None:
         db.close()
 
@@ -328,7 +339,7 @@ def get_db() -> sqlite3.Connection:
     Raises:
         DatabaseError: If the connection manager has not been initialized.
     """
-    if 'db' not in g:
+    if "db" not in g:
         manager = get_manager()
         g.db = manager.get_raw_connection()
     return g.db
