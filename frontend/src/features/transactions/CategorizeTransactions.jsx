@@ -1,9 +1,37 @@
+/**
+ * @file CategorizeTransactions.jsx
+ * Top-level page for reviewing and categorizing imported bank
+ * transactions.
+ *
+ * Responsibilities:
+ *  - Load and own all reference data (accounts, taxonomy, uploads).
+ *  - Fetch transactions with server-side filtering, sorting, and paging.
+ *  - Wire up inline-edit, bulk-edit, and party-remap flows.
+ *  - Surface success/error feedback via toasts.
+ *
+ * Child components:
+ *  - {@link TransactionTable} — sortable, filterable grid.
+ *  - {@link Pagination}
+ *  - {@link BulkEditModal} — multi-select mass update.
+ *  - {@link RemapPartyModal} — move a party to a different type.
+ */
+
 import { useState, useEffect, useCallback } from 'react';
 import { useToast } from '@/components/ToastContext';
 import {
-  getTransactions, updateTransaction, bulkUpdateTransactions,
-  getCategories, getSubCategories, getTypes, getParties, getUploads,
-  createCategory, createSubCategory, createType, createParty, remapParty
+  getTransactions,
+  updateTransaction,
+  bulkUpdateTransactions,
+  getCategories,
+  getSubCategories,
+  getTypes,
+  getParties,
+  getUploads,
+  createCategory,
+  createSubCategory,
+  createType,
+  createParty,
+  remapParty,
 } from './api';
 import { getAccounts } from '@/features/statements/api';
 import TransactionTable from './TransactionTable';
@@ -13,13 +41,22 @@ import RemapPartyModal from './RemapPartyModal';
 import './CategorizeTransactions.css';
 import { createLogger } from '@/lib/logger';
 
+/** @type {import('@/lib/logger').Logger} */
 const logger = createLogger('CategorizeTransactions');
+
+/** Page size for server-side pagination. */
 const ITEMS_PER_PAGE = 100;
 
+/**
+ * Main categorization view.
+ *
+ * @component
+ * @returns {JSX.Element}
+ */
 export default function CategorizeTransactions() {
   const { addToast } = useToast();
 
-  // Data state
+  // ── Data state ────────────────────────────────────────────────────
   const [transactions, setTransactions] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -28,32 +65,64 @@ export default function CategorizeTransactions() {
   const [parties, setParties] = useState([]);
   const [uploads, setUploads] = useState([]);
 
-  // UI state — `error` removed
+  // ── UI state ──────────────────────────────────────────────────────
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
+  /**
+   * Approximate total — API doesn't return a count, so we infer:
+   *  - If a full page is returned, assume at least one more exists.
+   *  - Otherwise clamp to actual count.
+   */
   const [totalTransactions, setTotalTransactions] = useState(0);
   const [filters, setFilters] = useState({});
   const [selectedTransactions, setSelectedTransactions] = useState([]);
   const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
   const [sortField, setSortField] = useState('transaction_date');
   const [sortDir, setSortDir] = useState('desc');
+  /**
+   * When set, the remap modal is open. If a number, that party is
+   * preselected; if `true`, the modal opens empty.
+   * @type {?number|true}
+   */
   const [remapPartyId, setRemapPartyId] = useState(null);
+  /** Optional target type to pre-fill in the remap modal. */
   const [remapTargetTypeId, setRemapTargetTypeId] = useState(null);
 
   const isRemapOpen = remapPartyId !== null;
 
-  // ── Data loading ──
+  // ── Effects: load data on mount / filter change ───────────────────
 
-  useEffect(() => { loadReferenceData(); }, []);
-  useEffect(() => { loadTransactions(); }, [filters, currentPage, sortField, sortDir]);
+  useEffect(() => {
+    loadReferenceData();
+  }, []);
 
+  useEffect(() => {
+    loadTransactions();
+  }, [filters, currentPage, sortField, sortDir]);
+
+  // ── Data loaders ──────────────────────────────────────────────────
+
+  /**
+   * Fetch all reference (lookup) data in parallel.
+   * Errors are toasted; we don't block the UI.
+   */
   const loadReferenceData = async () => {
     try {
-      const [accountsData, categoriesData, subCategoriesData, typesData, partiesData, uploadsData] =
-        await Promise.all([
-          getAccounts(), getCategories(), getSubCategories(),
-          getTypes(), getParties(), getUploads()
-        ]);
+      const [
+        accountsData,
+        categoriesData,
+        subCategoriesData,
+        typesData,
+        partiesData,
+        uploadsData,
+      ] = await Promise.all([
+        getAccounts(),
+        getCategories(),
+        getSubCategories(),
+        getTypes(),
+        getParties(),
+        getUploads(),
+      ]);
       setAccounts(accountsData);
       setCategories(categoriesData);
       setSubCategories(subCategoriesData);
@@ -62,10 +131,17 @@ export default function CategorizeTransactions() {
       setUploads(uploadsData.data || uploadsData);
     } catch (err) {
       logger.error('Error loading reference data:', err);
-      addToast({ message: `Failed to load reference data: ${err.userMessage || err.message}`, type: 'error' });
+      addToast({
+        message: `Failed to load reference data: ${err.userMessage || err.message}`,
+        type: 'error',
+      });
     }
   };
 
+  /**
+   * Fetch a page of transactions matching the current filters and
+   * sort order. Updates `transactions` and `totalTransactions`.
+   */
   const loadTransactions = async () => {
     setLoading(true);
     try {
@@ -90,30 +166,45 @@ export default function CategorizeTransactions() {
       );
     } catch (err) {
       logger.error('Error loading transactions:', err);
-      addToast({ message: `Failed to load transactions: ${err.userMessage || err.message}`, type: 'error' });
+      addToast({
+        message: `Failed to load transactions: ${err.userMessage || err.message}`,
+        type: 'error',
+      });
       setTransactions([]);
     } finally {
       setLoading(false);
     }
   };
 
-  // ── Mutations ──
+  // ── Mutation handlers ─────────────────────────────────────────────
 
+  /**
+   * Persist changes to a single transaction (inline edit).
+   *
+   * @param {number} transactionId
+   * @param {Object} updates
+   * @returns {Promise<Object>} The updated transaction.
+   */
   const handleTransactionUpdate = async (transactionId, updates) => {
     try {
       const updated = await updateTransaction(transactionId, updates);
-      setTransactions(prev =>
-        prev.map(t => t.id === transactionId ? { ...t, ...updated } : t)
+      setTransactions((prev) =>
+        prev.map((t) => (t.id === transactionId ? { ...t, ...updated } : t))
       );
-      // Optional: this fires on every inline cell edit, so keep it short & quick
-      // addToast({ message: 'Saved', type: 'success', duration: 1500 });
       return updated;
     } catch (err) {
-      addToast({ message: `Failed to update transaction: ${err.userMessage || err.message}`, type: 'error' });
+      addToast({
+        message: `Failed to update transaction: ${err.userMessage || err.message}`,
+        type: 'error',
+      });
       throw err;
     }
   };
 
+  /**
+   * Apply `updates` to all selected transactions.
+   * Called from {@link BulkEditModal}.
+   */
   const handleBulkUpdate = async (updates) => {
     if (selectedTransactions.length === 0) throw new Error('No transactions selected');
 
@@ -131,13 +222,20 @@ export default function CategorizeTransactions() {
       });
     } catch (err) {
       const msg = err.message || 'Failed to update transactions';
-      addToast({ message: msg.userMessage || msg.message || 'Failed to update transactions', type: 'error' });
+      addToast({
+        message: msg.userMessage || msg.message || 'Failed to update transactions',
+        type: 'error',
+      });
       throw new Error(msg);
     } finally {
       setLoading(false);
     }
   };
 
+  /**
+   * Remap a party to a new parent type.
+   * Called from {@link RemapPartyModal}.
+   */
   const handleRemapParty = async (partyId, newTypeId) => {
     try {
       const result = await remapParty(partyId, newTypeId);
@@ -150,16 +248,35 @@ export default function CategorizeTransactions() {
           ? `Party merged into existing — ${result.transactions_moved ?? result.data.transactions_moved} transactions moved`
           : 'Party remapped successfully',
         type: 'success',
-        duration: merged ? 5000 : 3000,  // give merge info a bit longer
+        duration: merged ? 5000 : 3000,
       });
       return result;
     } catch (err) {
-      addToast({ message: `Failed to remap party: ${err.userMessage || err.message}`, type: 'error' });
+      addToast({
+        message: `Failed to remap party: ${err.userMessage || err.message}`,
+        type: 'error',
+      });
       throw err;
     }
   };
 
-  // ── Create handlers ──
+  // ── Create-item factory ───────────────────────────────────────────
+
+  /**
+   * Factory producing create handlers for each taxonomy level.
+   *
+   * Each handler:
+   *  1. Calls the create API.
+   *  2. Refetches the list and updates local state.
+   *  3. Toasts success.
+   *  4. Returns the newly created record so callers can auto-select it.
+   *
+   * @param {string} label - Human label for toast (e.g. "Category").
+   * @param {Function} createFn - API function.
+   * @param {Function} refetchFn - Refetch list from API.
+   * @param {Function} setFn - State setter.
+   * @param {Function} findFn - Locate the new item in the refreshed list.
+   */
   const makeCreateHandler = useCallback(
     (label, createFn, refetchFn, setFn, findFn) =>
       async (...args) => {
@@ -174,63 +291,89 @@ export default function CategorizeTransactions() {
           });
           return findFn(fresh, ...args) || response;
         } catch (err) {
-          // Don't toast — let CreateCategoryModal show inline error
-          throw err;
+          throw err; // let caller (modal) handle inline error
         }
       },
     [addToast]
   );
 
   const handleCategoryCreated = makeCreateHandler(
-    'Category', createCategory, getCategories, setCategories,
-    (list, name) => list.find(c => c.category === name)
+    'Category',
+    createCategory,
+    getCategories,
+    setCategories,
+    (list, name) => list.find((c) => c.category === name)
   );
 
   const handleSubCategoryCreated = makeCreateHandler(
-    'Sub-category', createSubCategory, getSubCategories, setSubCategories,
+    'Sub-category',
+    createSubCategory,
+    getSubCategories,
+    setSubCategories,
     (list, name, categoryId) =>
-      list.find(sc => sc.sub_category === name && sc.category_id === categoryId)
+      list.find((sc) => sc.sub_category === name && sc.category_id === categoryId)
   );
 
   const handleTypeCreated = makeCreateHandler(
-    'Type', createType, getTypes, setTypes,
+    'Type',
+    createType,
+    getTypes,
+    setTypes,
     (list, name, subCategoryId) =>
-      list.find(t => t.type === name && t.sub_category_id === subCategoryId)
+      list.find((t) => t.type === name && t.sub_category_id === subCategoryId)
   );
 
   const handlePartyCreated = makeCreateHandler(
-    'Party', createParty, getParties, setParties,
-    (list, name, typeId) =>
-      list.find(p => p.name === name && p.type_id === typeId)
+    'Party',
+    createParty,
+    getParties,
+    setParties,
+    (list, name, typeId) => list.find((p) => p.name === name && p.type_id === typeId)
   );
 
-  // ── Remaining handlers (unchanged) ──
+  // ── Misc handlers ─────────────────────────────────────────────────
 
+  /** Replace filter state and reset to page 1. */
   const handleFilterChange = useCallback((newFilters) => {
     setFilters(newFilters);
     setCurrentPage(1);
   }, []);
 
+  /** Navigate to a new page and clear selection. */
   const handlePageChange = (page) => {
     setCurrentPage(page);
     setSelectedTransactions([]);
   };
 
+  /** Change sort column/direction and reset to page 1. */
   const handleSortChange = useCallback((field, dir) => {
     setSortField(field);
     setSortDir(dir);
     setCurrentPage(1);
   }, []);
 
-  const handleFindOrCreateParty = useCallback(async (name, typeId) => {
-    const existing = parties.find(
-      (p) => p.name.toLowerCase() === name.toLowerCase() && p.type_id === typeId
-    );
-    if (existing) return existing.id;
-    const newParty = await handlePartyCreated(name, typeId, '');
-    return newParty.id;
-  }, [parties, handlePartyCreated]);
+  /**
+   * Find an existing party by name+type, or create one if missing.
+   * Used by {@link TransactionRow} when the user chooses "this txn only"
+   * after a type conflict.
+   */
+  const handleFindOrCreateParty = useCallback(
+    async (name, typeId) => {
+      const existing = parties.find(
+        (p) => p.name.toLowerCase() === name.toLowerCase() && p.type_id === typeId
+      );
+      if (existing) return existing.id;
+      const newParty = await handlePartyCreated(name, typeId, '');
+      return newParty.id;
+    },
+    [parties, handlePartyCreated]
+  );
 
+  /**
+   * Open the remap-party modal.
+   * @param {?number} partyId - Pre-selected party, or `null`/`true` to open empty.
+   * @param {?number} targetTypeId - Optionally pre-fill target type.
+   */
   const handleOpenRemap = useCallback((partyId = null, targetTypeId = null) => {
     setRemapPartyId(partyId ?? true);
     setRemapTargetTypeId(targetTypeId);
@@ -241,6 +384,11 @@ export default function CategorizeTransactions() {
     setRemapTargetTypeId(null);
   };
 
+  /**
+   * Format an ISO date string for the uploads dropdown.
+   * @param {?string} dateString
+   * @returns {string}
+   */
   const formatUploadDate = (dateString) => {
     if (!dateString) return 'Unknown date';
     const date = new Date(dateString);
@@ -265,8 +413,6 @@ export default function CategorizeTransactions() {
           )}
         </div>
       </div>
-
-      {/* error banner removed — replaced by toasts */}
 
       <div className="filters-section">
         <div className="filter-group">
