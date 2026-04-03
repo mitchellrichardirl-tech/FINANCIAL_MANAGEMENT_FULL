@@ -26,7 +26,7 @@ const log = createLogger('ErrorBoundary');
  * and re-renders `children`; this recovers from transient errors but will
  * immediately re-trip if the underlying cause persists.
  *
- * @extends {Component<{children: React.ReactNode}, {hasError: boolean}>}
+ * @class
  *
  * @example
  * <ToastProvider>

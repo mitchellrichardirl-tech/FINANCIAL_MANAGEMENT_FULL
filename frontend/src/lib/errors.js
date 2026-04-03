@@ -34,7 +34,7 @@ const STATUS_MESSAGES = {
  * general-purpose wrapper when rethrowing lower-level errors with a
  * user-safe message attached.
  *
- * @extends Error
+ * @class
  *
  * @example
  * throw new AppError({

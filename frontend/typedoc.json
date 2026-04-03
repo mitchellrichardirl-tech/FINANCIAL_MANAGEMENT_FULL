@@ -1,0 +1,22 @@
+{
+  "entryPoints": ["src/**/*.{js,jsx}"],
+  "out": "docs",
+  "name": "Financial Management — Frontend",
+  "readme": "README.md",
+  "includeVersion": true,
+  "excludePrivate": true,
+  "excludeInternal": true,
+  "exclude": [
+    "**/node_modules/**",
+    "**/*.css",
+    "**/dist/**"
+  ],
+  "navigation": {
+    "includeCategories": true,
+    "includeGroups": true,
+    "includeFolders": true
+  },
+  "categorizeByGroup": true,
+  "sort": ["source-order"],
+  "skipErrorChecking": true
+}

@@ -151,7 +151,7 @@ export function unwrap(response, key) {
  * its fields directly on the error instance so callers can branch on
  * `err.code`, `err.status`, etc., and surface `err.userMessage` in the UI.
  *
- * @extends Error
+ * @class
  */
 class ApiError extends Error {
   /**
