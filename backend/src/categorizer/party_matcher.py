@@ -398,3 +398,77 @@ class PartyMatcher:
 
     def get_new_counts(self) -> Tuple[int, int]:
         return self.new_aliases, self.new_parties
+    
+class PartyMatcherReadOnly(PartyMatcher):
+    """
+    Read-only variant of :class:`PartyMatcher`.
+
+    Performs exact and fuzzy matching against existing parties but
+    **never writes to the database** — no new parties are created on
+    a miss. Intended for lookup / suggestion endpoints (e.g. matching
+    an OCR-extracted vendor name to pre-fill a form) where side
+    effects are undesirable.
+
+    Differences from the parent class:
+
+    - :meth:`_add_unknown_party` is a no-op.
+    - :meth:`find_match` returns ``None`` instead of creating a new
+      party when no existing party scores above the threshold.
+
+    Note:
+        :meth:`_check_fuzzy_match` still updates the in-memory
+        ``alias_mapping`` on a hit. Since instances are typically
+        request-scoped and discarded, this has no persistent effect.
+    """
+
+    def _add_unknown_party(self, party_name: str) -> None:
+        """No-op override — this matcher never creates parties.
+
+        Args:
+            party_name: Ignored.
+
+        Returns:
+            Always ``None``.
+        """
+        logger.debug(
+            f"Read-only matcher: not creating party for '{party_name}'"
+        )
+        return None
+
+    def find_match(self, party_name: str) -> Optional[Tuple[int, int]]:
+        """Identify the party for a single name, without creating one.
+
+        Runs the exact → fuzzy lookup tiers only. Unlike the parent
+        implementation, tier 3 ("create new") is skipped entirely.
+
+        Args:
+            party_name: Extracted party / vendor name.
+
+        Returns:
+            ``(party_id, confidence)`` on a match, or ``None`` if no
+            existing party scores at or above
+            :attr:`similarity_threshold`.
+
+        Raises:
+            ValueError: If *party_name* is empty or whitespace.
+        """
+        if not party_name or party_name.strip() == "":
+            raise ValueError("No party name provided")
+        self.last_match_score = 0
+
+        # Tier 1 — exact
+        try:
+            party_id = self._check_exact_match(party_name)
+            self.last_match_score = 100
+            return party_id, 100
+        except KeyError:
+            pass
+
+        # Tier 2 — fuzzy
+        try:
+            return self._check_fuzzy_match(party_name)
+        except (LookupError, KeyError):
+            pass
+
+        # Tier 3 — skipped in read-only mode
+        return None
