@@ -1,3 +1,25 @@
+"""
+OCR-based data extraction from receipt images.
+
+Provides the `ReceiptExtractor` class, which takes pre-processed receipt
+images, runs Tesseract OCR against multiple configurations, and parses
+out structured fields (vendor, amount, date) using regex heuristics.
+
+This is the second stage of the receipt pipeline:
+
+    ReceiptLoader (images)
+        → ReceiptExtractor (OCR + field parsing)  ← this module
+            → ReceiptRepository (database persistence)
+
+Extraction strategy:
+    1. Each processed image variant is OCR'd with multiple Tesseract
+       page-segmentation modes; the longest output wins.
+    2. Vendor, amount, and date are extracted independently via regex.
+    3. A confidence score (0–3) counts how many fields were found.
+    4. The variant with the highest confidence is selected; processing
+       stops early if all three fields are found (confidence = 3).
+"""
+
 import numpy as np
 import pytesseract
 import re
@@ -11,7 +33,37 @@ logger = ContextLogger(__name__)
 
 
 class ReceiptExtractor:
-    """Extracts vendor, amount, and date from receipt images using OCR."""
+    """Extracts vendor, amount, and date from receipt images using OCR.
+
+    Tries multiple OCR configurations and image-processing variants to
+    maximise extraction accuracy. The best result (by confidence score)
+    is written back to the `Receipt` object.
+
+    Class-level constants control validation bounds and search limits.
+    Instance-level pattern lists can be extended for additional vendor
+    names or date formats.
+
+    Constants:
+        MIN_AMOUNT / MAX_AMOUNT: Plausible receipt total range. Values
+            outside this are discarded.
+        MIN_YEAR: Earliest year accepted for extracted dates.
+        MAX_VENDOR_NAME_LENGTH / MIN_VENDOR_NAME_LENGTH: Length bounds
+            for heuristic vendor-name detection.
+        VENDOR_SEARCH_LINES: How many lines from the top of the OCR
+            text to search with regex patterns.
+        VENDOR_HEURISTIC_LINES: How many lines to try the capitalised-
+            line heuristic on.
+        OCR_TIMEOUT: Per-config Tesseract timeout in seconds.
+
+    Attributes:
+        vendor_patterns: Ordered list of regex patterns for vendor
+            extraction. Checked top-to-bottom; first match wins.
+        amount_patterns: Ordered list of regex patterns for total-amount
+            extraction. All matches are collected and the largest is
+            selected (assumed to be the grand total).
+        date_patterns: Regex patterns for date-string detection.
+            Matched strings are then parsed against known date formats.
+    """
 
     # Constants
     MIN_AMOUNT = 0.01
@@ -24,11 +76,18 @@ class ReceiptExtractor:
     OCR_TIMEOUT = 20
 
     def __init__(self, tesseract_path: Optional[str] = None):
-        """Initialize the receipt extractor."""
+        """Initialize the extractor with regex patterns and optional Tesseract path.
+
+        Args:
+            tesseract_path: Override path to the Tesseract binary. If
+                None, uses the system default or whatever pytesseract
+                is already configured to use.
+        """
         if tesseract_path:
             pytesseract.pytesseract.tesseract_cmd = tesseract_path
             logger.debug(f"Using custom Tesseract path: {tesseract_path}")
 
+        #TODO: Expand vendor patterns with more known chains or local stores and experiment if catch all is causing false positives
         self.vendor_patterns = [
             r"(euro\s*giant|eurogiant)",
             r"(walmart|target|costco|kroger|safeway|cvs|walgreens)",
@@ -52,7 +111,19 @@ class ReceiptExtractor:
         logger.debug("Initialized ReceiptExtractor")
 
     def extract_text_with_ocr(self, image: np.ndarray) -> str:
-        """Extract text using Tesseract with multiple PSM configs."""
+        """Run Tesseract OCR on an image using multiple page-segmentation modes.
+
+        Tries three PSM configs (6, 4, 3) and keeps the result that
+        produces the most text, on the assumption that more text means
+        better segmentation.
+
+        Args:
+            image: Pre-processed image as a NumPy array (H×W or H×W×C).
+
+        Returns:
+            The longest OCR text output across all configs. Empty string
+            if the image is invalid or all configs fail.
+        """
         if image is None or image.size == 0:
             logger.warning("Invalid image provided for OCR")
             return ""
@@ -87,13 +158,36 @@ class ReceiptExtractor:
         return best_text
 
     def clean_text(self, text: str) -> str:
-        """Clean up OCR text."""
+        """Normalise OCR text for pattern matching.
+
+        Collapses whitespace runs and fixes common OCR misreads
+        (pipe → I, exclamation → i).
+
+        Args:
+            text: Raw OCR output.
+
+        Returns:
+            Cleaned text string.
+        """
         text = re.sub(r"\s+", " ", text)
         text = text.replace("|", "I").replace("!", "i")
         return text
 
     def extract_vendor_name(self, text: str) -> Optional[str]:
-        """Extract vendor name from OCR text."""
+        """Extract the vendor/merchant name from OCR text.
+
+        Uses a two-pass approach:
+            1. Try each regex pattern in `vendor_patterns` against the
+               first `VENDOR_SEARCH_LINES` lines. Returns on first match.
+            2. Fall back to a heuristic: look for capitalised lines of
+               reasonable length near the top of the receipt.
+
+        Args:
+            text: OCR text (may contain newlines).
+
+        Returns:
+            Extracted vendor name, or None if nothing matched.
+        """
         lines = [line.strip() for line in text.split("\n") if line.strip()]
         cleaned_lines = [self.clean_text(line) for line in lines]
 
@@ -122,7 +216,23 @@ class ReceiptExtractor:
         return None
 
     def extract_amount(self, text: str) -> Optional[float]:
-        """Extract amount from OCR text."""
+        """Extract the receipt total from OCR text.
+
+        Tries each pattern in `amount_patterns`, collects all plausible
+        amounts (within `MIN_AMOUNT`–`MAX_AMOUNT`), and returns the
+        largest — on the assumption that the grand total is the highest
+        number on the receipt.
+
+        Handles comma-as-decimal (European format) by normalising to
+        dot-decimal before parsing.
+
+        Args:
+            text: OCR text.
+
+        Returns:
+            The extracted total as a float, or None if no plausible
+            amount was found.
+        """
         amounts = []
 
         for pattern in self.amount_patterns:
@@ -151,7 +261,18 @@ class ReceiptExtractor:
         return None
 
     def parse_date(self, date_str: str) -> Optional[datetime]:
-        """Parse date string against known formats."""
+        """Try to parse a date string against a list of known formats.
+
+        Attempts day-first (European) formats before month-first
+        (American) formats, since the app targets Irish/European users.
+
+        Args:
+            date_str: A date string extracted by regex (e.g.
+                "15/03/2024", "15 Mar 2024").
+
+        Returns:
+            Parsed `datetime`, or None if no format matched.
+        """
         formats = [
             "%d/%m/%Y", "%d-%m-%Y", "%d/%m/%y", "%d-%m-%y",
             "%m/%d/%Y", "%m-%d-%Y", "%m/%d/%y", "%m-%d-%y",
@@ -167,7 +288,18 @@ class ReceiptExtractor:
         return None
 
     def extract_date(self, text: str) -> Optional[datetime]:
-        """Extract date from OCR text."""
+        """Extract a date from OCR text.
+
+        Finds all date-like strings via `date_patterns`, parses each
+        with `parse_date()`, and returns the first that falls within
+        a plausible year range (`MIN_YEAR` to next year).
+
+        Args:
+            text: OCR text.
+
+        Returns:
+            Parsed `datetime`, or None if no valid date was found.
+        """
         for pattern in self.date_patterns:
             try:
                 matches = re.findall(pattern, text, re.IGNORECASE | re.MULTILINE)
@@ -186,15 +318,26 @@ class ReceiptExtractor:
         return None
 
     def process_image_variant(self, image: np.ndarray, variant: str) -> Dict[str, Any]:
-        """
-        Process a single image variant and extract receipt information.
-        
+        """OCR and extract fields from a single processed image variant.
+
+        Runs the full extraction pipeline (OCR → vendor, amount, date)
+        on one image and returns all results in a dict.
+
         Args:
-            image: The processed image array
-            variant: The processing method name used
-            
+            image: A pre-processed image array from
+                `Receipt.processed_images`.
+            variant: Name of the processing method that produced this
+                image (e.g. "enhanced", "bilateral"). Included in the
+                result for traceability.
+
         Returns:
-            Dictionary containing extracted vendor, amount, date, confidence, etc.
+            Dict with keys:
+                - `vendor`: Extracted name or None.
+                - `amount`: Extracted total or None.
+                - `date`: ISO date string or None.
+                - `confidence`: 0–3, counting non-None fields.
+                - `method`: The `variant` name.
+                - `extracted_text`: Raw OCR output.
         """
         text = self.extract_text_with_ocr(image).strip()
 
@@ -236,14 +379,25 @@ class ReceiptExtractor:
         }
 
     def process_receipt(self, receipt: Receipt) -> Receipt:
-        """
-        Process a receipt and extract information from its processed images.
-        
+        """Extract data from a receipt by trying all its image variants.
+
+        Iterates through `receipt.processed_images`, runs OCR and field
+        extraction on each variant, and keeps the result with the
+        highest confidence score. Short-circuits if confidence reaches
+        3 (all fields found).
+
+        Mutates and returns the same `Receipt` instance with these
+        fields populated: `vendor`, `amount`, `date`, `extracted_text`,
+        `selected_method`, `confidence`.
+
         Args:
-            receipt: Receipt object with processed_images attribute
-            
+            receipt: A `Receipt` with `processed_images` populated by
+                `ReceiptLoader`.
+
         Returns:
-            Updated receipt object with extracted information
+            The same `Receipt` instance, updated in place with
+            extraction results. If no processed images are available,
+            `confidence` is set to 0 and all other fields remain None.
         """
         if not hasattr(receipt, 'processed_images') or not receipt.processed_images:
             logger.warning("Receipt has no processed images")

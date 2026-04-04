@@ -1,11 +1,29 @@
+/**
+ * @file CreateCategoryModal.jsx
+ * Generic modal for creating a new taxonomy item (category, sub-category,
+ * type, or party).
+ *
+ * Rendered via `createPortal` directly into `document.body` so it
+ * overlays correctly regardless of where the opener lives in the tree.
+ *
+ * Distinguishes **field-level errors** (duplicate name, required field)
+ * — shown inline under the input — from **general errors** (server
+ * failure) — shown in a banner.
+ */
+
 import { createPortal } from 'react-dom';
 import { useState, useEffect } from 'react';
 import { ErrorCode } from '@/lib/apiErrors';
 import './CreateCategoryModal.css';
 import { createLogger } from '@/lib/logger';
 
+/** @type {import('@/lib/logger').Logger} */
 const logger = createLogger('CreateCategoryModal');
 
+/**
+ * UI copy for each taxonomy level.
+ * @type {Object<string, {title: string, nameLabel: string, namePlaceholder: string, parentLabel: ?string}>}
+ */
 const TYPE_CONFIG = {
   category: {
     title: 'Create New Category',
@@ -33,30 +51,43 @@ const TYPE_CONFIG = {
   },
 };
 
-// Error codes that relate to the name input specifically.
-// These get attached to the field rather than shown as a general banner.
-const NAME_FIELD_CODES = new Set([
-  ErrorCode.DUPLICATE_NAME,
-  ErrorCode.REQUIRED_FIELD,
-]);
+/**
+ * Error codes considered "name-field" scoped. These are shown inline
+ * under the input rather than in a banner.
+ *
+ * @type {Set<string>}
+ */
+const NAME_FIELD_CODES = new Set([ErrorCode.DUPLICATE_NAME, ErrorCode.REQUIRED_FIELD]);
 
-export default function CreateCategoryModal({
-  isOpen,
-  onClose,
-  onSave,
-  type,
-  parentName,
-  parentId,
-}) {
+/**
+ * Modal for creating a category, sub-category, type, or party.
+ *
+ * @component
+ * @param {Object} props
+ * @param {boolean} props.isOpen - Visibility flag.
+ * @param {() => void} props.onClose - Called to close the modal (Cancel, ×, backdrop).
+ * @param {(name: string, parentId: ?number, description: string) => Promise<Object>} props.onSave
+ *        Async callback that creates the item. Should throw on failure
+ *        (the modal catches and displays the error).
+ * @param {'category'|'sub_category'|'type'|'party'} props.type
+ *        Taxonomy level being created.
+ * @param {string} [props.parentName]
+ *        Display name of the parent entity (shown read-only).
+ * @param {?number} [props.parentId]
+ *        ID passed to `onSave` for non-root levels.
+ * @returns {JSX.Element|null}
+ */
+export default function CreateCategoryModal({ isOpen, onClose, onSave, type, parentName, parentId }) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
-  // General error (shown in banner at top of form)
+  /** General/banner error. */
   const [error, setError] = useState(null);
-  // Field-specific error (shown inline under the name input)
+  /** Inline error under the name input. */
   const [nameError, setNameError] = useState(null);
 
+  // Reset form when opened
   useEffect(() => {
     if (isOpen) {
       setName('');
@@ -68,6 +99,10 @@ export default function CreateCategoryModal({
 
   const config = TYPE_CONFIG[type] || TYPE_CONFIG.category;
 
+  /**
+   * Validate, call `onSave`, and route errors to the appropriate UI
+   * location.
+   */
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -86,17 +121,13 @@ export default function CreateCategoryModal({
     } catch (err) {
       logger.error('Error creating item:', err);
 
-      // Prefer the pre-formatted userMessage from ApiError
       const message = err.userMessage || err.message || 'Failed to create item';
 
-      // Route the error to the right place:
-      // - DUPLICATE_NAME, REQUIRED_FIELD on `name` → inline under the input
-      // - err.field === 'name' (or the entity's name column) → inline
-      // - Everything else → general banner
+      // Determine whether the error is name-field scoped
       const isNameField =
         NAME_FIELD_CODES.has(err.code) ||
         err.field === 'name' ||
-        err.field === type ||          // backend sends field='category', 'type', etc.
+        err.field === type || // backend may send field='category', 'type', …
         err.field === 'sub_category';
 
       if (isNameField) {
@@ -109,9 +140,9 @@ export default function CreateCategoryModal({
     }
   };
 
+  /** Clear field error as user types. */
   const handleNameChange = (e) => {
     setName(e.target.value);
-    // Clear field error as soon as user starts typing
     if (nameError) setNameError(null);
   };
 
@@ -189,19 +220,10 @@ export default function CreateCategoryModal({
           </div>
 
           <div className="modal-footer">
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={handleClose}
-              disabled={isSaving}
-            >
+            <button type="button" className="btn-secondary" onClick={handleClose} disabled={isSaving}>
               Cancel
             </button>
-            <button
-              type="submit"
-              className="btn-primary"
-              disabled={isSaving || !name.trim()}
-            >
+            <button type="submit" className="btn-primary" disabled={isSaving || !name.trim()}>
               {isSaving ? 'Creating...' : 'Create'}
             </button>
           </div>

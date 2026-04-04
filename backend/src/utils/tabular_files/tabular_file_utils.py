@@ -1,3 +1,14 @@
+"""
+Utility functions for tabular file handling.
+
+Low-level helpers used by the tabular-file readers and processors:
+file-type / encoding / delimiter detection, column type inference,
+JSON serialization for pandas/numpy types, and column-name
+normalization.
+
+These are stateless, pure functions — no classes or module state.
+"""
+
 import csv
 import os
 import re
@@ -15,7 +26,7 @@ from src.utils.logging import ContextLogger
 logger = ContextLogger(__name__)
 
 
-# File extension to FileType mapping
+# Maps file extensions to `FileType` enum members.
 EXTENSION_MAP = {
     '.csv': FileType.CSV,
     '.tsv': FileType.TSV,
@@ -29,12 +40,26 @@ EXTENSION_MAP = {
     '.json': FileType.JSON,
 }
 
+# File types that are read via the Excel reader path.
 EXCEL_TYPES = {FileType.XLS, FileType.XLSX, FileType.XLSM, FileType.XLSB, FileType.ODS}
+
+# File types that are delimited text and need encoding/delimiter detection.
 TEXT_TYPES = {FileType.CSV, FileType.TSV, FileType.TXT}
 
 
 def detect_file_type(file_path: Union[str, Path]) -> FileType:
-    """Detect file type from extension."""
+    """Determine file type from the extension.
+
+    Purely extension-based — does not inspect file contents. Unknown
+    extensions return `FileType.UNKNOWN` rather than raising.
+
+    Args:
+        file_path: Path to the file. Only the suffix is used.
+
+    Returns:
+        The corresponding `FileType` enum member, or
+        `FileType.UNKNOWN` if the extension is not recognised.
+    """
     path = Path(file_path)
     ext = path.suffix.lower()
     file_type = EXTENSION_MAP.get(ext, FileType.UNKNOWN)
@@ -46,7 +71,21 @@ def detect_file_type(file_path: Union[str, Path]) -> FileType:
 
 
 def detect_encoding(file_path: Union[str, Path], sample_size: int = 10000) -> str:
-    """Detect file encoding using chardet."""
+    """Detect the character encoding of a text file.
+
+    Reads a sample of bytes from the start of the file and uses
+    `chardet` to guess the encoding. Falls back to UTF-8 if detection
+    fails or confidence is below 50%.
+
+    Args:
+        file_path: Path to the file.
+        sample_size: Number of bytes to read for detection. Defaults
+            to 10 KB — larger samples are more accurate but slower.
+
+    Returns:
+        Encoding name suitable for passing to `open(encoding=...)`.
+        Always returns a valid encoding (falls back to "utf-8").
+    """
     with open(file_path, 'rb') as f:
         raw_data = f.read(sample_size)
 
@@ -69,7 +108,21 @@ def detect_delimiter(
     encoding: str = 'utf-8',
     sample_lines: int = 20
 ) -> str:
-    """Auto-detect delimiter for text-based files."""
+    """Auto-detect the field delimiter in a delimited text file.
+
+    Reads the first `sample_lines` and uses `csv.Sniffer` to guess
+    the delimiter from a candidate set (comma, semicolon, tab, pipe).
+    Falls back to comma on failure.
+
+    Args:
+        file_path: Path to the file.
+        encoding: Character encoding to read with. Typically the
+            result of `detect_encoding()`.
+        sample_lines: Number of lines to inspect. Defaults to 20.
+
+    Returns:
+        The detected delimiter character, or "," if detection fails.
+    """
     try:
         with open(file_path, 'r', encoding=encoding, errors='replace') as f:
             sample = ''.join(f.readline() for _ in range(sample_lines))
@@ -87,15 +140,36 @@ def detect_delimiter(
 
 
 def get_file_size(file_path: Union[str, Path]) -> int:
-    """Get file size in bytes."""
+    """Return the file size in bytes.
+
+    Thin wrapper around `os.path.getsize()` for consistency with the
+    other helpers in this module.
+
+    Args:
+        file_path: Path to the file.
+
+    Returns:
+        File size in bytes.
+    """
     return os.path.getsize(file_path)
 
 
 def _is_date_column(sample: pd.Series) -> bool:
-    """
-    Check if a sample of values appears to be dates.
-    
-    Uses common date formats to avoid slow fallback parsing.
+    """Check whether a sample of string values all parse as dates.
+
+    Tries a fixed list of common date formats against the entire
+    sample. Uses explicit formats rather than pandas' inference mode,
+    which is slow and noisy on non-date strings.
+
+    All sample values must be strings and all must parse with the
+    same format for this to return True.
+
+    Args:
+        sample: A slice of string values from a column.
+
+    Returns:
+        True if every value parses successfully with one of the
+        known formats; False otherwise.
     """
     date_formats = [
         '%Y-%m-%d',
@@ -132,7 +206,19 @@ def _is_date_column(sample: pd.Series) -> bool:
 
 
 def infer_column_type(series: pd.Series) -> str:
-    """Infer the data type of a pandas Series."""
+    """Infer a `DataType` for a pandas Series.
+
+    Maps pandas dtypes to the application's `DataType` enum. For
+    object-dtype columns (the catch-all for strings), additionally
+    checks whether the values look like dates using
+    `_is_date_column()` on the first 100 non-null values.
+
+    Args:
+        series: The column to inspect.
+
+    Returns:
+        A `DataType` enum value (as a string).
+    """
     dtype = series.dtype
 
     if pd.api.types.is_integer_dtype(dtype):
@@ -157,7 +243,25 @@ def infer_column_type(series: pd.Series) -> str:
 
 
 def sanitize_for_json(value: Any) -> Any:
-    """Convert a value to a JSON-serializable format."""
+    """Recursively convert a value to a JSON-serializable form.
+
+    Handles numpy scalars, pandas types, datetimes, bytes, and nested
+    containers. NaN/Inf/NaT become None. Used when converting
+    DataFrame rows for API responses, since `json.dumps` can't handle
+    numpy/pandas types natively.
+
+    Args:
+        value: Any value, potentially nested.
+
+    Returns:
+        A JSON-safe equivalent (None, bool, int, float, str, list,
+        or dict). Falls back to `str(value)` for unrecognised types,
+        or None if that also fails.
+
+    Note:
+        The check order matters — container checks come before the
+        `pd.isna()` check because `pd.isna()` raises on lists/arrays.
+    """
     if value is None:
         return None
     elif isinstance(value, (np.ndarray, pd.Series)):
@@ -189,7 +293,19 @@ def sanitize_for_json(value: Any) -> Any:
 
 
 def dataframe_to_json_records(df: pd.DataFrame) -> List[Dict[str, Any]]:
-    """Convert DataFrame to list of JSON-serializable dictionaries."""
+    """Convert a DataFrame to a list of JSON-safe row dicts.
+
+    Similar to `df.to_dict(orient='records')` but runs each value
+    through `sanitize_for_json()` so the result is guaranteed safe
+    for `json.dumps()`.
+
+    Args:
+        df: The DataFrame to convert.
+
+    Returns:
+        List of dicts, one per row, with string column names and
+        JSON-serializable values.
+    """
     records = []
 
     for _, row in df.iterrows():
@@ -202,7 +318,27 @@ def dataframe_to_json_records(df: pd.DataFrame) -> List[Dict[str, Any]]:
 
 
 def normalize_column_names(columns: List[str]) -> List[str]:
-    """Normalize column names to be valid identifiers."""
+    """Convert column names to valid, unique, lowercase identifiers.
+
+    Transforms arbitrary column headers into safe identifiers by:
+        1. Lowercasing and stripping whitespace.
+        2. Replacing non-word characters with underscores.
+        3. Collapsing runs of dashes/spaces into single underscores.
+        4. Prefixing `col_` if the name starts with a digit.
+        5. Replacing empty names with "unnamed".
+        6. Appending `_1`, `_2`, etc. to resolve duplicates.
+
+    Args:
+        columns: Original column names (may contain spaces, special
+            characters, duplicates, etc.).
+
+    Returns:
+        List of normalized names, same length and order as the input.
+
+    Example:
+        >>> normalize_column_names(['First Name', 'First Name', '2024 Total', ''])
+        ['first_name', 'first_name_1', 'col_2024_total', 'unnamed']
+    """
     normalized = []
     seen = {}
 

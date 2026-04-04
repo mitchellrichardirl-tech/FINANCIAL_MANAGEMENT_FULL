@@ -1,4 +1,7 @@
-FROM python:3.12-slim
+# ──────────────────────────────────────────────────────────────
+# Base: system deps + uv, shared by docs and runtime stages
+# ──────────────────────────────────────────────────────────────
+FROM python:3.12-slim AS base
 
 WORKDIR /app
 
@@ -16,10 +19,35 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml uv.lock ./
+
+
+# ──────────────────────────────────────────────────────────────
+# Docs: install WITH dev deps, generate static HTML, discard
+# ──────────────────────────────────────────────────────────────
+FROM base AS docs
+
+# Include dev group so pdoc is available
+RUN uv sync --frozen --no-install-project
+
+COPY . .
+RUN uv sync --frozen
+
+# PDOC_GENERATING=1 → get_manager() returns a mock so imports don't hit the DB
+RUN PDOC_GENERATING=1 uv run pdoc ./src -o ./docs --docformat google
+
+
+# ──────────────────────────────────────────────────────────────
+# Runtime: production image, no dev deps, just the HTML output
+# ──────────────────────────────────────────────────────────────
+FROM base AS runtime
+
 RUN uv sync --frozen --no-install-project --no-dev
 
 COPY . .
 RUN uv sync --frozen --no-dev
+
+# Pull in the generated docs only (pdoc itself is NOT installed here)
+COPY --from=docs /app/docs ./docs
 
 RUN mkdir -p /app/data/uploads
 

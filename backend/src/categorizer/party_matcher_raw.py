@@ -19,8 +19,12 @@ class PartyMatcherRaw(PartyMatcher):
         self,
         similarity_threshold: int = 70
     ):
-        super().__init__(db=None, similarity_threshold=similarity_threshold, use_db=False)
+        super().__init__(db=None, similarity_threshold=similarity_threshold)
 
+    def _intialize_database(self, db: Optional[CategoryRepository] = None):
+        # Override to skip DB initialization
+        return
+    
     def _load_known_parties(self) -> Dict[str, int]:
         logger.debug("Initializing empty party mapping (no DB)")
         self.alias_mapping = {}

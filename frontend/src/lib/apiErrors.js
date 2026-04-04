@@ -1,6 +1,35 @@
 /**
+ * @file apiErrors.js
+ * Parsing and presentation helpers for backend error responses.
+ *
+ * The backend returns errors in the shape:
+ *   { success: false, error: { code, message, field?, entity?, details? } }
+ *
+ * This module normalizes whatever we receive (fetch `Response`, Axios error,
+ * or a raw object) into a {@link ParsedError}, and maps error codes to
+ * user-friendly strings for display in toasts / form validation.
+ */
+
+/**
+ * A normalized, UI-ready representation of a backend error.
+ *
+ * @typedef {Object} ParsedError
+ * @property {string} code        - Backend error code (one of {@link ErrorCode}).
+ * @property {string} message     - Technical message from the server (not for end users).
+ * @property {?string} field      - Field name the error is attached to, if any.
+ * @property {?string} entity     - Domain entity the error relates to (e.g. `"Category"`).
+ * @property {Object} details     - Arbitrary extra data (e.g. `missing_columns`, `value`).
+ * @property {number} status      - HTTP status code.
+ * @property {*} [raw]            - The original error payload, for debugging.
+ * @property {string} [userMessage] - Precomputed user-facing message (optional).
+ */
+
+/**
  * Error codes returned by the backend.
- * Keep in sync with src/api/utils/errors.py → ErrorCode
+ * Keep in sync with `src/api/utils/errors.py → ErrorCode`.
+ *
+ * @readonly
+ * @enum {string}
  */
 export const ErrorCode = {
   REQUIRED_FIELD: 'REQUIRED_FIELD',
@@ -16,8 +45,11 @@ export const ErrorCode = {
 };
 
 /**
- * User-friendly message templates for each error code.
- * Functions receive the parsed error object for interpolation.
+ * User-friendly message templates keyed by {@link ErrorCode}.
+ * Each value is a function receiving the {@link ParsedError} so it can
+ * interpolate `field`, `entity`, `details`, etc.
+ *
+ * @type {Object<string, (err: ParsedError) => string>}
  */
 const ERROR_MESSAGES = {
   [ErrorCode.REQUIRED_FIELD]: (err) =>
@@ -58,7 +90,14 @@ const ERROR_MESSAGES = {
 };
 
 /**
- * Format a field name for display (e.g., "party_id" → "Party")
+ * Format a snake_case field name for display.
+ * Strips a trailing `_id`, replaces underscores with spaces, and
+ * title-cases each word.
+ *
+ * @param {?string} field - Raw field name from the backend, e.g. `"party_id"`.
+ * @returns {string} Human-readable label, e.g. `"Party"`. Returns
+ *          `"This field"` when `field` is falsy.
+ * @private
  */
 function formatField(field) {
   if (!field) return 'This field';
@@ -69,10 +108,20 @@ function formatField(field) {
 }
 
 /**
- * Parse an API error response into a structured object.
+ * Normalize any error-ish value into a {@link ParsedError}.
  *
- * @param {Error|Response|Object} error - Axios error, fetch Response, or raw object
- * @returns {ParsedError}
+ * Accepts:
+ *  - An Axios-style error (`error.response.data.error`)
+ *  - A fetch `Response` (body is read as JSON; safe if unreadable)
+ *  - An already-unwrapped `{ success: false, error: {...} }` object
+ *  - A raw error object that already has a `code`
+ *
+ * Unknown shapes fall back to `INTERNAL_ERROR` / status `500`.
+ *
+ * @async
+ * @param {Error|Response|Object} error - The value to normalize.
+ * @returns {Promise<ParsedError>} Structured error suitable for
+ *          {@link getUserMessage} and UI consumption.
  */
 export async function parseApiError(error) {
   let errorData = null;
@@ -116,11 +165,19 @@ export async function parseApiError(error) {
 }
 
 /**
- * Get a user-friendly message for a parsed error.
+ * Resolve a user-facing message for a parsed error.
  *
- * @param {ParsedError} parsedError - Output from parseApiError
- * @param {string} [fallbackContext] - Context for generic errors (e.g., "Creating category")
- * @returns {string}
+ * Resolution order:
+ *  1. Template in {@link ERROR_MESSAGES} for `parsedError.code`
+ *  2. The server-provided `parsedError.message` (if not the generic default)
+ *  3. `"<fallbackContext> failed. Please try again."`
+ *  4. A generic `"An error occurred. Please try again."`
+ *
+ * @param {ParsedError} parsedError - Output from {@link parseApiError}.
+ * @param {string} [fallbackContext]
+ *        Short description of the attempted action, used only when no
+ *        specific message can be derived (e.g. `"Creating category"`).
+ * @returns {string} Message safe to display to end users.
  */
 export function getUserMessage(parsedError, fallbackContext) {
   const mapper = ERROR_MESSAGES[parsedError.code];
@@ -144,7 +201,12 @@ export function getUserMessage(parsedError, fallbackContext) {
 }
 
 /**
- * Convenience: parse and get message in one call.
+ * Convenience wrapper: {@link parseApiError} + {@link getUserMessage}.
+ *
+ * @async
+ * @param {Error|Response|Object} error - Any error-ish value.
+ * @param {string} [fallbackContext] - See {@link getUserMessage}.
+ * @returns {Promise<string>} User-facing message.
  */
 export async function getErrorMessage(error, fallbackContext) {
   const parsed = await parseApiError(error);
@@ -152,21 +214,33 @@ export async function getErrorMessage(error, fallbackContext) {
 }
 
 /**
- * Check if an error is a specific code.
+ * Test whether a parsed error carries a specific backend error code.
+ *
+ * @param {ParsedError} parsedError
+ * @param {string} code - One of {@link ErrorCode}.
+ * @returns {boolean}
  */
 export function isErrorCode(parsedError, code) {
   return parsedError.code === code;
 }
 
 /**
- * Check if error is a "not found" type (404).
+ * Test whether an error represents a missing resource
+ * (`NOT_FOUND` code or HTTP 404).
+ *
+ * @param {ParsedError} parsedError
+ * @returns {boolean}
  */
 export function isNotFound(parsedError) {
   return parsedError.code === ErrorCode.NOT_FOUND || parsedError.status === 404;
 }
 
 /**
- * Check if error is a duplicate/conflict (409).
+ * Test whether an error represents a uniqueness conflict
+ * (`DUPLICATE_NAME` code or HTTP 409).
+ *
+ * @param {ParsedError} parsedError
+ * @returns {boolean}
  */
 export function isDuplicate(parsedError) {
   return parsedError.code === ErrorCode.DUPLICATE_NAME || parsedError.status === 409;

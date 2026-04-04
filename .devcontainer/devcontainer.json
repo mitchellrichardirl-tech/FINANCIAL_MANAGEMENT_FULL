@@ -1,10 +1,11 @@
 {
   "name": "Finance App",
-  "image": "mcr.microsoft.com/devcontainers/python:3.12-bullseye",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12-bookworm",
   "features": {
     "ghcr.io/devcontainers/features/node:1": {
       "version": "20"
-    }
+    },
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
   },
   "postCreateCommand": "bash .devcontainer/postCreate.sh",
   "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
