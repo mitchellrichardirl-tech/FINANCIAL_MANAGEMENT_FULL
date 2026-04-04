@@ -375,3 +375,58 @@ def unlink_receipt(transaction_id: int):
         data=updated_transaction,
         message=f'Receipt unlinked from transaction {transaction_id} successfully',
     )
+
+@bp.route('/generate-cash', methods=['POST'])
+@handle_errors(entity='Transaction')
+@require_json
+@log_route(logger)
+def generate_cash_transactions():
+    """Generate cash-account counterpart transactions.
+
+    Accepts a list of source transaction IDs and creates mirror
+    transactions on the Cash account with negated amounts. Transactions
+    already on the Cash account are rejected; transactions that already
+    have a counterpart are silently skipped.
+
+    Request body::
+
+        {
+            "transaction_ids": [12, 34, 56]
+        }
+
+    Response includes counts of created, skipped, and rejected
+    transactions for clear user feedback.
+    """
+    data = request.get_json()
+
+    if not data:
+        raise required('Request body')
+
+    transaction_ids = data.get('transaction_ids', [])
+    if not transaction_ids or not isinstance(transaction_ids, list):
+        raise invalid_value(
+            'transaction_ids must be a non-empty array',
+            field='transaction_ids',
+        )
+
+    try:
+        transaction_ids = [int(tid) for tid in transaction_ids]
+    except (ValueError, TypeError):
+        raise invalid_value(
+            'All transaction_ids must be integers',
+            field='transaction_ids',
+        )
+
+    from src.services.cash_transactions import CashTransactionService
+
+    service = CashTransactionService()
+    result = service.generate_cash_transactions(transaction_ids)
+
+    return success_response(
+        data=result,
+        message=(
+            f"Generated {result['created_count']} cash transaction(s) "
+            f"({result['skipped_count']} skipped, "
+            f"{result['rejected_count']} rejected)"
+        ),
+    )
