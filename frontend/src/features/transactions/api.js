@@ -122,6 +122,31 @@ export async function bulkUpdateTransactions(transactionIds, updates) {
 }
 
 /**
+ * Generate Cash-account counterpart transactions for the given
+ * source transactions.
+ *
+ * For each source transaction, the backend creates a mirror
+ * transaction on the Cash account with the amount negated and a
+ * `source_transaction_id` link back to the original. Sources already
+ * on the Cash account are rejected; sources that already have a
+ * counterpart are skipped.
+ *
+ * @async
+ * @param {Array<number|string>} transactionIds - Source transaction ids.
+ * @returns {Promise<Object>} Raw API response. The payload (under
+ *          `.data` when enveloped) contains:
+ *          `{ created_count, skipped_count, rejected_count,
+ *             upload_id, transactions, skipped_ids, rejected_ids }`.
+ * @throws {AppError|ApiError}
+ */
+export async function generateCashTransactions(transactionIds) {
+  return apiCall('/transactions/generate-cash', {
+    method: 'POST',
+    body: { transaction_ids: transactionIds },
+  });
+}
+
+/**
  * Fetch all top-level categories.
  *
  * @async
