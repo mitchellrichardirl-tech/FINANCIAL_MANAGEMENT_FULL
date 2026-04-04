@@ -428,10 +428,13 @@ class SchemaManager:
             upload_id: FK → `uploads.id`. Restricts delete.
             party_id: FK → `parties.id`. Restricts delete.
             receipt_id: FK → `receipts.id`. Set to NULL on receipt delete.
+            source_transaction_id: FK → `transactions.id`. Set to NULL on
+                source delete. Links a generated cash counterpart back to
+                its originating transaction.
             created_at: Row creation timestamp.
 
         Indexes: transaction_date, account_id, party_id, upload_id,
-            is_credit, receipt_id.
+            is_credit, receipt_id, source_transaction_id.
         """
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
@@ -449,6 +452,7 @@ class SchemaManager:
                     upload_id INTEGER NOT NULL,
                     party_id INTEGER NOT NULL,
                     receipt_id INTEGER,
+                    source_transaction_id INTEGER,
                     created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now')),
                     FOREIGN KEY (account_id) REFERENCES accounts(id)
                         ON DELETE RESTRICT ON UPDATE CASCADE,
@@ -457,6 +461,8 @@ class SchemaManager:
                     FOREIGN KEY (party_id) REFERENCES parties(id)
                         ON DELETE RESTRICT ON UPDATE CASCADE,
                     FOREIGN KEY (receipt_id) REFERENCES receipts(id)
+                        ON DELETE SET NULL ON UPDATE CASCADE,
+                    FOREIGN KEY (source_transaction_id) REFERENCES transactions(id)
                         ON DELETE SET NULL ON UPDATE CASCADE
                 )
             ''')
@@ -489,6 +495,11 @@ class SchemaManager:
             cursor.execute('''
                 CREATE INDEX IF NOT EXISTS idx_transactions_receipt_id 
                 ON transactions(receipt_id)
+            ''')
+
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_transactions_source_transaction_id 
+                ON transactions(source_transaction_id)
             ''')
 
             conn.commit()
