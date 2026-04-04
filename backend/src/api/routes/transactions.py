@@ -430,3 +430,61 @@ def generate_cash_transactions():
             f"{result['rejected_count']} rejected)"
         ),
     )
+
+@bp.route('/from-receipt', methods=['POST'])
+@handle_errors(entity='Transaction')
+@require_json
+@log_route(logger)
+def create_cash_transaction_from_receipt():
+    """Create a Cash-account transaction from a confirmed receipt.
+
+    Request body::
+
+        {
+            "receipt_id": 123,
+            "party_id": 456,
+            "is_withdrawal": true,
+            "is_credit": false
+        }
+
+    ``is_withdrawal`` defaults to True; ``is_credit`` defaults to False.
+    Rejects if the receipt is missing, incomplete, or already linked
+    to a transaction.
+    """
+    data = request.get_json()
+    if not data:
+        raise required('Request body')
+
+    receipt_id = data.get('receipt_id')
+    if receipt_id is None:
+        raise required('receipt_id')
+    try:
+        receipt_id = int(receipt_id)
+    except (ValueError, TypeError):
+        raise invalid_value('receipt_id must be an integer', field='receipt_id')
+
+    party_id = data.get('party_id')
+    if party_id is None:
+        raise required('party_id')
+    try:
+        party_id = int(party_id)
+    except (ValueError, TypeError):
+        raise invalid_value('party_id must be an integer', field='party_id')
+
+    is_withdrawal = bool(data.get('is_withdrawal', True))
+    is_credit = bool(data.get('is_credit', False))
+
+    from src.services.cash_transactions import CashTransactionService
+    service = CashTransactionService()
+    result = service.generate_cash_transaction_from_receipt(
+        receipt_id=receipt_id,
+        party_id=party_id,
+        is_withdrawal=is_withdrawal,
+        is_credit=is_credit,
+    )
+
+    return success_response(
+        data=result,
+        message='Cash transaction created from receipt',
+        status_code=201,
+    )
