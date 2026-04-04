@@ -1,63 +1,12 @@
-/**
- * @file Thumbnail.jsx
- * Small preview of a stored receipt file (image or PDF).
- *
- * Given a URL, issues a `HEAD` request to discover the file's
- * `Content-Type`, then renders either an `<img>` or the first page of a
- * PDF via `react-pdf`. Shows a loading placeholder while the type probe
- * and subsequent render are in flight, and a short error string if
- * anything fails.
- */
-
 import { useState, useEffect } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import { parseApiError, getUserMessage, isNotFound } from '@/lib/apiErrors';
 import { createLogger } from '@/lib/logger';
 
-/** @type {import('@/lib/logger').Logger} */
 const logger = createLogger('ReceiptThumbnail');
 
-// Point pdf.js at a CDN-hosted worker matching the bundled version.
-// Set once at module load; required before any <Document> renders.
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
-/**
- * Thumbnail preview for a receipt file served by the backend.
- *
- * Lifecycle per `src`:
- *  1. `HEAD src` to read `Content-Type` without downloading the body.
- *     Non-OK responses are run through {@link parseApiError} so the
- *     displayed message is user-friendly (e.g. "Image no longer
- *     available" for 404s).
- *  2. On success, renders:
- *     - `image/*` → `<img>` bounded by `maxHeight`.
- *     - `application/pdf` → page 1 via `react-pdf`, rasterized to
- *       `maxHeight` pixels, with text/annotation layers disabled for
- *       a lightweight render.
- *  3. A "Loading…" placeholder overlays the slot until the actual
- *     image/PDF finishes loading.
- *
- * @component
- * @param {Object} props
- * @param {?string} props.src
- *        URL of the file to preview. When falsy, the component renders
- *        nothing.
- * @param {string} [props.alt="File thumbnail"]
- *        `alt` text for image previews (ignored for PDFs).
- * @param {string} [props.maxWidth="50px"]
- *        CSS `max-width` applied to the outer container.
- * @param {string} [props.maxHeight="100px"]
- *        CSS `max-height` for images and, parsed to an integer, the
- *        rasterization height passed to `react-pdf`'s `<Page>`.
- * @returns {JSX.Element|null}
- *
- * @example
- * <ReceiptThumbnail
- *   src={`/api/receipts/${receipt.id}/file`}
- *   maxWidth="60px"
- *   maxHeight="80px"
- * />
- */
 function ReceiptThumbnail({
   src,
   alt = "File thumbnail",
@@ -68,21 +17,29 @@ function ReceiptThumbnail({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [fileType, setFileType] = useState(null);
+  /**
+   * True once react-pdf's `<Document>` has parsed the PDF and its
+   * proxy is safe to query. `<Page>` is only rendered when this is
+   * true, preventing it from calling `getPage()` on a proxy that
+   * hasn't finished loading or has been destroyed.
+   */
+  const [pdfReady, setPdfReady] = useState(false);       // ← NEW
 
   useEffect(() => {
     if (!src) {
       setPreviewUrl(null);
       setIsLoading(false);
+      setPdfReady(false);                                 // ← NEW
       return;
     }
 
     setError(null);
     setIsLoading(true);
+    setPdfReady(false);                                   // ← NEW
 
     fetch(src, { method: 'HEAD' })
       .then(async (response) => {
         if (!response.ok) {
-          // Try to parse structured error from API
           const parsed = await parseApiError(response);
 
           if (isNotFound(parsed)) {
@@ -119,28 +76,20 @@ function ReceiptThumbnail({
       });
   }, [src]);
 
-  /** `react-pdf` callback — document parsed, page about to paint. */
   const onDocumentLoadSuccess = () => {
+    setPdfReady(true);                                    // ← NEW
     setIsLoading(false);
   };
 
-  /**
-   * `react-pdf` callback — document failed to load/parse.
-   * @param {Error} error
-   */
   const onDocumentLoadError = (error) => {
     logger.error('Error loading PDF:', error);
+    setPdfReady(false);                                   // ← NEW
     setError('Failed to load PDF');
     setIsLoading(false);
   };
 
-  /** `<img>` onLoad — reveal the image and drop the placeholder. */
   const handleImageLoad = () => setIsLoading(false);
 
-  /**
-   * `<img>` onError — network/decoding failure after the HEAD succeeded.
-   * @param {import('react').SyntheticEvent<HTMLImageElement>} error
-   */
   const handleImageError = (error) => {
     logger.error('Error loading image:', error);
     setError('Failed to load image');
@@ -181,17 +130,23 @@ function ReceiptThumbnail({
             className={isLoading ? 'hidden' : ''}
           >
             <Document
+              key={previewUrl}                            // ← NEW
               file={previewUrl}
               onLoadSuccess={onDocumentLoadSuccess}
               onLoadError={onDocumentLoadError}
               loading=""
             >
-              <Page
-                pageNumber={1}
-                height={parseInt(maxHeight)}
-                renderTextLayer={false}
-                renderAnnotationLayer={false}
-              />
+              {pdfReady && (                              // ← NEW
+                <Page
+                  pageNumber={1}
+                  height={parseInt(maxHeight)}
+                  renderTextLayer={false}
+                  renderAnnotationLayer={false}
+                  onLoadError={(err) => {                 // ← NEW
+                    logger.warn('PDF page load error:', err.message);
+                  }}
+                />
+              )}
             </Document>
           </div>
         )}
