@@ -482,3 +482,30 @@ class AccountRepository:
         except Exception as e:
             logger.error(f"Failed to get distinct account types: {e}")
             raise DatabaseError(f"Failed to get account types: {e}") from e
+        
+
+    # ========== Cash Account ==========
+
+    CASH_ACCOUNT_NAME = "Cash"
+    CASH_ACCOUNT_TYPE = "cash"
+
+    def ensure_cash_account(self) -> Dict[str, Any]:
+        """Get the Cash account, creating it if it does not exist.
+
+        Uses the well-known name ``"Cash"`` with type ``"cash"``.
+        Safe to call repeatedly — the first call creates the account
+        and subsequent calls return the existing record.
+
+        Returns:
+            Dict of the Cash account row.
+
+        Raises:
+            DatabaseError: If creation or lookup fails.
+        """
+        account = self.get_account_by_name(self.CASH_ACCOUNT_NAME)
+        if account:
+            logger.debug(f"Cash account exists: id={account['id']}")
+            return account
+
+        logger.info("Creating Cash account")
+        return self.add_account(self.CASH_ACCOUNT_NAME, self.CASH_ACCOUNT_TYPE)
