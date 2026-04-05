@@ -122,6 +122,31 @@ export async function bulkUpdateTransactions(transactionIds, updates) {
 }
 
 /**
+ * Generate Cash-account counterpart transactions for the given
+ * source transactions.
+ *
+ * For each source transaction, the backend creates a mirror
+ * transaction on the Cash account with the amount negated and a
+ * `source_transaction_id` link back to the original. Sources already
+ * on the Cash account are rejected; sources that already have a
+ * counterpart are skipped.
+ *
+ * @async
+ * @param {Array<number|string>} transactionIds - Source transaction ids.
+ * @returns {Promise<Object>} Raw API response. The payload (under
+ *          `.data` when enveloped) contains:
+ *          `{ created_count, skipped_count, rejected_count,
+ *             upload_id, transactions, skipped_ids, rejected_ids }`.
+ * @throws {AppError|ApiError}
+ */
+export async function generateCashTransactions(transactionIds) {
+  return apiCall('/transactions/generate-cash', {
+    method: 'POST',
+    body: { transaction_ids: transactionIds },
+  });
+}
+
+/**
  * Fetch all top-level categories.
  *
  * @async
@@ -132,6 +157,37 @@ export async function getCategories() {
   const response = await apiCall('/categories');
   return unwrap(response, 'categories');
 }
+
+/**
+ * Create a Cash-account transaction from manually entered data.
+ *
+ * @param {Object} data
+ * @param {string} data.transactionDate - YYYY-MM-DD
+ * @param {string} data.description
+ * @param {number} data.amount            - Positive; sign from isWithdrawal.
+ * @param {number} data.partyId
+ * @param {boolean} data.isWithdrawal
+ * @param {boolean} data.isCredit
+ * @param {boolean} data.isKids
+ * @param {boolean} data.isOneOff
+ * @returns {Promise<Object>}
+ */
+export const createCashTransaction = async (data) => {
+  const response = await apiCall('/transactions/cash', {
+    method: 'POST',
+    body: {
+      transaction_date: data.transactionDate,
+      description: data.description,
+      amount: data.amount,
+      party_id: data.partyId,
+      is_withdrawal: data.isWithdrawal,
+      is_credit: data.isCredit,
+      is_kids: data.isKids,
+      is_one_off: data.isOneOff,
+    }
+  });
+  return unwrap(response, 'transaction');
+};
 
 /**
  * Fetch sub-categories, optionally scoped to a parent category.

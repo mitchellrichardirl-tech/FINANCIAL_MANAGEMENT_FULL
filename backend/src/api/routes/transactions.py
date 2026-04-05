@@ -375,3 +375,200 @@ def unlink_receipt(transaction_id: int):
         data=updated_transaction,
         message=f'Receipt unlinked from transaction {transaction_id} successfully',
     )
+
+@bp.route('/generate-cash', methods=['POST'])
+@handle_errors(entity='Transaction')
+@require_json
+@log_route(logger)
+def generate_cash_transactions():
+    """Generate cash-account counterpart transactions.
+
+    Accepts a list of source transaction IDs and creates mirror
+    transactions on the Cash account with negated amounts. Transactions
+    already on the Cash account are rejected; transactions that already
+    have a counterpart are silently skipped.
+
+    Request body::
+
+        {
+            "transaction_ids": [12, 34, 56]
+        }
+
+    Response includes counts of created, skipped, and rejected
+    transactions for clear user feedback.
+    """
+    data = request.get_json()
+
+    if not data:
+        raise required('Request body')
+
+    transaction_ids = data.get('transaction_ids', [])
+    if not transaction_ids or not isinstance(transaction_ids, list):
+        raise invalid_value(
+            'transaction_ids must be a non-empty array',
+            field='transaction_ids',
+        )
+
+    try:
+        transaction_ids = [int(tid) for tid in transaction_ids]
+    except (ValueError, TypeError):
+        raise invalid_value(
+            'All transaction_ids must be integers',
+            field='transaction_ids',
+        )
+
+    from src.services.cash_transactions import CashTransactionService
+
+    service = CashTransactionService()
+    result = service.generate_cash_transactions(transaction_ids)
+
+    return success_response(
+        data=result,
+        message=(
+            f"Generated {result['created_count']} cash transaction(s) "
+            f"({result['skipped_count']} skipped, "
+            f"{result['rejected_count']} rejected)"
+        ),
+    )
+
+@bp.route('/from-receipt', methods=['POST'])
+@handle_errors(entity='Transaction')
+@require_json
+@log_route(logger)
+def create_cash_transaction_from_receipt():
+    """Create a Cash-account transaction from a confirmed receipt.
+
+    Request body::
+
+        {
+            "receipt_id": 123,
+            "party_id": 456,
+            "is_withdrawal": true,
+            "is_credit": false,
+            "is_kids": false,
+            "is_one_off": false
+        }
+
+    ``is_withdrawal`` defaults to True; ``is_credit``, ``is_kids`` and
+    ``is_one_off`` default to False. Rejects if the receipt is missing,
+    incomplete, or already linked to a transaction.
+    """
+    data = request.get_json()
+    if not data:
+        raise required('Request body')
+
+    receipt_id = data.get('receipt_id')
+    if receipt_id is None:
+        raise required('receipt_id')
+    try:
+        receipt_id = int(receipt_id)
+    except (ValueError, TypeError):
+        raise invalid_value('receipt_id must be an integer', field='receipt_id')
+
+    party_id = data.get('party_id')
+    if party_id is None:
+        raise required('party_id')
+    try:
+        party_id = int(party_id)
+    except (ValueError, TypeError):
+        raise invalid_value('party_id must be an integer', field='party_id')
+
+    is_withdrawal = bool(data.get('is_withdrawal', True))
+    is_credit     = bool(data.get('is_credit', False))
+    is_kids       = bool(data.get('is_kids', False))
+    is_one_off    = bool(data.get('is_one_off', False))
+
+    from src.services.cash_transactions import CashTransactionService
+    service = CashTransactionService()
+    result = service.generate_cash_transaction_from_receipt(
+        receipt_id=receipt_id,
+        party_id=party_id,
+        is_withdrawal=is_withdrawal,
+        is_credit=is_credit,
+        is_kids=is_kids,
+        is_one_off=is_one_off,
+    )
+
+    return success_response(
+        data=result,
+        message='Cash transaction created from receipt',
+        status_code=201,
+    )
+
+@bp.route('/cash', methods=['POST'])
+@handle_errors(entity='Transaction')
+@require_json
+@log_route(logger)
+def create_cash_transaction():
+    """Create a Cash-account transaction from manually entered data.
+
+    Request body::
+
+        {
+            "transaction_date": "2024-01-15",
+            "amount": 12.50,
+            "description": "Coffee at Bewley's",
+            "party_id": 456,
+            "is_withdrawal": true,
+            "is_credit": false,
+            "is_kids": false,
+            "is_one_off": false
+        }
+
+    ``amount`` must be positive; its sign in the database is derived
+    from ``is_withdrawal``. ``is_withdrawal`` defaults to True;
+    ``is_credit``, ``is_kids``, ``is_one_off`` default to False.
+    """
+    data = request.get_json()
+    if not data:
+        raise required('Request body')
+
+    transaction_date = data.get('transaction_date')
+    if not transaction_date:
+        raise required('transaction_date')
+
+    description = data.get('description')
+    if not description or not str(description).strip():
+        raise required('description')
+
+    amount_raw = data.get('amount')
+    if amount_raw is None:
+        raise required('amount')
+    try:
+        amount = float(amount_raw)
+    except (ValueError, TypeError):
+        raise invalid_value('amount must be a number', field='amount')
+    if amount <= 0:
+        raise invalid_value('amount must be positive', field='amount')
+
+    party_id = data.get('party_id')
+    if party_id is None:
+        raise required('party_id')
+    try:
+        party_id = int(party_id)
+    except (ValueError, TypeError):
+        raise invalid_value('party_id must be an integer', field='party_id')
+
+    is_withdrawal = bool(data.get('is_withdrawal', True))
+    is_credit     = bool(data.get('is_credit', False))
+    is_kids       = bool(data.get('is_kids', False))
+    is_one_off    = bool(data.get('is_one_off', False))
+
+    from src.services.cash_transactions import CashTransactionService
+    service = CashTransactionService()
+    result = service.create_cash_transaction(
+        transaction_date=transaction_date,
+        amount=amount,
+        description=str(description).strip(),
+        party_id=party_id,
+        is_withdrawal=is_withdrawal,
+        is_credit=is_credit,
+        is_kids=is_kids,
+        is_one_off=is_one_off,
+    )
+
+    return success_response(
+        data=result,
+        message='Cash transaction created',
+        status_code=201,
+    )

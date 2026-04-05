@@ -1,5 +1,6 @@
 from flask import Blueprint, request
 
+from src.categorizer.party_matcher import PartyMatcherReadOnly
 from src.database.repositories.categories import CategoryRepository
 from src.api.utils.response_helpers import success_response
 from src.api.utils.route_helpers import handle_errors, require_json
@@ -430,3 +431,37 @@ def remap_party(party_id: int):
     result = repo.remap_party(party_id, new_type_id)
 
     return success_response(data=result)
+
+@bp.route('/parties/match', methods=['GET'])
+@handle_errors(entity='Party')
+@log_route(logger)
+def match_party():
+    """Fuzzy-match a name to an existing party without side effects.
+
+    Used by the receipt workflow to pre-select a party from the
+    OCR-extracted vendor string. Unlike the statement-import path,
+    this never creates new parties — it only reports the best
+    existing match, if any.
+
+    Query params:
+        name: The vendor / party name to match. Required.
+
+    Response::
+
+        {
+          "match": { "party_id": 42, "score": 87 } | null
+        }
+    """
+    name = (request.args.get('name') or '').strip()
+    if not name:
+        raise required('name')
+
+    result = PartyMatcherReadOnly().find_match(name)
+
+    if result is None:
+        return success_response(data={'match': None})
+
+    party_id, score = result
+    return success_response(
+        data={'match': {'party_id': party_id, 'score': score}}
+    )

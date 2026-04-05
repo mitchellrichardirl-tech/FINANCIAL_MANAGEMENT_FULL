@@ -21,6 +21,7 @@
 import { useState, useRef } from 'react';
 import FilePreview from '@/components/FilePreview';
 import './BulkUploadReceipts.css';
+import { API_BASE_URL } from '@/lib/apiClient';
 import { createLogger } from '@/lib/logger';
 import { AppError } from '@/lib/errors';
 
@@ -150,7 +151,7 @@ function BulkUploadReceipts({
 
     try {
       const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/receipts/upload-stream`,
+        `${API_BASE_URL}/receipts/upload-stream`,
         { method: 'POST', body: formData }
       );
 

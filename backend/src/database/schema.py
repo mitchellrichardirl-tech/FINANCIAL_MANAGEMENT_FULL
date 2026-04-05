@@ -417,8 +417,7 @@ class SchemaManager:
         Columns:
             id: Auto-incrementing primary key.
             transaction_date: Date the transaction occurred.
-            amount: Transaction value (positive for both debits/credits;
-                direction indicated by `is_credit`).
+            amount: Transaction value. Negative for debits, positive for credits.
             description: Raw description from the bank statement.
             cleaned_description: Normalised description after parsing.
             is_credit: 1 for income/credit, 0 for expense/debit.

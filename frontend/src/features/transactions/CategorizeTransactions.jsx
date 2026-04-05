@@ -22,6 +22,8 @@ import {
   getTransactions,
   updateTransaction,
   bulkUpdateTransactions,
+  generateCashTransactions,
+  createCashTransaction,
   getCategories,
   getSubCategories,
   getTypes,
@@ -38,6 +40,8 @@ import TransactionTable from './TransactionTable';
 import Pagination from '@/components/Pagination';
 import BulkEditModal from './BulkEditModal';
 import RemapPartyModal from './RemapPartyModal';
+import GenerateCashModal from './GenerateCashModal';
+import CreateCashTransactionModal from './CreateCashTransactionModal';
 import './CategorizeTransactions.css';
 import { createLogger } from '@/lib/logger';
 
@@ -76,7 +80,9 @@ export default function CategorizeTransactions() {
   const [totalTransactions, setTotalTransactions] = useState(0);
   const [filters, setFilters] = useState({});
   const [selectedTransactions, setSelectedTransactions] = useState([]);
-  const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
+  const [isBulkEditOpen, setIsBulkEditOpen] = useState(false)
+  const [isGenerateCashOpen, setIsGenerateCashOpen] = useState(false);
+  const [isCreateCashOpen, setIsCreateCashOpen] = useState(false);
   const [sortField, setSortField] = useState('transaction_date');
   const [sortDir, setSortDir] = useState('desc');
   /**
@@ -227,6 +233,102 @@ export default function CategorizeTransactions() {
         type: 'error',
       });
       throw new Error(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+   /**
+   * Generate Cash-account counterpart transactions for all selected
+   * transactions. Called from {@link GenerateCashModal}.
+   *
+   * On success:
+   *  - Reloads the transaction list.
+   *  - Refreshes accounts (the Cash account may have just been
+   *    created) and uploads (a synthetic upload record is added per
+   *    batch).
+   *  - Clears the selection and closes the modal.
+   *  - Toasts a summary of created / skipped / rejected counts.
+   */
+  const handleGenerateCash = async () => {
+    if (selectedTransactions.length === 0) {
+      throw new Error('No transactions selected');
+    }
+
+    setLoading(true);
+    try {
+      const response = await generateCashTransactions(selectedTransactions);
+      const result = response?.data ?? response;
+
+      // Refresh everything affected by the generation.
+      const [accountsData, uploadsData] = await Promise.all([
+        getAccounts(),
+        getUploads(),
+      ]);
+      setAccounts(accountsData);
+      setUploads(uploadsData.data || uploadsData);
+      await loadTransactions();
+
+      setSelectedTransactions([]);
+      setIsGenerateCashOpen(false);
+
+      const parts = [`${result.created_count} created`];
+      if (result.skipped_count > 0) parts.push(`${result.skipped_count} skipped`);
+      if (result.rejected_count > 0) parts.push(`${result.rejected_count} rejected`);
+
+      addToast({
+        message: `Cash transactions: ${parts.join(', ')}`,
+        type:
+          result.created_count > 0
+            ? result.rejected_count > 0
+              ? 'warning'
+              : 'success'
+            : 'info',
+        duration: 5000,
+      });
+    } catch (err) {
+      logger.error('Error generating cash transactions:', err);
+      addToast({
+        message: `Failed to generate cash transactions: ${err.userMessage || err.message}`,
+        type: 'error',
+      });
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /**
+   * Create a single Cash-account transaction from manually entered data.
+   * Called from {@link CreateCashTransactionModal}.
+   */
+  const handleCreateCashTransaction = async (opts) => {
+    setLoading(true);
+    try {
+      await createCashTransaction(opts);
+
+      // Refresh anything the new transaction could affect.
+      const [accountsData, uploadsData] = await Promise.all([
+        getAccounts(),
+        getUploads(),
+      ]);
+      setAccounts(accountsData);
+      setUploads(uploadsData.data || uploadsData);
+      await loadTransactions();
+
+      setIsCreateCashOpen(false);
+      addToast({
+        message: 'Cash transaction created',
+        type: 'success',
+        duration: 3000,
+      });
+    } catch (err) {
+      logger.error('Error creating cash transaction:', err);
+      addToast({
+        message: `Failed to create cash transaction: ${err.userMessage || err.message}`,
+        type: 'error',
+      });
+      throw err;
     } finally {
       setLoading(false);
     }
@@ -406,10 +508,27 @@ export default function CategorizeTransactions() {
       <div className="page-header">
         <h1>Categorize Transactions</h1>
         <div className="header-actions">
+          <button
+            onClick={() => setIsCreateCashOpen(true)}
+            className="new-cash-button"
+          >
+            + New Cash Transaction
+          </button>
           {selectedTransactions.length > 0 && (
-            <button onClick={() => setIsBulkEditOpen(true)} className="bulk-edit-button">
-              Bulk Edit ({selectedTransactions.length})
-            </button>
+            <>
+              <button
+                onClick={() => setIsBulkEditOpen(true)}
+                className="bulk-edit-button"
+              >
+                Bulk Edit ({selectedTransactions.length})
+              </button>
+              <button
+                onClick={() => setIsGenerateCashOpen(true)}
+                className="generate-cash-button"
+              >
+                Generate Cash ({selectedTransactions.length})
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -493,6 +612,26 @@ export default function CategorizeTransactions() {
         onTypeCreated={handleTypeCreated}
         initialPartyId={initialPartyId}
         initialTypeId={remapTargetTypeId}
+      />
+
+      <GenerateCashModal
+        isOpen={isGenerateCashOpen}
+        onClose={() => setIsGenerateCashOpen(false)}
+        onConfirm={handleGenerateCash}
+        transactionCount={selectedTransactions.length}
+      />
+      <CreateCashTransactionModal
+        isOpen={isCreateCashOpen}
+        onClose={() => setIsCreateCashOpen(false)}
+        onConfirm={handleCreateCashTransaction}
+        categories={categories}
+        subCategories={subCategories}
+        types={types}
+        parties={parties}
+        onCategoryCreated={handleCategoryCreated}
+        onSubCategoryCreated={handleSubCategoryCreated}
+        onTypeCreated={handleTypeCreated}
+        onPartyCreated={handlePartyCreated}
       />
     </div>
   );
