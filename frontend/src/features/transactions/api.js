@@ -159,6 +159,37 @@ export async function getCategories() {
 }
 
 /**
+ * Create a Cash-account transaction from manually entered data.
+ *
+ * @param {Object} data
+ * @param {string} data.transactionDate - YYYY-MM-DD
+ * @param {string} data.description
+ * @param {number} data.amount            - Positive; sign from isWithdrawal.
+ * @param {number} data.partyId
+ * @param {boolean} data.isWithdrawal
+ * @param {boolean} data.isCredit
+ * @param {boolean} data.isKids
+ * @param {boolean} data.isOneOff
+ * @returns {Promise<Object>}
+ */
+export const createCashTransaction = async (data) => {
+  const response = await apiCall('/transactions/cash', {
+    method: 'POST',
+    body: {
+      transaction_date: data.transactionDate,
+      description: data.description,
+      amount: data.amount,
+      party_id: data.partyId,
+      is_withdrawal: data.isWithdrawal,
+      is_credit: data.isCredit,
+      is_kids: data.isKids,
+      is_one_off: data.isOneOff,
+    }
+  });
+  return unwrap(response, 'transaction');
+};
+
+/**
  * Fetch sub-categories, optionally scoped to a parent category.
  *
  * @async

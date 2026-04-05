@@ -23,6 +23,7 @@ import {
   updateTransaction,
   bulkUpdateTransactions,
   generateCashTransactions,
+  createCashTransaction,
   getCategories,
   getSubCategories,
   getTypes,
@@ -40,6 +41,7 @@ import Pagination from '@/components/Pagination';
 import BulkEditModal from './BulkEditModal';
 import RemapPartyModal from './RemapPartyModal';
 import GenerateCashModal from './GenerateCashModal';
+import CreateCashTransactionModal from './CreateCashTransactionModal';
 import './CategorizeTransactions.css';
 import { createLogger } from '@/lib/logger';
 
@@ -80,6 +82,7 @@ export default function CategorizeTransactions() {
   const [selectedTransactions, setSelectedTransactions] = useState([]);
   const [isBulkEditOpen, setIsBulkEditOpen] = useState(false)
   const [isGenerateCashOpen, setIsGenerateCashOpen] = useState(false);
+  const [isCreateCashOpen, setIsCreateCashOpen] = useState(false);
   const [sortField, setSortField] = useState('transaction_date');
   const [sortDir, setSortDir] = useState('desc');
   /**
@@ -296,6 +299,42 @@ export default function CategorizeTransactions() {
   };
 
   /**
+   * Create a single Cash-account transaction from manually entered data.
+   * Called from {@link CreateCashTransactionModal}.
+   */
+  const handleCreateCashTransaction = async (opts) => {
+    setLoading(true);
+    try {
+      await createCashTransaction(opts);
+
+      // Refresh anything the new transaction could affect.
+      const [accountsData, uploadsData] = await Promise.all([
+        getAccounts(),
+        getUploads(),
+      ]);
+      setAccounts(accountsData);
+      setUploads(uploadsData.data || uploadsData);
+      await loadTransactions();
+
+      setIsCreateCashOpen(false);
+      addToast({
+        message: 'Cash transaction created',
+        type: 'success',
+        duration: 3000,
+      });
+    } catch (err) {
+      logger.error('Error creating cash transaction:', err);
+      addToast({
+        message: `Failed to create cash transaction: ${err.userMessage || err.message}`,
+        type: 'error',
+      });
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /**
    * Remap a party to a new parent type.
    * Called from {@link RemapPartyModal}.
    */
@@ -469,6 +508,12 @@ export default function CategorizeTransactions() {
       <div className="page-header">
         <h1>Categorize Transactions</h1>
         <div className="header-actions">
+          <button
+            onClick={() => setIsCreateCashOpen(true)}
+            className="new-cash-button"
+          >
+            + New Cash Transaction
+          </button>
           {selectedTransactions.length > 0 && (
             <>
               <button
@@ -574,6 +619,19 @@ export default function CategorizeTransactions() {
         onClose={() => setIsGenerateCashOpen(false)}
         onConfirm={handleGenerateCash}
         transactionCount={selectedTransactions.length}
+      />
+      <CreateCashTransactionModal
+        isOpen={isCreateCashOpen}
+        onClose={() => setIsCreateCashOpen(false)}
+        onConfirm={handleCreateCashTransaction}
+        categories={categories}
+        subCategories={subCategories}
+        types={types}
+        parties={parties}
+        onCategoryCreated={handleCategoryCreated}
+        onSubCategoryCreated={handleSubCategoryCreated}
+        onTypeCreated={handleTypeCreated}
+        onPartyCreated={handlePartyCreated}
       />
     </div>
   );

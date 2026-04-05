@@ -494,3 +494,81 @@ def create_cash_transaction_from_receipt():
         message='Cash transaction created from receipt',
         status_code=201,
     )
+
+@bp.route('/cash', methods=['POST'])
+@handle_errors(entity='Transaction')
+@require_json
+@log_route(logger)
+def create_cash_transaction():
+    """Create a Cash-account transaction from manually entered data.
+
+    Request body::
+
+        {
+            "transaction_date": "2024-01-15",
+            "amount": 12.50,
+            "description": "Coffee at Bewley's",
+            "party_id": 456,
+            "is_withdrawal": true,
+            "is_credit": false,
+            "is_kids": false,
+            "is_one_off": false
+        }
+
+    ``amount`` must be positive; its sign in the database is derived
+    from ``is_withdrawal``. ``is_withdrawal`` defaults to True;
+    ``is_credit``, ``is_kids``, ``is_one_off`` default to False.
+    """
+    data = request.get_json()
+    if not data:
+        raise required('Request body')
+
+    transaction_date = data.get('transaction_date')
+    if not transaction_date:
+        raise required('transaction_date')
+
+    description = data.get('description')
+    if not description or not str(description).strip():
+        raise required('description')
+
+    amount_raw = data.get('amount')
+    if amount_raw is None:
+        raise required('amount')
+    try:
+        amount = float(amount_raw)
+    except (ValueError, TypeError):
+        raise invalid_value('amount must be a number', field='amount')
+    if amount <= 0:
+        raise invalid_value('amount must be positive', field='amount')
+
+    party_id = data.get('party_id')
+    if party_id is None:
+        raise required('party_id')
+    try:
+        party_id = int(party_id)
+    except (ValueError, TypeError):
+        raise invalid_value('party_id must be an integer', field='party_id')
+
+    is_withdrawal = bool(data.get('is_withdrawal', True))
+    is_credit     = bool(data.get('is_credit', False))
+    is_kids       = bool(data.get('is_kids', False))
+    is_one_off    = bool(data.get('is_one_off', False))
+
+    from src.services.cash_transactions import CashTransactionService
+    service = CashTransactionService()
+    result = service.create_cash_transaction(
+        transaction_date=transaction_date,
+        amount=amount,
+        description=str(description).strip(),
+        party_id=party_id,
+        is_withdrawal=is_withdrawal,
+        is_credit=is_credit,
+        is_kids=is_kids,
+        is_one_off=is_one_off,
+    )
+
+    return success_response(
+        data=result,
+        message='Cash transaction created',
+        status_code=201,
+    )

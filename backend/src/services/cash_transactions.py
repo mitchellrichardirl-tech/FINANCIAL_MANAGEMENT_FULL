@@ -24,7 +24,7 @@ Typical usage::
 
 import json
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional, Tuple, Tuple
 
 from src.database.connection import get_manager, DatabaseError
 from src.database.repositories.accounts import AccountRepository
@@ -54,9 +54,140 @@ class CashTransactionService:
         self.db = get_manager()
         self.account_repo = AccountRepository()
 
+    def _insert_cash_transaction(
+        self,
+        cursor,
+        *,
+        transaction_date: str,
+        amount: float,
+        description: str,
+        party_id: int,
+        is_withdrawal: bool,
+        is_credit: bool,
+        is_kids: bool,
+        is_one_off: bool,
+        upload_filename: str,
+        receipt_id: Optional[int] = None,
+    ) -> Tuple[Dict[str, Any], int]:
+        """Insert a synthetic upload + a Cash-account transaction.
+
+        Runs on the supplied *cursor*; the caller is responsible for the
+        surrounding transaction context. This is the shared low-level
+        write path used by both :meth:`create_cash_transaction` and
+        :meth:`generate_cash_transaction_from_receipt`.
+
+        Args:
+            cursor: Open DB cursor inside an active transaction.
+            transaction_date: ISO date string (YYYY-MM-DD).
+            amount: Positive amount; sign is derived from ``is_withdrawal``.
+            description: Transaction description (also used for
+                ``cleaned_description``).
+            party_id: Party to assign.
+            is_withdrawal: True → negative amount (cash out);
+                False → positive (cash in).
+            is_credit / is_kids / is_one_off: Corresponding transaction flags.
+            upload_filename: Value used for both ``original_filename`` and
+                ``filename`` on the synthetic upload row.
+            receipt_id: If supplied, link the transaction back to this
+                receipt.
+
+        Returns:
+            ``(transaction_row_dict, upload_id)``.
+        """
+        cash_account_id = self.account_repo.ensure_cash_account()["id"]
+        signed_amount = -abs(float(amount)) if is_withdrawal else abs(float(amount))
+
+        # ---- synthetic upload ----
+        cursor.execute(
+            """INSERT INTO uploads
+            (original_filename, filename, file_type,
+                row_count, column_count, columns)
+            VALUES (?, ?, ?, ?, ?, ?)""",
+            (
+                upload_filename,
+                upload_filename,
+                "generated",
+                1,
+                0,
+                json.dumps([]),
+            ),
+        )
+        upload_id = cursor.lastrowid
+
+        # ---- transaction ----
+        cursor.execute(
+            """INSERT INTO transactions
+            (transaction_date, amount, description,
+                cleaned_description, is_credit, is_kids,
+                is_one_off, account_id, upload_id,
+                party_id, receipt_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                transaction_date,
+                signed_amount,
+                description,
+                description,
+                1 if is_credit  else 0,
+                1 if is_kids    else 0,
+                1 if is_one_off else 0,
+                cash_account_id,
+                upload_id,
+                party_id,
+                receipt_id,
+            ),
+        )
+        new_id = cursor.lastrowid
+        cursor.execute("SELECT * FROM transactions WHERE id = ?", (new_id,))
+        transaction = dict(cursor.fetchone())
+
+        return transaction, upload_id
+
+
+    def _validate_receipt_for_cash_transaction(
+        self, cursor, receipt_id: int
+    ) -> Dict[str, Any]:
+        """Load a receipt and check it's usable as a cash-transaction source.
+
+        Runs on *cursor* so that the check and the subsequent insert share
+        a single transaction — no race between "unlinked" and "linked".
+
+        Raises:
+            ValueError: If the receipt doesn't exist, is missing
+                ``vendor`` / ``date`` / ``amount``, or is already linked
+                to a transaction.
+        """
+        cursor.execute("SELECT * FROM receipts WHERE id = ?", (receipt_id,))
+        row = cursor.fetchone()
+        if row is None:
+            raise ValueError(f"Receipt {receipt_id} not found")
+        receipt = dict(row)
+
+        missing = [
+            f for f in ("vendor", "date", "amount")
+            if receipt.get(f) in (None, "")
+        ]
+        if missing:
+            raise ValueError(
+                f"Receipt {receipt_id} is missing required "
+                f"field(s): {', '.join(missing)}"
+            )
+
+        cursor.execute(
+            "SELECT id FROM transactions WHERE receipt_id = ? LIMIT 1",
+            (receipt_id,),
+        )
+        existing = cursor.fetchone()
+        if existing:
+            raise ValueError(
+                f"Receipt {receipt_id} is already linked to "
+                f"transaction {existing['id']}"
+            )
+
+        return receipt
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
 
     def generate_cash_transactions(
         self,
@@ -235,6 +366,56 @@ class CashTransactionService:
             ) from e
 
     # ------------------------------------------------------------------
+    # Generate from a user entered data
+    # ------------------------------------------------------------------
+
+    def create_cash_transaction(
+        self,
+        transaction_date: str,
+        amount: float,
+        description: str,
+        party_id: int,
+        is_withdrawal: bool = True,
+        is_credit: bool = False,
+        is_kids: bool = False,
+        is_one_off: bool = False,
+    ) -> Dict[str, Any]:
+        """Create a Cash-account transaction from manually entered data."""
+        if amount <= 0:
+            raise ValueError("amount must be positive")
+
+        try:
+            with self.db.transaction() as conn:
+                transaction, upload_id = self._insert_cash_transaction(
+                    conn.cursor(),
+                    transaction_date=transaction_date,
+                    amount=amount,
+                    description=description,
+                    party_id=party_id,
+                    is_withdrawal=is_withdrawal,
+                    is_credit=is_credit,
+                    is_kids=is_kids,
+                    is_one_off=is_one_off,
+                    upload_filename=f"manual_cash_{transaction_date}",
+                )
+
+            logger.info(
+                f"Created manual cash transaction {transaction['id']} "
+                f"(party_id={party_id}, is_withdrawal={is_withdrawal}, "
+                f"is_credit={is_credit}, is_kids={is_kids}, "
+                f"is_one_off={is_one_off}, upload_id={upload_id})"
+            )
+            return {"transaction": transaction, "upload_id": upload_id}
+
+        except (ValueError, DatabaseError):
+            raise
+        except Exception as e:
+            logger.error(f"Failed to create manual cash transaction: {e}")
+            raise DatabaseError(
+                f"Failed to create cash transaction: {e}"
+            ) from e
+
+    # ------------------------------------------------------------------
     # Generate from a receipt
     # ------------------------------------------------------------------
 
@@ -247,131 +428,62 @@ class CashTransactionService:
         is_kids: bool = False,
         is_one_off: bool = False,
     ) -> Dict[str, Any]:
-        """Create a single Cash-account transaction from a receipt.
+        """Create a Cash-account transaction from a confirmed receipt.
 
-        ...
+        Thin wrapper around :meth:`_insert_cash_transaction`: loads +
+        validates the receipt, derives the description / date / amount /
+        filename from it, and links the resulting transaction back via
+        ``receipt_id``.
 
         Args:
             receipt_id: ID of a **confirmed** receipt (must have
                 ``vendor``, ``date``, and ``amount`` populated).
             party_id: Party to assign to the new transaction.
-            is_withdrawal: When True (default) the amount is stored
-                negative (cash going out); when False it is stored
-                positive (cash coming in).
-            is_credit: Value for the transaction's ``is_credit`` flag
-                (currently used to mean "is income"). Defaults False.
-            is_kids: Value for the transaction's ``is_kids`` flag.
-                Defaults False.
-            is_one_off: Value for the transaction's ``is_one_off`` flag.
-                Defaults False.
-        ...
-        """
-        cash_account = self.account_repo.ensure_cash_account()
-        cash_account_id = cash_account["id"]
+            is_withdrawal / is_credit / is_kids / is_one_off: see
+                :meth:`create_cash_transaction`.
 
+        Raises:
+            ValueError: Receipt missing, incomplete, or already linked.
+            DatabaseError: On any underlying database failure.
+        """
         try:
             with self.db.transaction() as conn:
                 cursor = conn.cursor()
 
-                # ---- load + validate the receipt ----
-                cursor.execute(
-                    "SELECT * FROM receipts WHERE id = ?",
-                    (receipt_id,),
+                receipt = self._validate_receipt_for_cash_transaction(
+                    cursor, receipt_id
                 )
-                row = cursor.fetchone()
-                if row is None:
-                    raise ValueError(f"Receipt {receipt_id} not found")
-                receipt = dict(row)
 
-                missing = [
-                    f for f in ("vendor", "date", "amount")
-                    if receipt.get(f) in (None, "")
-                ]
-                if missing:
-                    raise ValueError(
-                        f"Receipt {receipt_id} is missing required "
-                        f"field(s): {', '.join(missing)}"
-                    )
-
-                # ---- reject if already linked ----
-                cursor.execute(
-                    "SELECT id FROM transactions WHERE receipt_id = ? LIMIT 1",
-                    (receipt_id,),
-                )
-                existing = cursor.fetchone()
-                if existing:
-                    raise ValueError(
-                        f"Receipt {receipt_id} is already linked to "
-                        f"transaction {existing['id']}"
-                    )
-
-                # ---- synthetic upload record (per-receipt) ----
-                original_filename = (
+                upload_filename = (
                     receipt.get("original_filename")
                     or receipt.get("stored_filename")
                     or f"receipt_{receipt_id}"
                 )
-                cursor.execute(
-                    """INSERT INTO uploads
-                       (original_filename, filename, file_type,
-                        row_count, column_count, columns)
-                       VALUES (?, ?, ?, ?, ?, ?)""",
-                    (
-                        original_filename,
-                        original_filename,
-                        "generated",
-                        1,
-                        0,
-                        json.dumps([]),
-                    ),
-                )
-                upload_id = cursor.lastrowid
 
-                # ---- insert the transaction ----
-                amount = abs(float(receipt["amount"]))
-                if is_withdrawal:
-                    amount = -amount
+                transaction, upload_id = self._insert_cash_transaction(
+                    cursor,
+                    transaction_date=receipt["date"],
+                    amount=abs(float(receipt["amount"])),
+                    description=receipt["vendor"],
+                    party_id=party_id,
+                    is_withdrawal=is_withdrawal,
+                    is_credit=is_credit,
+                    is_kids=is_kids,
+                    is_one_off=is_one_off,
+                    upload_filename=upload_filename,
+                    receipt_id=receipt_id,
+                )
 
-                cursor.execute(
-                    """INSERT INTO transactions
-                    (transaction_date, amount, description,
-                        cleaned_description, is_credit, is_kids,
-                        is_one_off, account_id, upload_id,
-                        party_id, receipt_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        receipt["date"],
-                        amount,
-                        receipt["vendor"],
-                        receipt["vendor"],
-                        1 if is_credit  else 0,
-                        1 if is_kids    else 0,
-                        1 if is_one_off else 0,
-                        cash_account_id,
-                        upload_id,
-                        party_id,
-                        receipt_id,
-                    ),
-                )
-                new_id = cursor.lastrowid
-                cursor.execute(
-                    "SELECT * FROM transactions WHERE id = ?",
-                    (new_id,),
-                )
-                transaction = dict(cursor.fetchone())
-
-                logger.info(
-                    f"Generated cash transaction {transaction['id']} "
-                    f"from receipt {receipt_id} "
-                    f"(party_id={party_id}, is_withdrawal={is_withdrawal}, "
-                    f"is_credit={is_credit}, is_kids={is_kids}, "
-                    f"is_one_off={is_one_off}, upload_id={upload_id})"
-                )
+            logger.info(
+                f"Generated cash transaction {transaction['id']} "
+                f"from receipt {receipt_id} "
+                f"(party_id={party_id}, is_withdrawal={is_withdrawal}, "
+                f"is_credit={is_credit}, is_kids={is_kids}, "
+                f"is_one_off={is_one_off}, upload_id={upload_id})"
+            )
             return {"transaction": transaction, "upload_id": upload_id}
 
-        except ValueError:
-            raise
-        except DatabaseError:
+        except (ValueError, DatabaseError):
             raise
         except Exception as e:
             logger.error(
@@ -381,7 +493,7 @@ class CashTransactionService:
             raise DatabaseError(
                 f"Failed to generate cash transaction from receipt: {e}"
             ) from e
-
+        
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
