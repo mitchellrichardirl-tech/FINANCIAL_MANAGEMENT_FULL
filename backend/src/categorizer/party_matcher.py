@@ -452,6 +452,9 @@ class PartyMatcherReadOnly(PartyMatcher):
         Raises:
             ValueError: If *party_name* is empty or whitespace.
         """
+        logger.debug(f"Read-only matcher: finding match for '{party_name}'")
+        logger.debug(f"Known aliases: {len(self.alias_mapping)}")
+        logger.debug("\n".join([f"  '{alias}' -> {pid}" for alias, pid in list(self.alias_mapping.items()) if alias[:1].upper()=='S']))
         if not party_name or party_name.strip() == "":
             raise ValueError("No party name provided")
         self.last_match_score = 0
@@ -459,6 +462,7 @@ class PartyMatcherReadOnly(PartyMatcher):
         # Tier 1 — exact
         try:
             party_id = self._check_exact_match(party_name)
+            logger.debug(f"Read-only matcher: exact match for '{party_name}' (id={party_id})")
             self.last_match_score = 100
             return party_id, 100
         except KeyError:
@@ -468,6 +472,7 @@ class PartyMatcherReadOnly(PartyMatcher):
         try:
             return self._check_fuzzy_match(party_name)
         except (LookupError, KeyError):
+            logger.debug(f"Read-only matcher: no fuzzy match for '{party_name}' (best score={self.last_match_score})")
             pass
 
         # Tier 3 — skipped in read-only mode

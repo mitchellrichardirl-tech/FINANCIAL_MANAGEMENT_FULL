@@ -22,7 +22,24 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { updateTransaction } from '@/features/transactions/api';
-import { confirmReceipt, deleteReceipt, getCandidateTransactions } from './api';
+import {
+  confirmReceipt,
+  deleteReceipt,
+  getCandidateTransactions,
+  matchParty,
+  createCashTransactionFromReceipt,
+} from './api';
+import {
+  getCategories,
+  getSubCategories,
+  getTypes,
+  getParties,
+  createCategory,
+  createSubCategory,
+  createType,
+  createParty,
+} from '@/features/transactions/api';
+import GenerateCashFromReceiptModal from './GenerateCashFromReceiptModal';
 import { ErrorCode } from '@/lib/apiErrors';
 import { useToast } from '@/components/ToastContext';
 import BulkUploadReceipts from './BulkUploadReceipts';
@@ -125,6 +142,19 @@ function ProcessReceipts() {
   /** The currently selected receipt object, or `undefined`. */
   const selectedReceipt = receipts.find((r) => r.receipt_id === selectedReceiptId);
 
+  // ── Taxonomy reference data (loaded once for the cash modal) ─────
+  const [categories, setCategories] = useState([]);
+  const [subCategories, setSubCategories] = useState([]);
+  const [types, setTypes] = useState([]);
+  const [parties, setParties] = useState([]);
+
+  // ── Generate-cash modal ──────────────────────────────────────────
+  const [isCashModalOpen, setIsCashModalOpen] = useState(false);
+  /** Fuzzy-matched party id for the current receipt's vendor, or null. */
+  const [suggestedPartyId, setSuggestedPartyId] = useState(null);
+  const [isGeneratingCash, setIsGeneratingCash] = useState(false);
+
+
   // ── Effect: reset the edit form when selection changes ──────────
   useEffect(() => {
     if (selectedReceipt) {
@@ -194,6 +224,27 @@ function ProcessReceipts() {
     selectedReceipt,
     candidateRefreshKey,
   ]);
+
+  // ── Effect: load taxonomy reference data once ───────────────────
+  useEffect(() => {
+    (async () => {
+      try {
+        const [cats, subs, ts, ps] = await Promise.all([
+          getCategories(),
+          getSubCategories(),
+          getTypes(),
+          getParties(),
+        ]);
+        setCategories(cats);
+        setSubCategories(subs);
+        setTypes(ts);
+        setParties(ps);
+      } catch (err) {
+        logger.error('Failed to load taxonomy:', err);
+        // Non-fatal — the cash modal will just start blank.
+      }
+    })();
+  }, []);
 
   // ── Error routing ─────────────────────────────────────────────────
 
@@ -277,6 +328,34 @@ function ProcessReceipts() {
     }
   };
 
+  // ── Create-item factory (mirrors CategorizeTransactions) ─────────
+  const makeCreateHandler =
+    (label, createFn, refetchFn, setFn, findFn) =>
+    async (...args) => {
+      const response = await createFn(...args);
+      const fresh = await refetchFn();
+      setFn(fresh);
+      addToast({ message: `${label} "${args[0]}" created`, type: 'success', duration: 2500 });
+      return findFn(fresh, ...args) || response;
+    };
+
+  const handleCategoryCreated = makeCreateHandler(
+    'Category', createCategory, getCategories, setCategories,
+    (list, name) => list.find((c) => c.category === name),
+  );
+  const handleSubCategoryCreated = makeCreateHandler(
+    'Sub-category', createSubCategory, getSubCategories, setSubCategories,
+    (list, name, catId) => list.find((s) => s.sub_category === name && s.category_id === catId),
+  );
+  const handleTypeCreated = makeCreateHandler(
+    'Type', createType, getTypes, setTypes,
+    (list, name, subId) => list.find((t) => t.type === name && t.sub_category_id === subId),
+  );
+  const handlePartyCreated = makeCreateHandler(
+    'Party', createParty, getParties, setParties,
+    (list, name, typeId) => list.find((p) => p.name === name && p.type_id === typeId),
+  );
+
   // ── Form handlers ─────────────────────────────────────────────────
 
   /** Select a receipt from the list. */
@@ -321,6 +400,91 @@ function ProcessReceipts() {
       raw_text: selectedReceipt.extracted_data?.raw_text,
       page_number: selectedReceipt.page_number || 1,
     };
+  };
+
+  /**
+   * Open the generate-cash modal. Fuzzy-match the current vendor
+   * first so the party cascade can be pre-filled.
+   */
+  const handleOpenCashModal = async () => {
+    setSuggestedPartyId(null);
+    try {
+      const match = await matchParty(editableData.vendor);
+      if (match?.party_id) setSuggestedPartyId(match.party_id);
+    } catch (err) {
+      logger.warn('Party match failed (non-fatal):', err);
+    }
+    setIsCashModalOpen(true);
+  };
+
+  /**
+   * Confirm the receipt, then create a Cash-account transaction
+   * from it. Called from {@link GenerateCashFromReceiptModal}.
+   *
+   * @param {{partyId:number, isWithdrawal:boolean, isCredit:boolean}} opts
+   */
+  const handleGenerateCash = async ({ partyId, isWithdrawal, isCredit }) => {
+    if (!selectedReceipt) return;
+
+    setFieldErrors({});
+    setIsGeneratingCash(true);
+
+    try {
+      // Step 1 — persist the (possibly edited) receipt fields.
+      const receiptData = buildReceiptData();
+      const saveResult = await confirmReceipt(receiptData);
+      const receiptId =
+        saveResult.data?.receipt?.id ||
+        saveResult.receipt?.id ||
+        saveResult.id ||
+        selectedReceipt.receipt_id;
+
+      if (!receiptId) {
+        throw new Error('Failed to get receipt ID from save response');
+      }
+
+      // Step 2 — create the cash transaction.
+      const result = await createCashTransactionFromReceipt({
+        receiptId,
+        partyId,
+        isWithdrawal,
+        isCredit,
+      });
+      const txn = result?.data?.transaction ?? result?.transaction;
+
+      // Step 3 — mark the receipt as linked in local session state.
+      setReceipts((prev) =>
+        prev.map((r) =>
+          r.receipt_id === selectedReceiptId
+            ? {
+                ...r,
+                status: 'linked',
+                linked_transaction_id: txn?.id,
+                extracted_data: {
+                  ...r.extracted_data,
+                  vendor: editableData.vendor,
+                  date: editableData.date,
+                  amount: editableData.amount,
+                },
+              }
+            : r,
+        ),
+      );
+
+      setIsCashModalOpen(false);
+      addToast({
+        message: 'Cash transaction created from receipt',
+        type: 'success',
+        duration: 2500,
+      });
+      setTimeout(selectNextReceipt, 1000);
+    } catch (err) {
+      logger.error('Failed to generate cash transaction:', err);
+      routeError(err, 'Failed to generate cash transaction');
+      throw err; // let the modal reset its spinner
+    } finally {
+      setIsGeneratingCash(false);
+    }
   };
 
   // ── Mutations ─────────────────────────────────────────────────────
@@ -553,6 +717,17 @@ function ProcessReceipts() {
   const canDelete =
     selectedReceipt && selectedReceipt.status === 'pending' && !isSaving && !isLinking;
 
+  /** Generate-cash requires vendor, date and amount to all be present. */
+  const canGenerateCash =
+    selectedReceipt &&
+    selectedReceipt.status === 'pending' &&
+    editableData.vendor.trim() !== '' &&
+    editableData.date !== '' &&
+    editableData.amount !== '' &&
+    !isSaving &&
+    !isLinking &&
+    !isGeneratingCash;
+
   const pendingCount = receipts.filter((r) => r.status === 'pending').length;
   const processedCount = receipts.filter((r) => r.status !== 'pending').length;
 
@@ -714,6 +889,14 @@ function ProcessReceipts() {
                   >
                     {isSaving ? 'Saving...' : 'Save'}
                   </button>
+                  <button
+                    onClick={handleOpenCashModal}
+                    className="btn-generate-cash"
+                    disabled={!canGenerateCash}
+                    title="Create a Cash-account transaction from this receipt"
+                  >
+                    Generate Cash
+                  </button>
                   <button onClick={handleDelete} className="btn-delete" disabled={!canDelete}>
                     {isSaving ? 'Deleting...' : 'Delete'}
                   </button>
@@ -754,6 +937,21 @@ function ProcessReceipts() {
           </div>
         </div>
       </div>
+      <GenerateCashFromReceiptModal
+        isOpen={isCashModalOpen}
+        onClose={() => setIsCashModalOpen(false)}
+        onConfirm={handleGenerateCash}
+        receiptData={editableData}
+        suggestedPartyId={suggestedPartyId}
+        categories={categories}
+        subCategories={subCategories}
+        types={types}
+        parties={parties}
+        onCategoryCreated={handleCategoryCreated}
+        onSubCategoryCreated={handleSubCategoryCreated}
+        onTypeCreated={handleTypeCreated}
+        onPartyCreated={handlePartyCreated}
+      />
     </div>
   );
 }

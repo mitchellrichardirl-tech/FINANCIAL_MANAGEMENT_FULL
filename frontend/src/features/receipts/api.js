@@ -136,3 +136,53 @@ export async function uploadReceiptsStream(formData) {
 export async function getUploads() {
   return await apiCall('/uploads');
 }
+
+/**
+ * Fuzzy-match a vendor/party name to an existing party.
+ *
+ * Read-only — does not create new aliases or parties. Used to
+ * pre-select a party in {@link GenerateCashFromReceiptModal}.
+ *
+ * @async
+ * @param {string} name - Vendor string from OCR (or user-edited).
+ * @returns {Promise<?{party_id: number, score: number}>}
+ *          Best match, or `null` if nothing scored above threshold.
+ * @throws {AppError|ApiError}
+ */
+export async function matchParty(name) {
+  if (!name || !name.trim()) return null;
+  const q = encodeURIComponent(name.trim());
+  const response = await apiCall(`/parties/match?name=${q}`);
+  const data = response?.data ?? response;
+  return data?.match ?? null;
+}
+
+/**
+ * Create a Cash-account transaction from a confirmed receipt.
+ *
+ * @async
+ * @param {Object} payload
+ * @param {number|string} payload.receiptId
+ * @param {number|string} payload.partyId
+ * @param {boolean} [payload.isWithdrawal=true]
+ * @param {boolean} [payload.isCredit=false]
+ * @returns {Promise<Object>} Raw API response. Payload (under `.data`
+ *          when enveloped) is `{ transaction, upload_id }`.
+ * @throws {AppError|ApiError}
+ */
+export async function createCashTransactionFromReceipt({
+  receiptId,
+  partyId,
+  isWithdrawal = true,
+  isCredit = false,
+}) {
+  return apiCall('/transactions/from-receipt', {
+    method: 'POST',
+    body: {
+      receipt_id: receiptId,
+      party_id: partyId,
+      is_withdrawal: isWithdrawal,
+      is_credit: isCredit,
+    },
+  });
+}
