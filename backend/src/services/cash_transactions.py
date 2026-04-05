@@ -244,14 +244,12 @@ class CashTransactionService:
         party_id: int,
         is_withdrawal: bool = True,
         is_credit: bool = False,
+        is_kids: bool = False,
+        is_one_off: bool = False,
     ) -> Dict[str, Any]:
         """Create a single Cash-account transaction from a receipt.
 
-        Used when a purchase was paid for in cash so there is no bank
-        statement entry to link the receipt to. The transaction is
-        created on the Cash account, populated from the receipt's
-        confirmed vendor / date / amount, and linked back to the
-        receipt via ``receipt_id``.
+        ...
 
         Args:
             receipt_id: ID of a **confirmed** receipt (must have
@@ -262,20 +260,11 @@ class CashTransactionService:
                 positive (cash coming in).
             is_credit: Value for the transaction's ``is_credit`` flag
                 (currently used to mean "is income"). Defaults False.
-
-        Returns:
-            A result dict::
-
-                {
-                    "transaction": <created row dict>,
-                    "upload_id": int,
-                }
-
-        Raises:
-            ValueError: If the receipt does not exist, is missing
-                required fields, or is already linked to a
-                transaction.
-            DatabaseError: On any underlying database failure.
+            is_kids: Value for the transaction's ``is_kids`` flag.
+                Defaults False.
+            is_one_off: Value for the transaction's ``is_one_off`` flag.
+                Defaults False.
+        ...
         """
         cash_account = self.account_repo.ensure_cash_account()
         cash_account_id = cash_account["id"]
@@ -345,19 +334,19 @@ class CashTransactionService:
 
                 cursor.execute(
                     """INSERT INTO transactions
-                       (transaction_date, amount, description,
+                    (transaction_date, amount, description,
                         cleaned_description, is_credit, is_kids,
                         is_one_off, account_id, upload_id,
                         party_id, receipt_id)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         receipt["date"],
                         amount,
                         receipt["vendor"],
                         receipt["vendor"],
-                        1 if is_credit else 0,
-                        0,
-                        0,
+                        1 if is_credit  else 0,
+                        1 if is_kids    else 0,
+                        1 if is_one_off else 0,
                         cash_account_id,
                         upload_id,
                         party_id,
@@ -371,12 +360,13 @@ class CashTransactionService:
                 )
                 transaction = dict(cursor.fetchone())
 
-            logger.info(
-                f"Generated cash transaction {transaction['id']} "
-                f"from receipt {receipt_id} "
-                f"(party_id={party_id}, is_withdrawal={is_withdrawal}, "
-                f"upload_id={upload_id})"
-            )
+                logger.info(
+                    f"Generated cash transaction {transaction['id']} "
+                    f"from receipt {receipt_id} "
+                    f"(party_id={party_id}, is_withdrawal={is_withdrawal}, "
+                    f"is_credit={is_credit}, is_kids={is_kids}, "
+                    f"is_one_off={is_one_off}, upload_id={upload_id})"
+                )
             return {"transaction": transaction, "upload_id": upload_id}
 
         except ValueError:

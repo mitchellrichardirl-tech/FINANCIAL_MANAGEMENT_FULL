@@ -444,12 +444,14 @@ def create_cash_transaction_from_receipt():
             "receipt_id": 123,
             "party_id": 456,
             "is_withdrawal": true,
-            "is_credit": false
+            "is_credit": false,
+            "is_kids": false,
+            "is_one_off": false
         }
 
-    ``is_withdrawal`` defaults to True; ``is_credit`` defaults to False.
-    Rejects if the receipt is missing, incomplete, or already linked
-    to a transaction.
+    ``is_withdrawal`` defaults to True; ``is_credit``, ``is_kids`` and
+    ``is_one_off`` default to False. Rejects if the receipt is missing,
+    incomplete, or already linked to a transaction.
     """
     data = request.get_json()
     if not data:
@@ -472,7 +474,9 @@ def create_cash_transaction_from_receipt():
         raise invalid_value('party_id must be an integer', field='party_id')
 
     is_withdrawal = bool(data.get('is_withdrawal', True))
-    is_credit = bool(data.get('is_credit', False))
+    is_credit     = bool(data.get('is_credit', False))
+    is_kids       = bool(data.get('is_kids', False))
+    is_one_off    = bool(data.get('is_one_off', False))
 
     from src.services.cash_transactions import CashTransactionService
     service = CashTransactionService()
@@ -481,6 +485,8 @@ def create_cash_transaction_from_receipt():
         party_id=party_id,
         is_withdrawal=is_withdrawal,
         is_credit=is_credit,
+        is_kids=is_kids,
+        is_one_off=is_one_off,
     )
 
     return success_response(
