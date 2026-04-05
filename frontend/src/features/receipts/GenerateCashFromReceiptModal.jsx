@@ -27,8 +27,13 @@ const logger = createLogger('GenerateCashFromReceiptModal');
  *
  * @param {boolean} props.isOpen - Visibility flag.
  * @param {() => void} props.onClose
- * @param {(opts: {partyId:number,isWithdrawal:boolean,isCredit:boolean})
- *         => Promise<void>} props.onConfirm
+ * @param {(opts: {
+ *   partyId: number,
+ *   isWithdrawal: boolean,
+ *   isCredit: boolean,
+ *   isKids: boolean,
+ *   isOneOff: boolean,
+ * }) => Promise<void>} props.onConfirm
  *        Async callback that performs the generation. Should throw
  *        on failure; the parent handles toasting.
  *
@@ -69,6 +74,8 @@ export default function GenerateCashFromReceiptModal({
   // ── Local form state ──────────────────────────────────────────────
   const [isWithdrawal, setIsWithdrawal] = useState(true);
   const [isCredit, setIsCredit] = useState(false);
+  const [isKids, setIsKids] = useState(false);
+  const [isOneOff, setIsOneOff] = useState(false);
 
   const [selectedCategoryId, setSelectedCategoryId] = useState(null);
   const [selectedSubCategoryId, setSelectedSubCategoryId] = useState(null);
@@ -86,14 +93,6 @@ export default function GenerateCashFromReceiptModal({
   });
 
   /**
-   * Tracks whether the form has already been initialised for the
-   * current open session. Prevents the reset effect from re-running
-   * (and wiping the user's selections) when taxonomy props change
-   * after an inline create.
-   */
-  const initialisedRef = useRef(false);
-
-  /**
    * Reset the form each time the modal opens.
    * If a suggested party is supplied, walk up the hierarchy to
    * pre-fill every level so the user can accept with one click.
@@ -108,6 +107,8 @@ export default function GenerateCashFromReceiptModal({
     setIsWithdrawal(true);
     setIsCredit(false);
     setSaving(false);
+    setIsKids(false);
+    setIsOneOff(false);
 
     if (suggestedPartyId) {
       const party = parties.find((p) => p.id === suggestedPartyId);
@@ -245,6 +246,8 @@ export default function GenerateCashFromReceiptModal({
         partyId: selectedPartyId,
         isWithdrawal,
         isCredit,
+        isKids,
+        isOneOff,
       });
       // Parent closes on success.
     } catch {
@@ -345,6 +348,28 @@ export default function GenerateCashFromReceiptModal({
                     disabled={saving}
                   />
                   Mark as income
+                </label>
+              </div>
+              <div className="form-field">
+                <label className="checkbox-option">
+                  <input
+                    type="checkbox"
+                    checked={isKids}
+                    onChange={(e) => setIsKids(e.target.checked)}
+                    disabled={saving}
+                  />
+                  Kids
+                </label>
+              </div>
+              <div className="form-field">
+                <label className="checkbox-option">
+                  <input
+                    type="checkbox"
+                    checked={isOneOff}
+                    onChange={(e) => setIsOneOff(e.target.checked)}
+                    disabled={saving}
+                  />
+                  One-off
                 </label>
               </div>
             </div>

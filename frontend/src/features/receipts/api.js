@@ -175,6 +175,8 @@ export async function createCashTransactionFromReceipt({
   partyId,
   isWithdrawal = true,
   isCredit = false,
+  isKids = false,
+  isOneOff = false,
 }) {
   return apiCall('/transactions/from-receipt', {
     method: 'POST',
@@ -183,6 +185,8 @@ export async function createCashTransactionFromReceipt({
       party_id: partyId,
       is_withdrawal: isWithdrawal,
       is_credit: isCredit,
+      is_kids: isKids,
+      is_one_off: isOneOff,
     },
   });
 }

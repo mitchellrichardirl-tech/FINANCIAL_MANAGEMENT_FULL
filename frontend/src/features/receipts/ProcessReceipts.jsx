@@ -421,9 +421,9 @@ function ProcessReceipts() {
    * Confirm the receipt, then create a Cash-account transaction
    * from it. Called from {@link GenerateCashFromReceiptModal}.
    *
-   * @param {{partyId:number, isWithdrawal:boolean, isCredit:boolean}} opts
+   * @param {{partyId:number, isWithdrawal:boolean, isCredit:boolean, isKids:boolean, isOneOff:boolean}} opts
    */
-  const handleGenerateCash = async ({ partyId, isWithdrawal, isCredit }) => {
+  const handleGenerateCash = async ({ partyId, isWithdrawal, isCredit, isKids, isOneOff }) => {
     if (!selectedReceipt) return;
 
     setFieldErrors({});
@@ -449,6 +449,8 @@ function ProcessReceipts() {
         partyId,
         isWithdrawal,
         isCredit,
+        isKids,
+        isOneOff
       });
       const txn = result?.data?.transaction ?? result?.transaction;
 
