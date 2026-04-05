@@ -79,6 +79,13 @@ class PartyMatcher:
             f"Initialized PartyMatcher: threshold={similarity_threshold}"
         )
 
+    @staticmethod
+    def _normalize(s: str) -> str:
+        """Canonical form for comparison: uppercase + whitespace collapsed."""
+        if s is None:
+            return ""
+        return " ".join(s.upper().split())
+
     def _intialize_database(self, db: Optional[CategoryRepository] = None):
         self.db = db if db else CategoryRepository()
 
@@ -95,7 +102,13 @@ class PartyMatcher:
         `process.extractOne` and `process.cdist`.
         """
         logger.debug("Loading known parties from database")
-        self.alias_mapping = self.db.get_all_party_aliases()
+        raw_mapping = self.db.get_all_party_aliases()
+        self.alias_mapping = {
+            self._normalize(alias): pid
+            for alias, pid
+            in raw_mapping.items()
+            if alias
+            }
 
         # Pre-build the list once; we'll refresh it when aliases are added
         self._alias_keys = list(self.alias_mapping.keys())
@@ -162,8 +175,9 @@ class PartyMatcher:
     # ── scalar methods (unchanged interface) ──
 
     def _check_exact_match(self, party_name: str) -> int:
+        key = self._normalize(party_name)
         try:
-            return self.alias_mapping[party_name]
+            return self.alias_mapping[key]
         except KeyError:
             raise KeyError(f"No exact match found for '{party_name}'")
 
@@ -174,11 +188,12 @@ class PartyMatcher:
         self.db.prime_unknown_type_cache()
 
     def _check_fuzzy_match(self, party_name: str) -> Tuple[int, int]:
+        query = self._normalize(party_name)
         if not self.alias_mapping:
             raise LookupError(f"No known parties to match against")
 
         best_match = process.extractOne(
-            party_name,
+            query,
             self._alias_keys,
             scorer=self.custom_scorer
         )
@@ -188,8 +203,8 @@ class PartyMatcher:
             self.last_match_score = score
             party_id = self.alias_mapping[matched_name]
 
-            if party_name not in self.alias_mapping:
-                self.alias_mapping[party_name] = party_id
+            if query not in self.alias_mapping:
+                self.alias_mapping[query] = party_id
                 self._refresh_alias_keys()
                 self.new_aliases += 1
                 logger.debug(
@@ -247,7 +262,7 @@ class PartyMatcher:
             pass
 
         party_id = self._add_unknown_party(party_name)
-        self.alias_mapping[party_name] = party_id
+        self.alias_mapping[self._normalize(party_name)] = party_id
         self._refresh_alias_keys()
         self.new_parties += 1
         logger.info(f"Created new party '{party_name}' with id {party_id}")
@@ -296,7 +311,8 @@ class PartyMatcher:
         logger.info(f"Batch matching {total} party names")
 
         # ── Step 1: deduplicate ──
-        unique_names = party_names.unique()
+        norm_names = party_names.map(self._normalize)
+        unique_names = norm_names[norm_names != ""].unique()
         unique_count = len(unique_names)
         logger.info(
             f"Deduplicated to {unique_count} unique names "
@@ -454,7 +470,7 @@ class PartyMatcherReadOnly(PartyMatcher):
         """
         logger.debug(f"Read-only matcher: finding match for '{party_name}'")
         logger.debug(f"Known aliases: {len(self.alias_mapping)}")
-        logger.debug("\n".join([f"  '{alias}' -> {pid}" for alias, pid in list(self.alias_mapping.items()) if alias[:1].upper()=='S']))
+        # logger.debug("\n".join([f"  '{alias}' -> {pid}" for alias, pid in list(self.alias_mapping.items()) if alias[:1].upper()=='S']))
         if not party_name or party_name.strip() == "":
             raise ValueError("No party name provided")
         self.last_match_score = 0
