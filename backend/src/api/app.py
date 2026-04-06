@@ -114,6 +114,7 @@ def _register_blueprints(app):
         categories,
         transactions,
         uploads,
+        statement_formats,
     )
 
     blueprints = [
@@ -124,6 +125,7 @@ def _register_blueprints(app):
         (categories.bp, "/api"),
         (transactions.bp, "/api/transactions"),
         (uploads.bp, "/api/uploads"),
+        (statement_formats.bp, "/api/statement-formats"),
     ]
 
     for blueprint, prefix in blueprints:

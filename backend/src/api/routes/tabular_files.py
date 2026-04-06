@@ -100,7 +100,7 @@ def _process_as_statement(result, account_id: int, upload_id: int):
     )
 
     statement = get_processor(
-        statement_type=account['statement_format'],
+        identifier=account['statement_format'],
         account_id=account_id,
         upload_id=upload_id,
     )
