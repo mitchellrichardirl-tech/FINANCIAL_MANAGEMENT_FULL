@@ -1,0 +1,35 @@
+.format-editor-page {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 20px 60px;
+}
+
+.format-editor-page__header {
+  margin-bottom: 24px;
+}
+
+.format-editor-page__header h1 {
+  margin: 0 0 4px;
+}
+
+.format-editor-page__sub {
+  margin: 0;
+  color: #6c757d;
+  font-size: 14px;
+}
+
+.format-editor-page__status {
+  color: #6c757d;
+}
+
+.format-editor-page__error {
+  padding: 14px 16px;
+  border: 1px solid #f5c2c7;
+  background: #f8d7da;
+  border-radius: 4px;
+  color: #842029;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}

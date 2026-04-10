@@ -222,17 +222,18 @@ export function validate(draft) {
 // ---------------------------------------------------------------------
 
 /**
- * Map an `INVALID_FORMAT` ApiError into the prop shape
+ * Map an `INVALID_FORMAT` ParsedError into the prop shape
  * `ColumnMismatchPanel` expects.
  *
- * @param {Object} err - ApiError with `.message` and `.details`.
+ * @param {import('@/lib/apiErrors').ParsedError} parsed
  * @returns {import('@/features/statements/ColumnMismatchPanel').ColumnMismatch|null}
+ *          Null when the error isn't a column-mismatch (no `missing_columns`).
  */
-export function mismatchFromApiError(err) {
-  const d = err?.details;
+export function mismatchFromParsedError(parsed) {
+  const d = parsed?.details;
   if (!d?.missing_columns) return null;
   return {
-    message: err.userMessage || err.message,
+    message: parsed.message,
     formatName: d.statement_format,
     missing: d.missing_columns || [],
     required: d.required_columns || [],
