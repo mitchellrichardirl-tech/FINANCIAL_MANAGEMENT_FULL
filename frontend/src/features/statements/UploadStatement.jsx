@@ -92,7 +92,7 @@ export default function UploadStatement() {
 
     try {
       const preview = await previewFile(file);
-      setPreviewData(preview.data);
+      setPreviewData(preview);
 
       const [accountsData, formatsData] = await Promise.all([
         getAccounts(),
@@ -344,90 +344,3 @@ export default function UploadStatement() {
   );
 }
 
-/**
- * Single expandable warning item.
- * @param {{warning: {code: string, message: string, details: Object}}} props
- */
-function WarningItem({ warning }) {
-  const [expanded, setExpanded] = useState(true);
-  const { code, message, details = {} } = warning;
-
-  return (
-    <div className={`iwp-item iwp-code-${code?.toLowerCase() || 'unknown'}`}>
-      <button
-        type="button"
-        className="iwp-toggle"
-        onClick={() => setExpanded((e) => !e)}
-        aria-expanded={expanded}
-      >
-        <span className="iwp-chevron">{expanded ? '▾' : '▸'}</span>
-        <span className="iwp-message">{message}</span>
-      </button>
-
-      {expanded && (
-        <div className="iwp-details">
-          <WarningDetails code={code} details={details} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-/**
- * Render details for a specific warning code.
- * Add cases here as the backend emits new warning types.
- *
- * @param {Object} props
- * @param {string} props.code
- * @param {Object} props.details
- */
-function WarningDetails({ code, details }) {
-  switch (code) {
-    case 'DATES_UNPARSEABLE':
-      return (
-        <>
-          <dl className="iwp-dl">
-            <div>
-              <dt>Column</dt>
-              <dd>
-                <code>{details.column}</code>
-              </dd>
-            </div>
-            <div>
-              <dt>Rows dropped</dt>
-              <dd>
-                {details.dropped} of {details.total}
-              </dd>
-            </div>
-            <div>
-              <dt>Parser used</dt>
-              <dd>
-                <code>{details.format_used}</code>
-              </dd>
-            </div>
-          </dl>
-
-          {details.sample_values?.length > 0 && (
-            <div className="iwp-samples">
-              <p className="iwp-samples-label">Sample values that couldn't be parsed:</p>
-              <ul>
-                {[...new Set(details.sample_values)].slice(0, 5).map((v, i) => (
-                  <li key={i}>
-                    <code>{v}</code>
-                  </li>
-                ))}
-              </ul>
-              <p className="iwp-hint">
-                💡 If these look like valid dates, the statement format for this account may need a
-                different date format string.
-              </p>
-            </div>
-          )}
-        </>
-      );
-
-    default:
-      if (!details || Object.keys(details).length === 0) return null;
-      return <pre className="iwp-raw-details">{JSON.stringify(details, null, 2)}</pre>;
-  }
-}

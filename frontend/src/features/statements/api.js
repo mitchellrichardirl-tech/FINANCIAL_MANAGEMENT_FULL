@@ -74,7 +74,8 @@ export async function previewFile(file, numRows = 20) {
   formData.append('file', file);
   formData.append('num_rows', numRows);
   formData.append('include_types', 'true');
-  return apiCall('/tabular/preview', { method: 'POST', body: formData });
+  const response = await apiCall('/tabular/preview', { method: 'POST', body: formData });
+  return unwrap(response);
 }
 
 /**
