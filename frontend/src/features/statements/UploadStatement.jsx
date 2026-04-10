@@ -32,6 +32,10 @@ import ImportResult from './ImportResult';
 import AccountSelector from './AccountSelector';
 import './UploadStatement.css';
 
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('DropdownWithCreate')
+
 /**
  * Bank statement upload and import page.
  *
@@ -100,6 +104,8 @@ export default function UploadStatement() {
       ]);
       setAccounts(accountsData);
       setStatementFormats(formatsData);
+      logger.info('Fetched accounts:', accountsData);
+      logger.info('Fetched statement formats:', formatsData);
     } catch (err) {
       addToast({
         message: err.userMessage || err.message || 'Failed to preview file',

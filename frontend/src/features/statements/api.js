@@ -146,6 +146,6 @@ export async function getUploads() {
  * @throws {AppError|ApiError}
  */
 export async function fetchStatementFormats() {
-  const response = await apiCall('/accounts/statement-formats');
-  return unwrap(response); // no key — just strips the .data envelope
+  const response = await apiCall('/statement-formats');
+  return unwrap(response, 'formats'); // no key — just strips the .data envelope
 }
