@@ -2,7 +2,7 @@ import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import UploadStatement from '@/features/statements';
 import CategorizeTransactions from '@/features/transactions/CategorizeTransactions';
 import ProcessReceipts from '@/features/receipts/ProcessReceipts';
-import { StatementFormatsPage } from '@/features/statementFormats';
+import StatementFormatsPage from '@/features/statementFormats/StatementFormatsPage';
 import { ToastProvider } from '@/components/ToastContext';
 import './App.css';
 

@@ -8,6 +8,7 @@
 import { useEffect, useState } from 'react';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { useToast } from '@/components/ToastContext';
+import { parseApiError, getUserMessage } from '@/lib/apiErrors';
 import { deleteFormat } from './api';
 
 /**
@@ -40,14 +41,16 @@ export default function DeleteFormatDialog({ format, onCancel, onDeleted }) {
       await deleteFormat(numericId);
       onDeleted();
     } catch (err) {
-      if (err?.details?.linked_accounts) {
-        setLinkedAccounts(err.details.linked_accounts);
+      const parsed = await parseApiError(err);
+
+      if (parsed.details?.linked_accounts) {
+        setLinkedAccounts(parsed.details.linked_accounts);
+        setLoading(false);
       } else {
-        addToast({ message: err.userMessage || err.message || 'Delete failed.' });
+        addToast({ message: getUserMessage(parsed, 'Deleting format') });
+        setLoading(false);
         onCancel();
       }
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -79,7 +82,10 @@ export default function DeleteFormatDialog({ format, onCancel, onDeleted }) {
           <p>
             <strong>{format.display_name}</strong> will be permanently removed.
           </p>
-          <p>Accounts already using it will keep their past imports, but you&apos;ll need to pick a different format for future uploads.</p>
+          <p>
+            Accounts already using it will keep their past imports, but you&apos;ll need
+            to pick a different format for future uploads.
+          </p>
         </>
       )}
     </ConfirmDialog>
