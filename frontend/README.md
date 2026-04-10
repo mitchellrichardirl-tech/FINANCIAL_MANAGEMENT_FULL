@@ -35,8 +35,11 @@ Defined in `App.jsx`.
 
 - **`/`** — Home (landing page, nav links)
 - **`/upload`** — Upload a bank statement, preview, import
-- **`/categorize`** — Review transactions, assign/edit party categorization
-- **`/process-receipts`** — Bulk-upload receipt images, match to transactions
+- **`/categorize`** — Review transactions, assign/edit party categorization;
+  generate Cash-account counterparts from selected rows or enter cash
+  transactions manually
+- **`/process-receipts`** — Bulk-upload receipt images, match to transactions,
+  or generate a Cash-account transaction directly from a receipt
 
 ---
 
@@ -80,7 +83,8 @@ Feature `api.js` files are thin wrappers that give each endpoint a name and
 hide the URL/method details from the page.
 
 **Exception:** bulk receipt upload streams progress via SSE and talks to
-`fetch` directly rather than going through `apiCall`.
+`fetch` directly (using the exported `API_BASE_URL`) rather than going
+through `apiCall`.
 
 ### Response envelopes
 
