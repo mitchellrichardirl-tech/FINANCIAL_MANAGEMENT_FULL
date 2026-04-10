@@ -1,7 +1,8 @@
 # Backend
 
 Flask API for the finance tracker. Handles statement imports, receipt
-processing (OCR), transaction-to-party matching, and data persistence.
+processing (OCR), transaction-to-party matching, cash transaction
+generation, and data persistence.
 
 ---
 
@@ -11,7 +12,8 @@ processing (OCR), transaction-to-party matching, and data persistence.
 ┌─────────────────────────────────────────────┐
 │  api/routes/       Flask blueprints         │  HTTP + orchestration
 ├─────────────────────────────────────────────┤
-│  api/services/     Parallel batch jobs      │  (receipts only)
+│  api/services/     Parallel batch jobs      │  (receipts)
+│  services/         Domain services          │  (cash transactions)
 ├─────────────────────────────────────────────┤
 │  categorizer/      Domain logic             │
 │  receipts/         (Flask-independent)      │
@@ -25,9 +27,9 @@ processing (OCR), transaction-to-party matching, and data persistence.
 ```
 
 **Routes** currently handle both HTTP concerns and most orchestration logic.
-There is no general service layer — `api/services/` exists specifically for
-parallel batch processing of receipts. Extracting a proper service layer is
-a known refactoring opportunity.
+A proper service layer is being extracted incrementally — `services/` holds
+the first of these (`CashTransactionService`), while `api/services/` remains
+specific to parallel receipt batch processing.
 
 **Domain modules** (`categorizer/`, `receipts/`, `statements/`) have no Flask
 dependencies and can be driven from a notebook or script.
@@ -88,6 +90,17 @@ Transaction description
 Categorization of the party itself (assigning it a type/sub-category/category)
 is done by the user in the frontend.
 
+### Cash transaction generation
+```
+Source (bank txn ids | receipt | manual entry)
+  → services/cash_transactions.py       (CashTransactionService)
+  → repositories/accounts.py            (ensure_cash_account)
+  → insert mirror txn on Cash account   (amount negated, source_transaction_id link)
+```
+A synthetic `uploads` row (`file_type='generated'`) groups each batch so
+existing upload-based bookkeeping still works. The Cash account is created
+automatically on first use.
+
 ---
 
 ## Configuration
@@ -131,8 +144,8 @@ Test layout mirrors `src/` — e.g. `tests/test_categorizer/` tests
 
 - **`health`** → `/api` — Liveness check
 - **`accounts`** → `/api/accounts` — Bank account CRUD
-- **`categories`** → `/api` — Category hierarchy CRUD
-- **`transactions`** → `/api/transactions` — List, filter, bulk-edit
+- **`categories`** → `/api` — Category hierarchy CRUD; read-only party match
+- **`transactions`** → `/api/transactions` — List, filter, bulk-edit, cash generation
 - **`uploads`** → `/api/uploads` — Upload tracking / history
 - **`receipts`** → `/api` — Receipt upload & processing
 - **`tabular_files`** → `/api/tabular` — Statement file upload & preview
@@ -160,10 +173,11 @@ enabled, to prevent duplicate job execution.
 - **`api/services/parallel_processor.py`** — Runs receipt jobs concurrently.
 - **`api/utils/sse.py`** — Server-Sent Events helpers for streaming progress.
 - **`categorizer/party_extractor.py`** — Extracts party name from a transaction description.
-- **`categorizer/party_matcher.py`** — Fuzzy-matches extracted names against known parties; creates new parties for unmatched names.
+- **`categorizer/party_matcher.py`** — Fuzzy-matches extracted names against known parties; creates new parties for unmatched names. Also defines `PartyMatcherReadOnly`, a side-effect-free variant used for lookup/suggestion endpoints.
 - **`categorizer/party_matcher_raw.py`** — Same matching algorithm, no DB integration. No party import, no party creation. Used primarily for testing.
 - **`database/connection.py`** — SQLite connection manager, registered on the Flask app.
 - **`database/migrations.py`** — Schema migrations, run on startup.
+- **`services/cash_transactions.py`** — `CashTransactionService`: generates Cash-account counterpart transactions from bank transactions, receipts, or manual input.
 - **`statements/base.py`** — Abstract base for statement parsers. Defines the contract.
 - **`statements/registry.py`** — Maps bank identifier → config class.
 - **`statements/processors/revolut.py`** — Revolut-specific preprocessing beyond column mapping.
