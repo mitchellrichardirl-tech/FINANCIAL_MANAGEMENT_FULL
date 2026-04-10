@@ -26,13 +26,13 @@ export default function StepSampleFile({ editor }) {
   const hasFile = !!file;
   const hasData = !!previewData;
 
-  // PreviewTable's `startRow` is the 1-based *file* row number of the first
-  // kept row. Row 1 is the header (consumed as column names), so data row 0
-  // is file row 2 → startRow = skip_rows_start + 2.
-  const startRow = (draft.skip_rows_start ?? 0) + 2;
+  // PreviewTable's `startRow` highlights the header row (yellow) and shades
+  // everything before it (red). The table's <th> still show row 1's values —
+  // possibly junk — but the yellow band makes the real header visible.
+  const startRow = sample.headerRow;
 
   const handleSkipChange = (field) => (n) => {
-    updateDraft(field, n ?? 0); // NumberInput emits null when cleared
+    updateDraft(field, n ?? 0);
   };
 
   return (
@@ -93,10 +93,23 @@ export default function StepSampleFile({ editor }) {
 
       {hasData && (
         <>
-          <div className="fe-step-sample__skiprows">
+          <div className="fe-step-sample__controls">
             <FormField
-              label="Skip rows at start"
-              help="Leading junk rows (titles, blank lines) after the header. Shown in red below."
+              label="Column headers are on row"
+              help="Row containing the column names. Rows above are ignored for this preview."
+              htmlFor="header-row"
+            >
+              <NumberInput
+                id="header-row"
+                value={sample.headerRow}
+                onChange={editor.setHeaderRow}
+                min={1}
+              />
+            </FormField>
+
+            <FormField
+              label="Skip rows after header"
+              help="Junk rows between the header and the first transaction. Part of the saved format."
               htmlFor="skip-start"
             >
               <NumberInput
@@ -106,9 +119,10 @@ export default function StepSampleFile({ editor }) {
                 min={0}
               />
             </FormField>
+
             <FormField
               label="Skip rows at end"
-              help="Trailing rows to drop (totals, disclaimers). Not visualised in the preview yet."
+              help="Trailing rows to drop (totals, disclaimers). Part of the saved format."
               htmlFor="skip-end"
             >
               <NumberInput
@@ -120,19 +134,20 @@ export default function StepSampleFile({ editor }) {
             </FormField>
           </div>
 
-          {/*
-            PreviewTable's legend says "Header row" for the yellow band; in this
-            context it's really "first transaction row". Making the legend labels
-            configurable is a follow-up — the visual still communicates the
-            skip boundary clearly.
-          */}
+          {sample.headerRow > 1 && (
+            <div className="fe-step-sample__detected">
+              <strong>Columns detected from row {sample.headerRow}:</strong>{' '}
+              {editor.sampleColumns.length > 0
+                ? editor.sampleColumns.join(', ')
+                : '(none — check the row number)'}
+            </div>
+          )}
+
           <div className="fe-step-sample__table">
             <PreviewTable
               previewData={previewData}
               startRow={startRow}
-              onStartRowChange={() => {
-                /* PreviewTable doesn't currently call this; skip controlled via the input above. */
-              }}
+              onStartRowChange={() => {}}
             />
           </div>
         </>

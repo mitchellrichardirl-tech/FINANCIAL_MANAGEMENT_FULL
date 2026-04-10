@@ -88,39 +88,92 @@ export function useFormatEditor({ mode, initialDraft, numericId }) {
   // ── Sample file ────────────────────────────────────────────────────
   const [sample, setSample] = useState({
     file: null,
-    previewData: null, // shape consumed by <PreviewTable> — { columns, data, column_types, total_rows }
+    previewData: null,
+    headerRow: 1,          // ← NEW: 1-based file row containing column names
     loading: false,
     error: null,
   });
 
   const loadSampleFile = useCallback(async (file) => {
     logger.info('Loading sample file', { name: file?.name, size: file?.size });
-    setSample({ file, previewData: null, loading: true, error: null });
-    // Stale preview no longer reflects the new file's rows.
+    setSample({ file, previewData: null, headerRow: 1, loading: true, error: null });
     setPreview(EMPTY_PREVIEW);
     try {
       const previewData = await previewFile(file, SAMPLE_PREVIEW_ROWS);
-      setSample({ file, previewData, loading: false, error: null });
+      setSample({ file, previewData, headerRow: 1, loading: false, error: null });
     } catch (err) {
       const parsed = await parseApiError(err);
       logger.error('Sample file preview failed', parsed);
       setSample({
-        file,
-        previewData: null,
-        loading: false,
+        file, previewData: null, headerRow: 1, loading: false,
         error: getUserMessage(parsed, 'Reading file'),
       });
     }
   }, []);
 
   const clearSampleFile = useCallback(() => {
-    setSample({ file: null, previewData: null, loading: false, error: null });
+    setSample({ file: null, previewData: null, headerRow: 1, loading: false, error: null });
     setPreview(EMPTY_PREVIEW);
   }, []);
 
-  /** Column names available for <ColumnSelect>; empty when no sample loaded. */
-  const sampleColumns = sample.previewData?.columns || [];
-  const sampleColumnTypes = sample.previewData?.column_types || {};
+  const setHeaderRow = useCallback((n) => {
+    setSample((s) => ({ ...s, headerRow: Math.max(1, n ?? 1) }));
+    setPreview(EMPTY_PREVIEW); // stale once columns change
+  }, []);
+
+  /**
+   * Effective columns + rows after applying `headerRow`.
+   * When headerRow === 1 the raw preview is already correct.
+   * When headerRow > 1 we lift that row's *values* as the column names and
+   * re-key every subsequent row, so Step 3's pickers and Step 5's preview
+   * see the real headers.
+   */
+  const { sampleColumns, sampleColumnTypes, sampleRows } = useMemo(() => {
+    const pd = sample.previewData;
+    if (!pd?.columns || !pd?.data) {
+      return { sampleColumns: [], sampleColumnTypes: {}, sampleRows: [] };
+    }
+
+    if (sample.headerRow <= 1) {
+      return {
+        sampleColumns: pd.columns,
+        sampleColumnTypes: pd.column_types || {},
+        sampleRows: pd.data,
+      };
+    }
+
+    // data[0] is file row 2, so the header values live at data[headerRow - 2].
+    const headerData = pd.data[sample.headerRow - 2];
+    if (!headerData) {
+      // headerRow is beyond the previewed range — fall back to raw.
+      return {
+        sampleColumns: pd.columns,
+        sampleColumnTypes: pd.column_types || {},
+        sampleRows: pd.data,
+      };
+    }
+
+    const newColumns = pd.columns
+      .map((oldKey) => {
+        const v = headerData[oldKey];
+        return v == null ? '' : String(v).trim();
+      });
+
+    const sampleRows = pd.data.slice(sample.headerRow - 1).map((row) => {
+      const out = {};
+      pd.columns.forEach((oldKey, i) => {
+        const newKey = newColumns[i];
+        if (newKey) out[newKey] = row[oldKey];
+      });
+      return out;
+    });
+
+    return {
+      sampleColumns: newColumns.filter(Boolean),
+      sampleColumnTypes: {}, // types were inferred against junk headers — drop them
+      sampleRows,
+    };
+  }, [sample.previewData, sample.headerRow]);
 
   // ── Format preview (Step 5) ────────────────────────────────────────
   const [preview, setPreview] = useState(EMPTY_PREVIEW);
@@ -137,7 +190,7 @@ export function useFormatEditor({ mode, initialDraft, numericId }) {
 
     setPreview({ ...EMPTY_PREVIEW, loading: true });
     try {
-      const result = await previewFormat(toApiShape(draft), rows);
+      const result = await previewFormat(toApiShape(draft), sampleRows);
       setPreview({ ...EMPTY_PREVIEW, result });
     } catch (err) {
       const parsed = await parseApiError(err);
@@ -156,7 +209,7 @@ export function useFormatEditor({ mode, initialDraft, numericId }) {
         });
       }
     }
-  }, [draft, sample.previewData]);
+  }, [draft, sampleRows]);
 
   // ── Save ───────────────────────────────────────────────────────────
   const [saving, setSaving] = useState(false);
@@ -228,8 +281,10 @@ export function useFormatEditor({ mode, initialDraft, numericId }) {
     sample,
     sampleColumns,
     sampleColumnTypes,
+    sampleRows,
     loadSampleFile,
     clearSampleFile,
+    setHeaderRow,
 
     preview,
     runPreview,
