@@ -11,6 +11,8 @@ auto-categorizing transactions. Built for Irish banks (AIB, PTSB, Revolut).
   existing transactions
 - **Auto-categorize** — transactions get categorized based on merchant/party
   name, with manual override and party remapping
+- **Track cash** — generate Cash-account transactions from ATM
+  withdrawals/lodgements, from scanned receipts, or by entering them manually
 
 ## Stack
 - **Frontend** — React + Vite
@@ -67,6 +69,7 @@ backend/src/
 ├── database/     Connection, schema, repositories (data access)
 ├── models/       Shared dataclasses
 ├── receipts/     Receipt image → structured data
+├── services/     Cross-cutting domain services (cash transactions)
 ├── statements/   Bank-specific statement parsers
 └── utils/        Image processing, tabular file I/O, logging
 
