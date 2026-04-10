@@ -1,0 +1,54 @@
+.chip-input {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  background: #fff;
+  min-height: 38px;
+  box-sizing: border-box;
+}
+
+.chip-input:focus-within {
+  border-color: #4a90e2;
+  box-shadow: 0 0 0 2px rgba(74, 144, 226, 0.2);
+}
+
+.chip-input--disabled {
+  background: #f1f3f5;
+}
+
+.chip-input__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #e7f3ff;
+  color: #0b5ed7;
+  border-radius: 12px;
+  padding: 2px 6px 2px 10px;
+  font-size: 13px;
+}
+
+.chip-input__remove {
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.chip-input__remove:disabled { cursor: not-allowed; }
+
+.chip-input__field {
+  flex: 1;
+  min-width: 80px;
+  border: none;
+  outline: none;
+  font-size: 14px;
+  padding: 4px 2px;
+  background: transparent;
+}
