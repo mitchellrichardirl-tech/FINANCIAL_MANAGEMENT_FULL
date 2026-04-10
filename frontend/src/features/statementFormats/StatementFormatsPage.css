@@ -1,7 +1,11 @@
 .sfp {
+  width: 100%;
   max-width: 960px;
+  height: 100%;
   margin: 0 auto;
   padding: 24px 20px 60px;
+  box-sizing: border-box;
+  overflow-y: auto;
 }
 
 .sfp__header {
@@ -33,3 +37,4 @@
   align-items: center;
   gap: 16px;
 }
+

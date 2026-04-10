@@ -1,0 +1,68 @@
+.fe-step-cols__section {
+  margin-bottom: 28px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.fe-step-cols__section:last-of-type {
+  border-bottom: none;
+  margin-bottom: 12px;
+  padding-bottom: 0;
+}
+
+.fe-step-cols__section h3 {
+  font-size: 16px;
+  margin: 0 0 16px;
+  color: #212529;
+}
+
+/* Side-by-side field pairs (credit+debit, indicator+value, etc.) */
+.fe-step-cols__fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+/* Narrower variant for single-character inputs (separators) */
+.fe-step-cols__fields--narrow {
+  max-width: 360px;
+}
+
+@media (max-width: 640px) {
+  .fe-step-cols__fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Advanced collapsible */
+.fe-step-cols__advanced {
+  margin-top: 12px;
+  border: 1px solid #e9ecef;
+  border-radius: 6px;
+}
+
+.fe-step-cols__advanced summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 14px;
+  color: #495057;
+  padding: 12px 16px;
+  user-select: none;
+}
+
+.fe-step-cols__advanced summary:hover {
+  background: #f8f9fa;
+}
+
+.fe-step-cols__advanced[open] summary {
+  border-bottom: 1px solid #e9ecef;
+}
+
+.fe-step-cols__advanced-body {
+  padding: 16px;
+}
+
+/* Give the debit_is_negative checkbox breathing room inside advanced */
+.fe-step-cols__advanced-body > .checkbox-container {
+  margin: 16px 0;
+}
