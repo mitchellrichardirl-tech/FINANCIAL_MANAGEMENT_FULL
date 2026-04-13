@@ -1627,3 +1627,513 @@ class CategoryRepository:
             The cached "Unknown" type `id`.
         """
         return self._ensure_unknown_hierarchy()
+    
+    # ========== Hierarchy Manager: Tree ==========
+
+    def get_hierarchy_tree(self) -> List[Dict[str, Any]]:
+        """Fetch the full category → sub_category → type tree.
+
+        Returns a nested list of dicts suitable for rendering a tree
+        sidebar. Parties are deliberately excluded — at thousands of
+        rows they bloat the payload and are instead loaded on demand
+        via `get_parties_with_stats()` when a type node is selected.
+
+        Each node has the shape::
+
+            {
+                'id': int,
+                'name': str,
+                'level': 'category' | 'sub_category' | 'type',
+                'children': [ ...same shape... ],
+            }
+
+        Returns:
+            List of category nodes, each containing nested sub_category
+            and type nodes. Ordered alphabetically at every level. Empty
+            list if no categories exist.
+
+        Raises:
+            DatabaseError: On query failure.
+        """
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT
+                        c.id   AS category_id,
+                        c.category,
+                        sc.id  AS sub_category_id,
+                        sc.sub_category,
+                        ty.id  AS type_id,
+                        ty.type
+                    FROM categories c
+                    LEFT JOIN sub_categories sc ON sc.category_id = c.id
+                    LEFT JOIN types ty          ON ty.sub_category_id = sc.id
+                    ORDER BY c.category, sc.sub_category, ty.type
+                ''')
+                rows = cursor.fetchall()
+
+            # Assemble nested structure. Dicts keyed by id preserve
+            # insertion order, and the query pre-sorts the rows.
+            categories: Dict[int, Dict[str, Any]] = {}
+            sub_categories: Dict[int, Dict[str, Any]] = {}
+
+            for row in rows:
+                cat_id = row['category_id']
+                if cat_id not in categories:
+                    categories[cat_id] = {
+                        'id': cat_id,
+                        'name': row['category'],
+                        'level': 'category',
+                        'children': [],
+                    }
+
+                sc_id = row['sub_category_id']
+                if sc_id is None:
+                    continue  # category with no sub_categories
+                if sc_id not in sub_categories:
+                    node = {
+                        'id': sc_id,
+                        'name': row['sub_category'],
+                        'level': 'sub_category',
+                        'children': [],
+                    }
+                    sub_categories[sc_id] = node
+                    categories[cat_id]['children'].append(node)
+
+                ty_id = row['type_id']
+                if ty_id is None:
+                    continue  # sub_category with no types
+                sub_categories[sc_id]['children'].append({
+                    'id': ty_id,
+                    'name': row['type'],
+                    'level': 'type',
+                    'children': [],
+                })
+
+            tree = list(categories.values())
+            logger.debug(
+                f"Built hierarchy tree: {len(tree)} categories, "
+                f"{len(sub_categories)} sub-categories, "
+                f"{sum(len(sc['children']) for sc in sub_categories.values())} types"
+            )
+            return tree
+
+        except Exception as e:
+            logger.error(f"Failed to build hierarchy tree: {e}")
+            raise DatabaseError(f"Failed to build hierarchy tree: {e}") from e
+
+    # ========== Hierarchy Manager: Node + Stats ==========
+
+    def get_all_categories_with_stats(self) -> List[Dict[str, Any]]:
+        """Fetch every category with rolled-up transaction stats.
+
+        Aggregates `transactions` through the full hierarchy
+        (party → type → sub_category → category) so each row carries
+        the count and net value across all descendants.
+
+        Serves as the "children" list for the synthetic root view in
+        the hierarchy manager UI (i.e. when nothing is selected).
+
+        Returns:
+            List of category dicts, each including all `categories`
+            columns plus `transaction_count` and `total_value`.
+            Ordered by category name.
+
+        Raises:
+            DatabaseError: On query failure.
+        """
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT
+                        c.id,
+                        c.category,
+                        c.description,
+                        c.created_at,
+                        COUNT(t.id)                AS transaction_count,
+                        COALESCE(SUM(t.amount), 0) AS total_value
+                    FROM categories c
+                    LEFT JOIN sub_categories sc ON sc.category_id = c.id
+                    LEFT JOIN types ty          ON ty.sub_category_id = sc.id
+                    LEFT JOIN parties p         ON p.type_id = ty.id
+                    LEFT JOIN transactions t    ON t.party_id = p.id
+                    GROUP BY c.id
+                    ORDER BY c.category
+                ''')
+                rows = cursor.fetchall()
+
+            logger.debug(f"Retrieved {len(rows)} categories with stats")
+            return [dict(row) for row in rows]
+
+        except Exception as e:
+            logger.error(f"Failed to get categories with stats: {e}")
+            raise DatabaseError(f"Failed to get categories with stats: {e}") from e
+
+    def get_category_with_stats(self, category_id: int) -> Optional[Dict[str, Any]]:
+        """Fetch a single category with rolled-up transaction stats.
+
+        Args:
+            category_id: The category's `id` column value.
+
+        Returns:
+            Category dict including all `categories` columns plus:
+                - `transaction_count`: Count of all descendant transactions.
+                - `total_value`: Net sum of all descendant transaction
+                  amounts (credits positive, debits negative).
+                - `child_count`: Number of direct sub_categories.
+            None if the category does not exist.
+
+        Raises:
+            DatabaseError: On query failure.
+        """
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT
+                        c.id,
+                        c.category,
+                        c.description,
+                        c.created_at,
+                        COUNT(t.id)                AS transaction_count,
+                        COALESCE(SUM(t.amount), 0) AS total_value,
+                        (SELECT COUNT(*) FROM sub_categories
+                         WHERE category_id = c.id) AS child_count
+                    FROM categories c
+                    LEFT JOIN sub_categories sc ON sc.category_id = c.id
+                    LEFT JOIN types ty          ON ty.sub_category_id = sc.id
+                    LEFT JOIN parties p         ON p.type_id = ty.id
+                    LEFT JOIN transactions t    ON t.party_id = p.id
+                    WHERE c.id = ?
+                    GROUP BY c.id
+                ''', (category_id,))
+                row = cursor.fetchone()
+
+            if not row:
+                logger.debug(f"Category {category_id} not found")
+                return None
+            return dict(row)
+
+        except Exception as e:
+            logger.error(f"Failed to get category {category_id} with stats: {e}")
+            raise DatabaseError(f"Failed to get category with stats: {e}") from e
+
+    def get_sub_category_with_stats(
+        self, sub_category_id: int
+    ) -> Optional[Dict[str, Any]]:
+        """Fetch a single subcategory with stats and parent context.
+
+        Args:
+            sub_category_id: The subcategory's `id` column value.
+
+        Returns:
+            Subcategory dict including all `sub_categories` columns plus:
+                - `category_name`: Parent category name (for breadcrumb).
+                - `transaction_count`: Count of all descendant transactions.
+                - `total_value`: Net sum of all descendant transaction amounts.
+                - `child_count`: Number of direct types.
+            None if the subcategory does not exist.
+
+        Raises:
+            DatabaseError: On query failure.
+        """
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT
+                        sc.id,
+                        sc.sub_category,
+                        sc.description,
+                        sc.category_id,
+                        sc.created_at,
+                        c.category                 AS category_name,
+                        COUNT(t.id)                AS transaction_count,
+                        COALESCE(SUM(t.amount), 0) AS total_value,
+                        (SELECT COUNT(*) FROM types
+                         WHERE sub_category_id = sc.id) AS child_count
+                    FROM sub_categories sc
+                    JOIN categories c        ON c.id = sc.category_id
+                    LEFT JOIN types ty       ON ty.sub_category_id = sc.id
+                    LEFT JOIN parties p      ON p.type_id = ty.id
+                    LEFT JOIN transactions t ON t.party_id = p.id
+                    WHERE sc.id = ?
+                    GROUP BY sc.id
+                ''', (sub_category_id,))
+                row = cursor.fetchone()
+
+            if not row:
+                logger.debug(f"Sub-category {sub_category_id} not found")
+                return None
+            return dict(row)
+
+        except Exception as e:
+            logger.error(
+                f"Failed to get sub-category {sub_category_id} with stats: {e}"
+            )
+            raise DatabaseError(
+                f"Failed to get sub-category with stats: {e}"
+            ) from e
+
+    def get_type_with_stats(self, type_id: int) -> Optional[Dict[str, Any]]:
+        """Fetch a single type with stats and full ancestor context.
+
+        Args:
+            type_id: The type's `id` column value.
+
+        Returns:
+            Type dict including all `types` columns plus:
+                - `sub_category_name`, `category_id`, `category_name`:
+                  Ancestor info for breadcrumb rendering.
+                - `transaction_count`: Count of all descendant transactions.
+                - `total_value`: Net sum of all descendant transaction amounts.
+                - `child_count`: Number of direct parties.
+            None if the type does not exist.
+
+        Raises:
+            DatabaseError: On query failure.
+        """
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT
+                        ty.id,
+                        ty.type,
+                        ty.description,
+                        ty.sub_category_id,
+                        ty.created_at,
+                        sc.sub_category            AS sub_category_name,
+                        c.id                       AS category_id,
+                        c.category                 AS category_name,
+                        COUNT(t.id)                AS transaction_count,
+                        COALESCE(SUM(t.amount), 0) AS total_value,
+                        (SELECT COUNT(*) FROM parties
+                         WHERE type_id = ty.id)    AS child_count
+                    FROM types ty
+                    JOIN sub_categories sc   ON sc.id = ty.sub_category_id
+                    JOIN categories c        ON c.id = sc.category_id
+                    LEFT JOIN parties p      ON p.type_id = ty.id
+                    LEFT JOIN transactions t ON t.party_id = p.id
+                    WHERE ty.id = ?
+                    GROUP BY ty.id
+                ''', (type_id,))
+                row = cursor.fetchone()
+
+            if not row:
+                logger.debug(f"Type {type_id} not found")
+                return None
+            return dict(row)
+
+        except Exception as e:
+            logger.error(f"Failed to get type {type_id} with stats: {e}")
+            raise DatabaseError(f"Failed to get type with stats: {e}") from e
+
+    def get_party_with_stats(self, party_id: int) -> Optional[Dict[str, Any]]:
+        """Fetch a single party with stats and full ancestor context.
+
+        Args:
+            party_id: The party's `id` column value.
+
+        Returns:
+            Party dict including all `parties` columns plus:
+                - `type_name`, `sub_category_id`, `sub_category_name`,
+                  `category_id`, `category_name`: Ancestor info for
+                  breadcrumb rendering.
+                - `transaction_count`: Count of this party's transactions.
+                - `total_value`: Net sum of this party's transaction amounts.
+            None if the party does not exist.
+
+        Raises:
+            DatabaseError: On query failure.
+        """
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT
+                        p.id,
+                        p.name,
+                        p.description,
+                        p.type_id,
+                        p.created_at,
+                        ty.type                    AS type_name,
+                        sc.id                      AS sub_category_id,
+                        sc.sub_category            AS sub_category_name,
+                        c.id                       AS category_id,
+                        c.category                 AS category_name,
+                        COUNT(t.id)                AS transaction_count,
+                        COALESCE(SUM(t.amount), 0) AS total_value
+                    FROM parties p
+                    JOIN types ty            ON ty.id = p.type_id
+                    JOIN sub_categories sc   ON sc.id = ty.sub_category_id
+                    JOIN categories c        ON c.id = sc.category_id
+                    LEFT JOIN transactions t ON t.party_id = p.id
+                    WHERE p.id = ?
+                    GROUP BY p.id
+                ''', (party_id,))
+                row = cursor.fetchone()
+
+            if not row:
+                logger.debug(f"Party {party_id} not found")
+                return None
+            return dict(row)
+
+        except Exception as e:
+            logger.error(f"Failed to get party {party_id} with stats: {e}")
+            raise DatabaseError(f"Failed to get party with stats: {e}") from e
+
+    # ========== Hierarchy Manager: Children + Stats ==========
+
+    def get_sub_categories_with_stats(
+        self, category_id: int
+    ) -> List[Dict[str, Any]]:
+        """Fetch all subcategories under a category, each with rolled-up stats.
+
+        Args:
+            category_id: Parent category to filter by.
+
+        Returns:
+            List of subcategory dicts, each including `transaction_count`
+            and `total_value` aggregated through types → parties →
+            transactions. Ordered by name. Empty list if the category
+            has no subcategories (or doesn't exist).
+
+        Raises:
+            DatabaseError: On query failure.
+        """
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT
+                        sc.id,
+                        sc.sub_category,
+                        sc.description,
+                        sc.category_id,
+                        sc.created_at,
+                        COUNT(t.id)                AS transaction_count,
+                        COALESCE(SUM(t.amount), 0) AS total_value
+                    FROM sub_categories sc
+                    LEFT JOIN types ty       ON ty.sub_category_id = sc.id
+                    LEFT JOIN parties p      ON p.type_id = ty.id
+                    LEFT JOIN transactions t ON t.party_id = p.id
+                    WHERE sc.category_id = ?
+                    GROUP BY sc.id
+                    ORDER BY sc.sub_category
+                ''', (category_id,))
+                rows = cursor.fetchall()
+
+            logger.debug(
+                f"Retrieved {len(rows)} sub-categories with stats "
+                f"for category {category_id}"
+            )
+            return [dict(row) for row in rows]
+
+        except Exception as e:
+            logger.error(
+                f"Failed to get sub-categories with stats for "
+                f"category {category_id}: {e}"
+            )
+            raise DatabaseError(
+                f"Failed to get sub-categories with stats: {e}"
+            ) from e
+
+    def get_types_with_stats(self, sub_category_id: int) -> List[Dict[str, Any]]:
+        """Fetch all types under a subcategory, each with rolled-up stats.
+
+        Args:
+            sub_category_id: Parent subcategory to filter by.
+
+        Returns:
+            List of type dicts, each including `transaction_count` and
+            `total_value` aggregated through parties → transactions.
+            Ordered by name. Empty list if the subcategory has no types
+            (or doesn't exist).
+
+        Raises:
+            DatabaseError: On query failure.
+        """
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT
+                        ty.id,
+                        ty.type,
+                        ty.description,
+                        ty.sub_category_id,
+                        ty.created_at,
+                        COUNT(t.id)                AS transaction_count,
+                        COALESCE(SUM(t.amount), 0) AS total_value
+                    FROM types ty
+                    LEFT JOIN parties p      ON p.type_id = ty.id
+                    LEFT JOIN transactions t ON t.party_id = p.id
+                    WHERE ty.sub_category_id = ?
+                    GROUP BY ty.id
+                    ORDER BY ty.type
+                ''', (sub_category_id,))
+                rows = cursor.fetchall()
+
+            logger.debug(
+                f"Retrieved {len(rows)} types with stats "
+                f"for sub-category {sub_category_id}"
+            )
+            return [dict(row) for row in rows]
+
+        except Exception as e:
+            logger.error(
+                f"Failed to get types with stats for "
+                f"sub-category {sub_category_id}: {e}"
+            )
+            raise DatabaseError(f"Failed to get types with stats: {e}") from e
+
+    def get_parties_with_stats(self, type_id: int) -> List[Dict[str, Any]]:
+        """Fetch all parties under a type, each with direct transaction stats.
+
+        Args:
+            type_id: Parent type to filter by.
+
+        Returns:
+            List of party dicts, each including `transaction_count` and
+            `total_value` for the party's own transactions. Ordered by
+            name. Empty list if the type has no parties (or doesn't
+            exist).
+
+        Raises:
+            DatabaseError: On query failure.
+        """
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT
+                        p.id,
+                        p.name,
+                        p.description,
+                        p.type_id,
+                        p.created_at,
+                        COUNT(t.id)                AS transaction_count,
+                        COALESCE(SUM(t.amount), 0) AS total_value
+                    FROM parties p
+                    LEFT JOIN transactions t ON t.party_id = p.id
+                    WHERE p.type_id = ?
+                    GROUP BY p.id
+                    ORDER BY p.name
+                ''', (type_id,))
+                rows = cursor.fetchall()
+
+            logger.debug(
+                f"Retrieved {len(rows)} parties with stats for type {type_id}"
+            )
+            return [dict(row) for row in rows]
+
+        except Exception as e:
+            logger.error(
+                f"Failed to get parties with stats for type {type_id}: {e}"
+            )
+            raise DatabaseError(
+                f"Failed to get parties with stats: {e}"
+            ) from e
