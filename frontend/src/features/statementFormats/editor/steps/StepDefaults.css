@@ -1,0 +1,17 @@
+.fe-step-defaults__list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid #e9ecef;
+  border-radius: 6px;
+  background: #fcfcfd;
+}
+
+.fe-step-defaults__unsupported {
+  font-size: 13px;
+  color: #856404;
+  background: #fff3cd;
+  padding: 8px 10px;
+  border-radius: 4px;
+}

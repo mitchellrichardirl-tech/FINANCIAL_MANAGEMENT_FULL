@@ -3,10 +3,11 @@ from flask import Blueprint, request
 from src.database.repositories.accounts import AccountRepository
 from src.api.utils.response_helpers import success_response
 from src.api.utils.route_helpers import handle_errors, require_json
-from src.api.utils.errors import required, invalid_value, not_found
+from src.api.utils.errors import AppError, required, invalid_value, not_found
 from src.api.utils.validators import RequestValidator, require_at_least_one
 from src.utils.logging import ContextLogger, log_route
 from src.statements.configs import STATEMENT_CONFIGS
+from src.statements.registry import StatementFormatRegistry
 
 bp = Blueprint('accounts', __name__)
 logger = ContextLogger(__name__)
@@ -16,14 +17,17 @@ logger = ContextLogger(__name__)
 
 def validate_statement_format_value(value: str) -> str | None:
     """
-    Check a statement format key against the registry.
+    Check a statement format identifier against the registry.
+    Accepts tagged ids ("builtin:ptsb_current", "user:42") and
+    bare built-in keys for backwards compatibility.
     Returns an error message if invalid, None if valid.
     """
-    formats = STATEMENT_CONFIGS
-    if value not in formats:
-        valid_keys = list(formats.keys())
-        return f"Unknown statement format '{value}'. Must be one of: {valid_keys}"
-    return None
+    registry = StatementFormatRegistry()
+    try:
+        registry.get(value)
+        return None
+    except AppError as e:
+        return e.message
 
 
 def validate_create_account(data: dict) -> tuple[bool, dict, str]:

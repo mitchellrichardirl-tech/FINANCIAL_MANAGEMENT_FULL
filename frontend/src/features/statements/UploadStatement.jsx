@@ -25,10 +25,16 @@ import { useToast } from '@/components/ToastContext';
 import { ErrorCode } from '@/lib/apiErrors';
 import { previewFile, importFile, fetchStatementFormats, getAccounts } from './api';
 import FileDropzone from '@/components/FileDropzone';
+import ColumnMismatchPanel from './ColumnMismatchPanel';
+import ProcessingWarningsPanel from './ProcessingWarningsPanel';
 import PreviewTable from './PreviewTable';
 import ImportResult from './ImportResult';
 import AccountSelector from './AccountSelector';
 import './UploadStatement.css';
+
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('DropdownWithCreate')
 
 /**
  * Bank statement upload and import page.
@@ -90,7 +96,7 @@ export default function UploadStatement() {
 
     try {
       const preview = await previewFile(file);
-      setPreviewData(preview.data);
+      setPreviewData(preview);
 
       const [accountsData, formatsData] = await Promise.all([
         getAccounts(),
@@ -98,6 +104,8 @@ export default function UploadStatement() {
       ]);
       setAccounts(accountsData);
       setStatementFormats(formatsData);
+      logger.info('Fetched accounts:', accountsData);
+      logger.info('Fetched statement formats:', formatsData);
     } catch (err) {
       addToast({
         message: err.userMessage || err.message || 'Failed to preview file',
@@ -226,7 +234,11 @@ export default function UploadStatement() {
 
       {importResult ? (
         <div className="import-result-section">
-          <ImportWarningsPanel warnings={importResult.warnings} />
+          <ProcessingWarningsPanel
+            warnings={importResult.warnings}
+            heading="⚠️ Import completed with warnings"
+            context="import"
+          />
           <ImportResult result={importResult} onUploadAnother={reset} showHeader />
         </div>
       ) : (
@@ -267,8 +279,10 @@ export default function UploadStatement() {
                 <ColumnMismatchPanel
                   error={importError}
                   onDismiss={() => setImportError(null)}
-                  onChangeAccount={() => setImportError(null)}
-                  onRemoveFile={reset}
+                  actions={([
+                    { label: 'Try a different account', onClick: () => setImportError(null)},
+                    { label: 'Choose a different file', onClick: reset },
+                  ])}
                 />
               )}
 
@@ -336,255 +350,3 @@ export default function UploadStatement() {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Column mismatch panel
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Inline error panel showing which columns are expected vs. found.
- *
- * Rendered when `importFile` fails with `INVALID_FORMAT` and
- * `missing_columns` in the details.
- *
- * @param {Object} props
- * @param {{message: string, formatName: string, missing: string[], required: string[], found: string[]}} props.error
- * @param {() => void} props.onDismiss - Close the panel (user may retry).
- * @param {() => void} props.onChangeAccount - Clear error and let user pick another account.
- * @param {() => void} props.onRemoveFile - Reset the page to choose a different file.
- */
-function ColumnMismatchPanel({ error, onDismiss, onChangeAccount, onRemoveFile }) {
-  const { message, formatName, missing, required, found } = error;
-
-  const foundSet = new Set(found);
-  const requiredSet = new Set(required);
-  const missingSet = new Set(missing);
-
-  return (
-    <div className="column-mismatch-panel" role="alert">
-      <div className="cmp-header">
-        <div>
-          <strong>Import failed — column mismatch</strong>
-          <p className="cmp-message">{message}</p>
-        </div>
-        <button className="cmp-close" onClick={onDismiss} aria-label="Dismiss">
-          ×
-        </button>
-      </div>
-
-      <div className="cmp-comparison">
-        <div className="cmp-column">
-          <h4>
-            Expected by <em>{formatName || 'this format'}</em>
-          </h4>
-          <ul>
-            {required.map((col) => (
-              <li key={col} className={missingSet.has(col) ? 'cmp-missing' : 'cmp-present'}>
-                {missingSet.has(col) ? '✗' : '✓'} {col}
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <div className="cmp-column">
-          <h4>Found in file</h4>
-          <ul>
-            {found.length === 0 && <li className="cmp-empty">(no columns)</li>}
-            {found.map((col) => (
-              <li key={col} className={requiredSet.has(col) ? 'cmp-present' : 'cmp-extra'}>
-                {requiredSet.has(col) ? '✓' : '·'} {col}
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
-
-      <div className="cmp-hint">
-        {missing.length === 1 &&
-          found.some(
-            (f) =>
-              f.toLowerCase().includes(missing[0].toLowerCase()) ||
-              missing[0].toLowerCase().includes(f.toLowerCase())
-          ) && (
-            <p>
-              💡 The file has a column that looks similar — check if the header spelling matches
-              exactly.
-            </p>
-          )}
-        <p>
-          This usually means either the wrong account was selected, or the file was exported in a
-          different format than expected.
-        </p>
-      </div>
-
-      <div className="cmp-actions">
-        <button onClick={onChangeAccount} className="cmp-btn-secondary">
-          Try a different account
-        </button>
-        <button onClick={onRemoveFile} className="cmp-btn-secondary">
-          Choose a different file
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Import warnings panel
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Collapsible panel listing warnings from a successful import.
- *
- * Rendered when the import succeeds but some rows were skipped (e.g.
- * unparseable dates).
- *
- * @param {Object} props
- * @param {Array<Object|string>} props.warnings - Raw warnings from the API.
- */
-function ImportWarningsPanel({ warnings }) {
-  if (!warnings?.length) return null;
-
-  const parsed = warnings.map(normalizeWarning);
-
-  return (
-    <div className="import-warnings-panel" role="status">
-      <div className="iwp-header">
-        <strong>⚠️ Import completed with warnings</strong>
-        <p className="iwp-subheader">
-          {parsed.length === 1
-            ? 'One issue was encountered. The affected rows were skipped.'
-            : `${parsed.length} issues were encountered. Affected rows were skipped.`}
-        </p>
-      </div>
-
-      <div className="iwp-items">
-        {parsed.map((w, i) => (
-          <WarningItem key={`${w.code}-${i}`} warning={w} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/**
- * Single expandable warning item.
- * @param {{warning: {code: string, message: string, details: Object}}} props
- */
-function WarningItem({ warning }) {
-  const [expanded, setExpanded] = useState(true);
-  const { code, message, details = {} } = warning;
-
-  return (
-    <div className={`iwp-item iwp-code-${code?.toLowerCase() || 'unknown'}`}>
-      <button
-        type="button"
-        className="iwp-toggle"
-        onClick={() => setExpanded((e) => !e)}
-        aria-expanded={expanded}
-      >
-        <span className="iwp-chevron">{expanded ? '▾' : '▸'}</span>
-        <span className="iwp-message">{message}</span>
-      </button>
-
-      {expanded && (
-        <div className="iwp-details">
-          <WarningDetails code={code} details={details} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-/**
- * Render details for a specific warning code.
- * Add cases here as the backend emits new warning types.
- *
- * @param {Object} props
- * @param {string} props.code
- * @param {Object} props.details
- */
-function WarningDetails({ code, details }) {
-  switch (code) {
-    case 'DATES_UNPARSEABLE':
-      return (
-        <>
-          <dl className="iwp-dl">
-            <div>
-              <dt>Column</dt>
-              <dd>
-                <code>{details.column}</code>
-              </dd>
-            </div>
-            <div>
-              <dt>Rows dropped</dt>
-              <dd>
-                {details.dropped} of {details.total}
-              </dd>
-            </div>
-            <div>
-              <dt>Parser used</dt>
-              <dd>
-                <code>{details.format_used}</code>
-              </dd>
-            </div>
-          </dl>
-
-          {details.sample_values?.length > 0 && (
-            <div className="iwp-samples">
-              <p className="iwp-samples-label">Sample values that couldn't be parsed:</p>
-              <ul>
-                {[...new Set(details.sample_values)].slice(0, 5).map((v, i) => (
-                  <li key={i}>
-                    <code>{v}</code>
-                  </li>
-                ))}
-              </ul>
-              <p className="iwp-hint">
-                💡 If these look like valid dates, the statement format for this account may need a
-                different date format string.
-              </p>
-            </div>
-          )}
-        </>
-      );
-
-    default:
-      if (!details || Object.keys(details).length === 0) return null;
-      return <pre className="iwp-raw-details">{JSON.stringify(details, null, 2)}</pre>;
-  }
-}
-
-/**
- * Normalize a warning to `{ code, message, details }`.
- *
- * Handles objects directly, JSON strings, and (temporarily) Python repr
- * strings if the backend hasn't been fixed yet.
- *
- * @param {Object|string} w
- * @returns {{code: string, message: string, details: Object}}
- */
-function normalizeWarning(w) {
-  if (w && typeof w === 'object') return w;
-
-  if (typeof w === 'string') {
-    try {
-      return JSON.parse(w);
-    } catch {
-      /* fall through */
-    }
-
-    // Last-ditch: Python repr → JSON
-    try {
-      const jsonish = w
-        .replace(/\bNone\b/g, 'null')
-        .replace(/\bTrue\b/g, 'true')
-        .replace(/\bFalse\b/g, 'false')
-        .replace(/'((?:[^'\\]|\\.)*)'/g, (_, inner) => `"${inner.replace(/"/g, '\\"')}"`);
-      return JSON.parse(jsonish);
-    } catch {
-      return { code: 'UNKNOWN', message: w, details: {} };
-    }
-  }
-
-  return { code: 'UNKNOWN', message: String(w), details: {} };
-}

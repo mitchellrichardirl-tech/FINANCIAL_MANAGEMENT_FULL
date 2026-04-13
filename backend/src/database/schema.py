@@ -83,6 +83,7 @@ class SchemaManager:
             self._create_upload_data_table()
             self._create_accounts_table()
             self._create_transactions_table()
+            self._create_statement_format_table()
 
             logger.info("Database schema initialized successfully")
         except Exception as e:
@@ -537,6 +538,45 @@ class SchemaManager:
             conn.commit()
             logger.debug("Table ready: accounts")
 
+    def _create_statement_format_table(self):
+        """Create the `statement_formats` table and indexes.
+
+        Represents the format of a bank's statement export.
+
+        Columns:
+            id: Auto-incrementing primary key.
+            bank_name: Human-readable bank name.
+            account_type: Account kind (e.g. "current", "credit").
+            config_json: JSON string containing the statement configuration.
+
+        Indexes: bank_name, account_type.
+        """
+        with self.db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS statement_formats (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    bank_name TEXT NOT NULL,
+                    account_type TEXT NOT NULL,
+                    config_json TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now')),
+                    updated_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now')),
+                    UNIQUE(bank_name, account_type)
+                )
+            ''')
+
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_statement_formats_bank_name 
+                ON statement_formats(bank_name)
+            ''')
+
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_statement_formats_account_type 
+                ON statement_formats(account_type)
+            ''')
+
+            conn.commit()
+            logger.debug("Table ready: statement_formats")
 
 def initialize_schema(connection_manager: ConnectionManager):
     """Create all tables using the provided connection manager.

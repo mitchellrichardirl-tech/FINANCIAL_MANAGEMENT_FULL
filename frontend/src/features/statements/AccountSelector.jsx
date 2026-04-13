@@ -12,6 +12,10 @@ import { useState } from 'react';
 import { createAccount } from './api';
 import { ErrorCode } from '@/lib/apiErrors';
 
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('AccountSelector');
+
 /**
  * Maps backend field names to form input ids for error routing.
  * @type {Record<string, string>}
@@ -59,13 +63,14 @@ function AccountSelector({
   const [newAccountType, setNewAccountType] = useState('bank');
   const [newStatementFormat, setNewStatementFormat] = useState('');
   const [creating, setCreating] = useState(false);
-
   /**
    * Field-level errors.
    * `_general` holds errors that don't map to a specific field.
    * @type {[Record<string, string>, Function]}
    */
   const [fieldErrors, setFieldErrors] = useState({});
+
+  logger.info('Available statement formats:', statementFormats);
 
   /**
    * Clear a single field error (called as user types).
@@ -156,7 +161,7 @@ function AccountSelector({
    */
   const getFormatName = (formatKey) => {
     if (!formatKey) return null;
-    const format = statementFormats.find((f) => f.key === formatKey);
+    const format = statementFormats.find((f) => f.identifier === formatKey);
     return format ? format.name : formatKey;
   };
 
@@ -281,8 +286,8 @@ function AccountSelector({
             >
               <option value="">-- None (configure later) --</option>
               {statementFormats.map((format) => (
-                <option key={format.key} value={format.key}>
-                  {format.name}
+                <option key={format.identifier} value={format.identifier}>
+                  {format.display_name}
                 </option>
               ))}
             </select>

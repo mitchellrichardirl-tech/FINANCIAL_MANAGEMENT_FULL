@@ -2,6 +2,7 @@ import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import UploadStatement from '@/features/statements';
 import CategorizeTransactions from '@/features/transactions/CategorizeTransactions';
 import ProcessReceipts from '@/features/receipts/ProcessReceipts';
+import { StatementFormatsPage, FormatEditorPage } from '@/features/statementFormats';
 import { ToastProvider } from '@/components/ToastContext';
 import './App.css';
 
@@ -16,6 +17,7 @@ function App() {
             <Link to="/upload">Upload Statement</Link>
             <Link to="/categorize">Categorize Transactions</Link>
             <Link to="/process-receipts">Process Receipts</Link>
+            <Link to="/statement-formats">Statement Formats</Link>
           </nav>
 
           {/* Main content area */}
@@ -30,6 +32,9 @@ function App() {
               <Route path="/upload" element={<UploadStatement />} />
               <Route path="/categorize" element={<CategorizeTransactions />} />
               <Route path="/process-receipts" element={<ProcessReceipts />} />
+              <Route path="/statement-formats" element={<StatementFormatsPage />} />
+              <Route path="/statement-formats/new" element={<FormatEditorPage mode="create" />} />
+              <Route path="/statement-formats/:identifier" element={<FormatEditorPage mode="edit" />} />
             </Routes>
           </main>
         </div>

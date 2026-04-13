@@ -48,6 +48,13 @@ class DatabaseError(Exception):
 
     pass
 
+class RecordNotFound(DatabaseError):
+    """Requested record does not exist. Safe to map to HTTP 404."""
+    def __init__(self, entity: str, **criteria):
+        self.entity = entity
+        self.criteria = criteria
+        parts = ", ".join(f"{k}={v!r}" for k, v in criteria.items())
+        super().__init__(f"{entity} not found: {parts}")
 
 class ConnectionManager:
     """Manages SQLite database connections and configuration.

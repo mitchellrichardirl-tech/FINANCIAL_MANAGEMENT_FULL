@@ -74,7 +74,8 @@ export async function previewFile(file, numRows = 20) {
   formData.append('file', file);
   formData.append('num_rows', numRows);
   formData.append('include_types', 'true');
-  return apiCall('/tabular/preview', { method: 'POST', body: formData });
+  const response = await apiCall('/tabular/preview', { method: 'POST', body: formData });
+  return unwrap(response);
 }
 
 /**
@@ -145,6 +146,6 @@ export async function getUploads() {
  * @throws {AppError|ApiError}
  */
 export async function fetchStatementFormats() {
-  const response = await apiCall('/accounts/statement-formats');
-  return unwrap(response); // no key — just strips the .data envelope
+  const response = await apiCall('/statement-formats');
+  return unwrap(response, 'formats'); // no key — just strips the .data envelope
 }

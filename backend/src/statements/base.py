@@ -19,8 +19,8 @@ Pipeline overview — see `StatementProcessor.process_statement()`:
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import Optional, Callable, Any
+from dataclasses import dataclass, field, fields as dataclass_fields, asdict
+from typing import Optional, Any, ClassVar
 
 import pandas as pd
 
@@ -29,16 +29,6 @@ from src.utils.logging import ContextLogger
 from src.api.utils.errors import AppError, ErrorCode
 
 logger = ContextLogger(__name__)
-
-# TODO: Maybe delete this - I don't think it's actually used
-@dataclass
-class ColumnMapping:
-    """Maps source column(s) to a target field."""
-    target: str
-    source: str | list[str]  # Single column or multiple for combined fields
-    transform: Optional[Callable[[Any], Any]] = None
-    default: Any = None
-
 
 @dataclass
 class AmountConfig:
@@ -130,6 +120,17 @@ class StatementConfig:
             row from this config. E.g. `{"is_kids": True}` for payments related
             to children.
     """
+
+    # Columns users may apply a config-level default to.
+    # Everything not listed here either:
+    #   - must come from the source data (amount, description, transaction_date)
+    #   - is derived by the pipeline (is_credit, cleaned_description, party_id, confidence)
+    #   - is stamped by the caller (account_id, upload_id, receipt_id)
+    ALLOWED_DEFAULT_FIELDS: ClassVar[dict[str, type]] = {
+        "is_kids":    bool,
+        "is_one_off": bool,
+    }
+
     bank_name: str
     account_type: str
 
@@ -157,7 +158,33 @@ class StatementConfig:
                 "AmountConfig must specify either credit_column/debit_column "
                 "or amount_column"
             )
-        
+        self._validate_defaults()
+
+    def _validate_defaults(self) -> None:
+        key_errors = []
+        value_errors = []
+        for key, value in self.defaults.items():
+            if key not in self.ALLOWED_DEFAULT_FIELDS:
+                key_errors.append(f"'{key}' is not a permitted default field")
+            else:
+                expected = self.ALLOWED_DEFAULT_FIELDS[key]
+                if not isinstance(value, expected):
+                    value_errors.append(
+                        f"Default for '{key}' must be {expected.__name__}"
+                    )
+        error_message = ""
+        if key_errors:
+            error_message += ", ".join(key_errors) + "."
+            error_message += f" Allowed: {sorted(self.ALLOWED_DEFAULT_FIELDS)}. " \
+                         f"Fields like 'amount' and 'description' must come from " \
+                         f"the source columns, not from config defaults."
+        if value_errors:
+            if len(error_message) > 0:
+                error_message += "\n "
+            error_message += ", ".join(value_errors)
+        if len(error_message) > 0:
+            raise ValueError(error_message)
+              
     @property
     def required_columns(self) -> list[str]:
         """All source columns this config expects to find in the input data."""
@@ -178,6 +205,39 @@ class StatementConfig:
     @property
     def display_name(self) -> str:
         return f"{self.bank_name} {self.account_type}"
+    
+    def to_dict(self) -> dict[str, Any]:
+        """
+        Serialize to a JSON-safe dict.
+
+        Used for persistence (statement_format.config_json) and for
+        logging / error details. Changes here need to stay backward-
+        compatible with stored configs — see `from_dict` for the
+        tolerance rules.
+        """
+        return asdict(self)
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> "StatementConfig":
+        """
+        Reconstruct a config, tolerating schema drift:
+          - missing optional keys  → dataclass defaults are used
+          - unknown keys           → silently dropped (old renamed fields)
+          - missing required keys  → raises, as it should
+        """
+        def _take(klass, payload: dict) -> dict:
+            known = {f.name for f in dataclass_fields(klass)}
+            return {k: v for k, v in payload.items() if k in known}
+
+        data = dict(data)  # don't mutate caller
+        date_data   = data.pop("date_config", {}) or {}
+        amount_data = data.pop("amount_config", {}) or {}
+
+        return cls(
+            **_take(cls, data),
+            date_config=DateConfig(**_take(DateConfig, date_data)),
+            amount_config=AmountConfig(**_take(AmountConfig, amount_data)),
+        )
     
 @dataclass
 class ProcessingWarning:
