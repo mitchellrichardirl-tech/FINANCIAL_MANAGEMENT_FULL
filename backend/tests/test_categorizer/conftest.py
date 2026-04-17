@@ -119,3 +119,9 @@ def make_categorizer():
         return cat
 
     return _make
+
+@pytest.fixture
+def extractor():
+    """Default PartyExtractor, no custom patterns or stop words."""
+    from src.categorizer.party_extractor import PartyExtractor
+    return PartyExtractor()
