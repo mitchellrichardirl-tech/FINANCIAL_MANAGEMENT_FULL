@@ -3,6 +3,7 @@ import UploadStatement from '@/features/statements';
 import CategorizeTransactions from '@/features/transactions/CategorizeTransactions';
 import ProcessReceipts from '@/features/receipts/ProcessReceipts';
 import { StatementFormatsPage, FormatEditorPage } from '@/features/statementFormats';
+import CategoryHierarchyPage from './features/hierarchy';
 import { ToastProvider } from '@/components/ToastContext';
 import './App.css';
 
@@ -16,6 +17,7 @@ function App() {
               <Link to="/">Home</Link>
             <Link to="/upload">Upload Statement</Link>
             <Link to="/categorize">Categorize Transactions</Link>
+            <Link to="/hierarchy">Manage Category Hierarchy</Link>
             <Link to="/process-receipts">Process Receipts</Link>
             <Link to="/statement-formats">Statement Formats</Link>
           </nav>
@@ -31,6 +33,7 @@ function App() {
               } />
               <Route path="/upload" element={<UploadStatement />} />
               <Route path="/categorize" element={<CategorizeTransactions />} />
+              <Route path="/hierarchy" element={<CategoryHierarchyPage />} />
               <Route path="/process-receipts" element={<ProcessReceipts />} />
               <Route path="/statement-formats" element={<StatementFormatsPage />} />
               <Route path="/statement-formats/new" element={<FormatEditorPage mode="create" />} />
