@@ -48,3 +48,7 @@ class PartyMatcherRaw(PartyMatcher):
     
     def _prime_unknown_type_cache(self):
         return
+    
+    def _bulk_add_unknown_parties(self, names: list[str]) -> Dict[str, int]:
+        start = max(self.alias_mapping.values(), default=0) + 1
+        return {n: start + i for i, n in enumerate(names)}

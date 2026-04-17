@@ -104,13 +104,10 @@ class PartyMatcher:
         logger.debug("Loading known parties from database")
         raw_mapping = self.db.get_all_party_aliases()
         self.alias_mapping = {
-            self._normalize(alias): pid
-            for alias, pid
-            in raw_mapping.items()
-            if alias
-            }
-
-        # Pre-build the list once; we'll refresh it when aliases are added
+            norm: pid
+            for alias, pid in raw_mapping.items()
+            if (norm := self._normalize(alias))
+        }
         self._alias_keys = list(self.alias_mapping.keys())
 
         total_unique = len(set(self.alias_mapping.values()))
@@ -268,6 +265,17 @@ class PartyMatcher:
         logger.info(f"Created new party '{party_name}' with id {party_id}")
         return party_id, 100
 
+    def _bulk_add_unknown_parties(self, names: list[str]) -> Dict[str, int]:
+        """
+        Bulk-insert multiple new parties in one DB transaction.
+
+        Args:
+            names: List of party names to create.
+        Returns:
+            Mapping of party name to new party ID for all inserted parties.
+        """        
+        return self.db.bulk_add_parties_unknown_type(names)
+    
     def find_matches_batch(self, party_names: pd.Series) -> pd.DataFrame:
         """
         Identify parties for a Series of description strings.
@@ -374,7 +382,7 @@ class PartyMatcher:
             # One transaction for all new parties
             if needs_new_party:
                 logger.info(f"Creating {len(needs_new_party)} new parties in one transaction")
-                new_ids = self.db.bulk_add_parties_unknown_type(needs_new_party)
+                new_ids = self._bulk_add_unknown_parties(needs_new_party)
                 for name in needs_new_party:
                     pid = new_ids.get(name)
                     if pid is not None:
@@ -396,8 +404,8 @@ class PartyMatcher:
         # ── Step 4: broadcast back to original index ──
         result_df = pd.DataFrame({
             'cleaned_description': party_names,
-            'party_id': party_names.map(lambda n: results.get(n, (None, 0))[0]),
-            'confidence': party_names.map(lambda n: results.get(n, (None, 0))[1]),
+            'party_id': norm_names.map(lambda n: results.get(n, (None, 0))[0]),
+            'confidence': norm_names.map(lambda n: results.get(n, (None, 0))[1]),
         })
 
         fuzzy_count = len(results) - exact_count
