@@ -23,6 +23,20 @@ from src.utils.logging import ContextLogger
 
 logger = ContextLogger(__name__)
 
+_UNSET = object()
+
+class RemapConflictError(Exception):
+    """Raised when a remap would violate a unique-name constraint
+    at the target parent and auto-merge is not supported at this level.
+
+    Attributes:
+        conflicting_id: PK of the existing entity that blocks the move.
+    """
+
+    def __init__(self, message: str, conflicting_id: int):
+        super().__init__(message)
+        self.conflicting_id = conflicting_id
+
 
 class CategoryRepository:
     """Data-access layer for the category hierarchy tables.
@@ -93,63 +107,57 @@ class CategoryRepository:
     def update_category(
         self,
         category_id: int,
-        category: Optional[str] = None,
-        description: Optional[str] = None
+        *,
+        category: Any = _UNSET,
+        description: Any = _UNSET,
     ) -> Optional[Dict[str, Any]]:
-        """Update one or more fields on an existing category.
+        """Update a category's name and/or description.
 
-        Only non-None arguments are applied. Passing no updatable fields
-        is a no-op that returns the current row.
-
-        Args:
-            category_id: Primary key of the category to update.
-            category: New category name, if changing.
-            description: New description, if changing.
+        Pass only the fields you want to change.  Fields left as
+        ``_UNSET`` are not touched.  Pass ``description=None`` to
+        clear the description.
 
         Returns:
-            The updated category as a dict, or None if `category_id`
+            The updated category dict, or ``None`` if *category_id*
             does not exist.
 
         Raises:
-            DatabaseError: If the new name collides with an existing
-                category, or on any other database failure.
+            DatabaseError: On unique-constraint violation or other
+                database failure.
         """
         try:
+            updates, params = [], []
+
+            if category is not _UNSET:
+                updates.append("category = ?")
+                params.append(category)
+            if description is not _UNSET:
+                updates.append("description = ?")
+                params.append(description)
+
+            if not updates:
+                return self.get_category_by_id(category_id)
+
+            params.append(category_id)
             with self.db.transaction() as conn:
                 cursor = conn.cursor()
-
-                updates = []
-                params = []
-                updated_fields = []
-
-                if category is not None:
-                    updates.append("category = ?")
-                    params.append(category)
-                    updated_fields.append('category')
-
-                if description is not None:
-                    updates.append("description = ?")
-                    params.append(description)
-                    updated_fields.append('description')
-
-                if not updates:
-                    logger.debug(f"No fields to update for category {category_id}")
-                    return self.get_category_by_id(category_id)
-
-                params.append(category_id)
-                query = f"UPDATE categories SET {', '.join(updates)} WHERE id = ?"
-                cursor.execute(query, params)
-
+                cursor.execute(
+                    f"UPDATE categories SET {', '.join(updates)} "
+                    f"WHERE id = ?",
+                    params,
+                )
                 if cursor.rowcount == 0:
-                    logger.debug(f"Category {category_id} not found for update")
                     return None
 
-            logger.info(f"Updated category {category_id}: {updated_fields}")
+            logger.info(f"Updated category {category_id}")
             return self.get_category_by_id(category_id)
 
         except sqlite3.IntegrityError as e:
-            logger.warning(f"Duplicate category name on update: {category}")
-            raise DatabaseError(f"Category name already exists: {category}") from e
+            if "unique" in str(e).lower():
+                raise DatabaseError(
+                    f"A category named '{category}' already exists"
+                ) from e
+            raise DatabaseError(f"Failed to update category: {e}") from e
         except Exception as e:
             logger.error(f"Failed to update category {category_id}: {e}")
             raise DatabaseError(f"Failed to update category: {e}") from e
@@ -311,81 +319,167 @@ class CategoryRepository:
     def update_sub_category(
         self,
         sub_category_id: int,
-        sub_category: Optional[str] = None,
-        category_id: Optional[int] = None,
-        description: Optional[str] = None
+        *,
+        sub_category: Any = _UNSET,
+        description: Any = _UNSET,
     ) -> Optional[Dict[str, Any]]:
-        """Update one or more fields on an existing subcategory.
+        """Update a sub-category's name and/or description.
 
-        Can re-parent a subcategory under a different category by passing
-        a new `category_id`.
-
-        Args:
-            sub_category_id: Primary key of the subcategory to update.
-            sub_category: New subcategory name, if changing.
-            category_id: New parent category ID, if re-parenting.
-            description: New description, if changing.
+        Does **not** support changing ``category_id`` — use
+        ``remap_sub_category()`` for that.
 
         Returns:
-            The updated subcategory as a dict, or None if
-            `sub_category_id` does not exist.
+            The updated sub-category dict, or ``None`` if not found.
+        """
+        try:
+            updates, params = [], []
+
+            if sub_category is not _UNSET:
+                updates.append("sub_category = ?")
+                params.append(sub_category)
+            if description is not _UNSET:
+                updates.append("description = ?")
+                params.append(description)
+
+            if not updates:
+                return self.get_sub_category_by_id(sub_category_id)
+
+            params.append(sub_category_id)
+            with self.db.transaction() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"UPDATE sub_categories SET {', '.join(updates)} "
+                    f"WHERE id = ?",
+                    params,
+                )
+                if cursor.rowcount == 0:
+                    return None
+
+            logger.info(f"Updated sub-category {sub_category_id}")
+            return self.get_sub_category_by_id(sub_category_id)
+
+        except sqlite3.IntegrityError as e:
+            if "unique" in str(e).lower():
+                raise DatabaseError(
+                    f"A sub-category named '{sub_category}' already "
+                    f"exists under this category"
+                ) from e
+            raise DatabaseError(
+                f"Failed to update sub-category: {e}"
+            ) from e
+        except Exception as e:
+            logger.error(
+                f"Failed to update sub-category {sub_category_id}: {e}"
+            )
+            raise DatabaseError(
+                f"Failed to update sub-category: {e}"
+            ) from e
+
+    def remap_sub_category(
+        self, sub_category_id: int, new_category_id: int
+    ) -> dict:
+        """Move a sub-category to a different category.
+
+        Unlike ``remap_party``, this does **not** auto-merge on name
+        collision — it raises ``RemapConflictError`` so the caller
+        (and ultimately the user) can decide what to do.
+
+        Args:
+            sub_category_id: PK of the sub-category to move.
+            new_category_id: Target category.
+
+        Returns:
+            ``{'action': 'none', ...}`` or
+            ``{'action': 'remapped', ...}``.
 
         Raises:
-            DatabaseError: If the (sub_category, category_id) pair
-                already exists, the target category doesn't exist,
-                or on any other database failure.
+            ValueError: If either id does not exist.
+            RemapConflictError: If the target category already has a
+                sub-category with the same name.
+            DatabaseError: On any other database failure.
         """
         try:
             with self.db.transaction() as conn:
                 cursor = conn.cursor()
 
-                updates = []
-                params = []
-                updated_fields = []
+                # ── Look up the sub-category ──
+                cursor.execute(
+                    "SELECT id, sub_category, category_id "
+                    "FROM sub_categories WHERE id = ?",
+                    (sub_category_id,),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    raise ValueError(
+                        f"Sub-category {sub_category_id} not found"
+                    )
 
-                if sub_category is not None:
-                    updates.append("sub_category = ?")
-                    params.append(sub_category)
-                    updated_fields.append('sub_category')
+                name = row['sub_category']
+                old_category_id = row['category_id']
 
-                if category_id is not None:
-                    updates.append("category_id = ?")
-                    params.append(category_id)
-                    updated_fields.append('category_id')
+                # ── No-op ──
+                if old_category_id == new_category_id:
+                    return {
+                        'action': 'none',
+                        'sub_category_id': sub_category_id,
+                        'message': (
+                            'Sub-category already belongs to '
+                            'this category'
+                        ),
+                    }
 
-                if description is not None:
-                    updates.append("description = ?")
-                    params.append(description)
-                    updated_fields.append('description')
+                # ── Validate target ──
+                cursor.execute(
+                    "SELECT id FROM categories WHERE id = ?",
+                    (new_category_id,),
+                )
+                if not cursor.fetchone():
+                    raise ValueError(
+                        f"Category {new_category_id} not found"
+                    )
 
-                if not updates:
-                    logger.debug(f"No fields to update for sub-category {sub_category_id}")
-                    return self.get_sub_category_by_id(sub_category_id)
+                # ── Conflict check ──
+                cursor.execute(
+                    "SELECT id FROM sub_categories "
+                    "WHERE sub_category = ? AND category_id = ? "
+                    "AND id != ?",
+                    (name, new_category_id, sub_category_id),
+                )
+                existing = cursor.fetchone()
+                if existing:
+                    raise RemapConflictError(
+                        f"A sub-category named '{name}' already "
+                        f"exists under category {new_category_id}",
+                        conflicting_id=existing['id'],
+                    )
 
-                params.append(sub_category_id)
-                query = f"UPDATE sub_categories SET {', '.join(updates)} WHERE id = ?"
-                cursor.execute(query, params)
+                # ── Move ──
+                cursor.execute(
+                    "UPDATE sub_categories SET category_id = ? "
+                    "WHERE id = ?",
+                    (new_category_id, sub_category_id),
+                )
 
-                if cursor.rowcount == 0:
-                    logger.debug(f"Sub-category {sub_category_id} not found for update")
-                    return None
+            logger.info(
+                f"Remapped sub-category {sub_category_id} from "
+                f"category {old_category_id} → {new_category_id}"
+            )
+            return {
+                'action': 'remapped',
+                'sub_category_id': sub_category_id,
+                'old_category_id': old_category_id,
+                'new_category_id': new_category_id,
+            }
 
-            logger.info(f"Updated sub-category {sub_category_id}: {updated_fields}")
-            return self.get_sub_category_by_id(sub_category_id)
-
-        except sqlite3.IntegrityError as e:
-            error_msg = str(e).lower()
-            if "unique" in error_msg:
-                logger.warning(f"Duplicate sub-category name on update: {sub_category}")
-                raise DatabaseError(f"Sub-category name already exists in this category") from e
-            if "foreign key" in error_msg:
-                logger.warning(f"Category {category_id} does not exist")
-                raise DatabaseError(f"Category {category_id} does not exist") from e
-            logger.error(f"Integrity error updating sub-category {sub_category_id}: {e}")
-            raise DatabaseError(f"Failed to update sub-category: {e}") from e
+        except (ValueError, RemapConflictError):
+            raise
         except Exception as e:
-            logger.error(f"Failed to update sub-category {sub_category_id}: {e}")
-            raise DatabaseError(f"Failed to update sub-category: {e}") from e
+            logger.error(
+                f"Failed to remap sub-category {sub_category_id}: {e}"
+            )
+            raise DatabaseError(
+                f"Failed to remap sub-category: {e}"
+            ) from e
 
     def get_sub_category_by_id(self, sub_category_id: int) -> Optional[Dict[str, Any]]:
         """Fetch a single subcategory by primary key.
@@ -587,81 +681,159 @@ class CategoryRepository:
     def update_type(
         self,
         type_id: int,
-        type_name: Optional[str] = None,
-        sub_category_id: Optional[int] = None,
-        description: Optional[str] = None
+        *,
+        type_name: Any = _UNSET,
+        description: Any = _UNSET,
     ) -> Optional[Dict[str, Any]]:
-        """Update one or more fields on an existing type.
+        """Update a type's name and/or description.
 
-        Can re-parent a type under a different subcategory by passing a
-        new `sub_category_id`.
+        Does **not** support changing ``sub_category_id`` — use
+        ``remap_type()`` for that.
 
-        Args:
-            type_id: Primary key of the type to update.
-            type_name: New type name, if changing.
-            sub_category_id: New parent subcategory ID, if re-parenting.
-            description: New description, if changing.
+        Note: the parameter is called *type_name* because ``type``
+        is a Python builtin; the DB column is ``type``.
 
         Returns:
-            The updated type as a dict, or None if `type_id` does not
-            exist.
+            The updated type dict, or ``None`` if not found.
+        """
+        try:
+            updates, params = [], []
+
+            if type_name is not _UNSET:
+                updates.append("type = ?")
+                params.append(type_name)
+            if description is not _UNSET:
+                updates.append("description = ?")
+                params.append(description)
+
+            if not updates:
+                return self.get_type_by_id(type_id)
+
+            params.append(type_id)
+            with self.db.transaction() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"UPDATE types SET {', '.join(updates)} "
+                    f"WHERE id = ?",
+                    params,
+                )
+                if cursor.rowcount == 0:
+                    return None
+
+            logger.info(f"Updated type {type_id}")
+            return self.get_type_by_id(type_id)
+
+        except sqlite3.IntegrityError as e:
+            if "unique" in str(e).lower():
+                raise DatabaseError(
+                    f"A type named '{type_name}' already exists "
+                    f"under this sub-category"
+                ) from e
+            raise DatabaseError(f"Failed to update type: {e}") from e
+        except Exception as e:
+            logger.error(f"Failed to update type {type_id}: {e}")
+            raise DatabaseError(f"Failed to update type: {e}") from e
+
+    def remap_type(
+        self, type_id: int, new_sub_category_id: int
+    ) -> dict:
+        """Move a type to a different sub-category.
+
+        Unlike ``remap_party``, this does **not** auto-merge on name
+        collision — it raises ``RemapConflictError`` so the caller
+        can decide what to do.
+
+        Args:
+            type_id: PK of the type to move.
+            new_sub_category_id: Target sub-category.
+
+        Returns:
+            ``{'action': 'none', ...}`` or
+            ``{'action': 'remapped', ...}``.
 
         Raises:
-            DatabaseError: If the (type, sub_category_id) pair already
-                exists, the target subcategory doesn't exist, or on any
-                other database failure.
+            ValueError: If either id does not exist.
+            RemapConflictError: If the target sub-category already
+                has a type with the same name.
+            DatabaseError: On any other database failure.
         """
         try:
             with self.db.transaction() as conn:
                 cursor = conn.cursor()
 
-                updates = []
-                params = []
-                updated_fields = []
+                # ── Look up the type ──
+                cursor.execute(
+                    "SELECT id, type, sub_category_id "
+                    "FROM types WHERE id = ?",
+                    (type_id,),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    raise ValueError(f"Type {type_id} not found")
 
-                if type_name is not None:
-                    updates.append("type = ?")
-                    params.append(type_name)
-                    updated_fields.append('type')
+                name = row['type']
+                old_sub_category_id = row['sub_category_id']
 
-                if sub_category_id is not None:
-                    updates.append("sub_category_id = ?")
-                    params.append(sub_category_id)
-                    updated_fields.append('sub_category_id')
+                # ── No-op ──
+                if old_sub_category_id == new_sub_category_id:
+                    return {
+                        'action': 'none',
+                        'type_id': type_id,
+                        'message': (
+                            'Type already belongs to this sub-category'
+                        ),
+                    }
 
-                if description is not None:
-                    updates.append("description = ?")
-                    params.append(description)
-                    updated_fields.append('description')
+                # ── Validate target ──
+                cursor.execute(
+                    "SELECT id FROM sub_categories WHERE id = ?",
+                    (new_sub_category_id,),
+                )
+                if not cursor.fetchone():
+                    raise ValueError(
+                        f"Sub-category {new_sub_category_id} not found"
+                    )
 
-                if not updates:
-                    logger.debug(f"No fields to update for type {type_id}")
-                    return self.get_type_by_id(type_id)
+                # ── Conflict check ──
+                cursor.execute(
+                    "SELECT id FROM types "
+                    "WHERE type = ? AND sub_category_id = ? "
+                    "AND id != ?",
+                    (name, new_sub_category_id, type_id),
+                )
+                existing = cursor.fetchone()
+                if existing:
+                    raise RemapConflictError(
+                        f"A type named '{name}' already exists "
+                        f"under sub-category {new_sub_category_id}",
+                        conflicting_id=existing['id'],
+                    )
 
-                params.append(type_id)
-                query = f"UPDATE types SET {', '.join(updates)} WHERE id = ?"
-                cursor.execute(query, params)
+                # ── Move ──
+                cursor.execute(
+                    "UPDATE types SET sub_category_id = ? "
+                    "WHERE id = ?",
+                    (new_sub_category_id, type_id),
+                )
 
-                if cursor.rowcount == 0:
-                    logger.debug(f"Type {type_id} not found for update")
-                    return None
+            logger.info(
+                f"Remapped type {type_id} from sub-category "
+                f"{old_sub_category_id} → {new_sub_category_id}"
+            )
+            return {
+                'action': 'remapped',
+                'type_id': type_id,
+                'old_sub_category_id': old_sub_category_id,
+                'new_sub_category_id': new_sub_category_id,
+            }
 
-            logger.info(f"Updated type {type_id}: {updated_fields}")
-            return self.get_type_by_id(type_id)
-
-        except sqlite3.IntegrityError as e:
-            error_msg = str(e).lower()
-            if "unique" in error_msg:
-                logger.warning(f"Duplicate type name on update: {type_name}")
-                raise DatabaseError(f"Type name already exists in this sub-category") from e
-            if "foreign key" in error_msg:
-                logger.warning(f"Sub-category {sub_category_id} does not exist")
-                raise DatabaseError(f"Sub-category {sub_category_id} does not exist") from e
-            logger.error(f"Integrity error updating type {type_id}: {e}")
-            raise DatabaseError(f"Failed to update type: {e}") from e
+        except (ValueError, RemapConflictError):
+            raise
         except Exception as e:
-            logger.error(f"Failed to update type {type_id}: {e}")
-            raise DatabaseError(f"Failed to update type: {e}") from e
+            logger.error(f"Failed to remap type {type_id}: {e}")
+            raise DatabaseError(
+                f"Failed to remap type: {e}"
+            ) from e
 
     def get_type_by_id(self, type_id: int) -> Optional[Dict[str, Any]]:
         """Fetch a single type by primary key.
