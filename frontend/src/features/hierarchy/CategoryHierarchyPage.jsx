@@ -19,9 +19,11 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useToast } from '@/components/ToastContext';
-import { getHierarchyTree, getNodeDetail } from './api';
+import { getHierarchyTree, getNodeDetail, updateNode } from './api';
 import HierarchyTree from './components/HierarchyTree';
 import HierarchyDetailPanel from './components/HierarchyDetailPanel';
+import EditNodeModal from './components/EditNodeModal';
+import { LEVEL_LABELS } from './constants';
 import { createLogger } from '@/lib/logger';
 import './CategoryHierarchyPage.css';
 
@@ -55,6 +57,9 @@ export default function CategoryHierarchyPage() {
    */
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+
+  // ── Edit modal state ───────────────────────────────────────────────
+  const [editModalOpen, setEditModalOpen] = useState(false);
 
   // ── Effects ───────────────────────────────────────────────────────
 
@@ -153,11 +158,31 @@ export default function CategoryHierarchyPage() {
     [handleSelect]
   );
 
-  // ── Mutation placeholders (wired in Steps 5–10) ───────────────────
+  // ── Edit handlers ───────────────────────────────────────────────
 
   const handleEdit = useCallback(() => {
-    addToast({ message: 'Edit not implemented yet', type: 'info' });
-  }, [addToast]);
+    if (!selected) return;
+    setEditModalOpen(true);
+  }, [selected, detail]);
+
+  /**
+   * Persist edits. Errors propagate to the modal; success toasts,
+   * closes the modal, and refreshes both the tree (for the rename)
+   * and the detail panel.
+   */
+  const handleEditSave = async (payload) => {
+    if (!selected) return;
+    await updateNode(selected.level, selected.id, payload);
+    addToast({
+      message: `${LEVEL_LABELS[selected.level]} updated`,
+      type: 'success',
+    });
+    setEditModalOpen(false);
+    loadTree();
+    loadDetail(selected.level, selected.id);
+  };
+
+  // ── Mutation placeholders (wired in Steps 5–10) ───────────────────
 
   const handleDelete = useCallback(() => {
     addToast({ message: 'Delete not implemented yet', type: 'info' });
@@ -195,6 +220,13 @@ export default function CategoryHierarchyPage() {
           />
         </section>
       </div>
+      <EditNodeModal
+        isOpen={editModalOpen}
+        onClose={() => setEditModalOpen(false)}
+        onSave={handleEditSave}
+        node={detail?.node}
+        level={selected?.level}
+      />
     </div>
   );
 }

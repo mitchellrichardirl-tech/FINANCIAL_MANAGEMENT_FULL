@@ -1,0 +1,11 @@
+/* EditNodeModal.css
+ * Inherits styles from the shared modal class set (modal-backdrop,
+ * modal-content, modal-header, form-group, …). Defined in
+ * CreateCategoryModal.css — make sure that's imported globally
+ * or refactor into a shared Modal.css.
+ */
+
+.edit-modal {
+  /* Match the create modal sizing */
+  max-width: 480px;
+}
