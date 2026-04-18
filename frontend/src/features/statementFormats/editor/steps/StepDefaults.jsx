@@ -10,7 +10,6 @@
  */
 
 import Checkbox from '@/components/Checkbox';
-import './StepDefaults.css';
 
 /** Human labels for known default fields. Unknown names fall back to a prettified key. */
 const LABELS = {
@@ -29,18 +28,20 @@ export default function StepDefaults({ editor, schema }) {
   const fields = schema?.allowed_defaults ?? [];
 
   return (
-    <div className="fe-step fe-step-defaults">
-      <h2>Defaults</h2>
-      <p className="fe-step__sub">
+    <div className="fe-step">
+      <h2 className="m-0 mb-1.5 text-xl">Defaults</h2>
+      <p className="m-0 mb-5 text-[#6c757d] text-sm">
         Optional. Values set here are applied to <em>every</em> transaction imported with
         this format. Use this for accounts that are always one category — e.g. a
         kids&apos; savings account.
       </p>
 
       {fields.length === 0 ? (
-        <p className="fe-step__placeholder">No defaultable fields are configured.</p>
+        <p className="p-10 text-center text-[#868e96] bg-[#f8f9fa] border border-dashed border-[#dee2e6] rounded-[6px]">
+          No defaultable fields are configured.
+        </p>
       ) : (
-        <div className="fe-step-defaults__list">
+        <div className="flex flex-col gap-3.5 p-4 border border-[#e9ecef] rounded-[6px] bg-[#fcfcfd]">
           {fields.map(({ name, type }) => {
             if (type === 'bool') {
               return (
@@ -54,7 +55,7 @@ export default function StepDefaults({ editor, schema }) {
             }
             // Future-proofing: surface unsupported types instead of hiding them.
             return (
-              <div key={name} className="fe-step-defaults__unsupported">
+              <div key={name} className="text-[13px] text-[#856404] bg-[#fff3cd] px-2.5 py-2 rounded">
                 <code>{name}</code> ({type}) — control not implemented yet.
               </div>
             );

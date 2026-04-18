@@ -13,7 +13,6 @@ import { useState, useEffect, useMemo } from 'react';
 import DropdownWithCreate from '@/components/DropdownWithCreate';
 import Checkbox from '@/components/Checkbox';
 import CreateCategoryModal from './CreateCategoryModal';
-import './BulkEditModal.css';
 import { createLogger } from '@/lib/logger';
 
 /** @type {import('@/lib/logger').Logger} */
@@ -174,10 +173,6 @@ export default function BulkEditModal({
 
   // ── Taxonomy change handlers (cascade upward & downward) ──────────
 
-  /**
-   * When category changes, clear all children.
-   * @param {?string} categoryId
-   */
   const handleCategoryChange = (categoryId) => {
     setUpdates((prev) => ({
       ...prev,
@@ -189,10 +184,6 @@ export default function BulkEditModal({
     }));
   };
 
-  /**
-   * When sub-category changes, auto-fill its parent category and
-   * clear children.
-   */
   const handleSubCategoryChange = (subCategoryId) => {
     if (subCategoryId) {
       const subCategory = subCategories.find((sc) => sc.id === parseInt(subCategoryId));
@@ -217,7 +208,6 @@ export default function BulkEditModal({
     }
   };
 
-  /** When type changes, auto-fill subcat & category, clear party. */
   const handleTypeChange = (typeId) => {
     if (typeId) {
       const type = types.find((t) => t.id === parseInt(typeId));
@@ -242,7 +232,6 @@ export default function BulkEditModal({
     }
   };
 
-  /** When party changes, auto-fill type → subcat → category. */
   const handlePartyChange = (partyId) => {
     if (partyId) {
       const party = parties.find((p) => p.id === parseInt(partyId));
@@ -263,11 +252,6 @@ export default function BulkEditModal({
     }
   };
 
-  /**
-   * Toggle a boolean flag.
-   * @param {'is_kids'|'is_one_off'} field
-   * @param {boolean} value
-   */
   const handleCheckboxChange = (field, value) => {
     setUpdates((prev) => ({ ...prev, [field]: value }));
   };
@@ -308,10 +292,6 @@ export default function BulkEditModal({
     });
   };
 
-  /**
-   * Callback from the nested create modal. Delegates to the
-   * appropriate `onXxxCreated` prop and updates local state.
-   */
   const handleSaveNewItem = async (name, parentId, description) => {
     const { type } = createModalState;
 
@@ -321,50 +301,25 @@ export default function BulkEditModal({
         case 'category':
           newItem = await onCategoryCreated(name, description);
           if (newItem?.id) {
-            setUpdates((prev) => ({
-              ...prev,
-              category_id: newItem.id,
-              sub_category_id: null,
-              type_id: null,
-              party_id: null,
-              party_name: '',
-            }));
+            setUpdates((prev) => ({ ...prev, category_id: newItem.id, sub_category_id: null, type_id: null, party_id: null, party_name: '' }));
           }
           break;
-
         case 'sub_category':
           newItem = await onSubCategoryCreated(name, parentId, description);
           if (newItem?.id) {
-            setUpdates((prev) => ({
-              ...prev,
-              sub_category_id: newItem.id,
-              type_id: null,
-              party_id: null,
-              party_name: '',
-            }));
+            setUpdates((prev) => ({ ...prev, sub_category_id: newItem.id, type_id: null, party_id: null, party_name: '' }));
           }
           break;
-
         case 'type':
           newItem = await onTypeCreated(name, parentId, description);
           if (newItem?.id) {
-            setUpdates((prev) => ({
-              ...prev,
-              type_id: newItem.id,
-              party_id: null,
-              party_name: '',
-            }));
+            setUpdates((prev) => ({ ...prev, type_id: newItem.id, party_id: null, party_name: '' }));
           }
           break;
-
         case 'party':
           newItem = await onPartyCreated(name, parentId, description);
           if (newItem?.id) {
-            setUpdates((prev) => ({
-              ...prev,
-              party_id: newItem.id,
-              party_name: newItem.name || name,
-            }));
+            setUpdates((prev) => ({ ...prev, party_id: newItem.id, party_name: newItem.name || name }));
           }
           break;
       }
@@ -379,11 +334,6 @@ export default function BulkEditModal({
 
   // ── Save ──────────────────────────────────────────────────────────
 
-  /**
-   * Collect only the changed fields and delegate to `onSave`.
-   * Validation-only errors (nothing to save) stay in the modal;
-   * API errors are surfaced by the parent via toast.
-   */
   const handleSave = async () => {
     logger.debug('BulkEditModal: handleSave called');
     setValidationError(null);
@@ -407,7 +357,6 @@ export default function BulkEditModal({
       logger.debug('BulkEditModal: Calling onSave...');
       await onSave(finalUpdates);
       logger.debug('BulkEditModal: onSave completed successfully');
-      // Parent handles success toast and closes modal
     } catch (err) {
       logger.error('BulkEditModal: Save failed:', err);
       setIsSaving(false);
@@ -416,7 +365,6 @@ export default function BulkEditModal({
 
   // ── Close / cancel ────────────────────────────────────────────────
 
-  /** Reset state and invoke parent's close callback. */
   const resetAndClose = () => {
     setUpdates({
       category_id: null,
@@ -437,7 +385,6 @@ export default function BulkEditModal({
     resetAndClose();
   };
 
-  /** Close when clicking the overlay backdrop. */
   const handleBackdropClick = (e) => {
     if (e.target === e.currentTarget && !isSaving) {
       resetAndClose();
@@ -450,18 +397,23 @@ export default function BulkEditModal({
 
   if (!isOpen) return null;
 
-  /** Enable save only when at least one change is selected. */
   const canSave =
     !isSaving && (updates.party_id || updates.is_kids !== null || updates.is_one_off !== null);
 
   return (
     <>
-      <div className="modal-overlay" onClick={handleBackdropClick}>
-        <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-          <div className="modal-header">
-            <h2>Bulk Edit {transactionCount} Transactions</h2>
+      <div
+        className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] p-[1rem]"
+        onClick={handleBackdropClick}
+      >
+        <div
+          className="bg-white rounded-[8px] shadow-[0_4px_24px_rgba(0,0,0,0.18)] flex flex-col max-h-[90vh] w-full max-w-[560px] overflow-hidden"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between px-[1.5rem] pt-[1.25rem] pb-[1rem] border-b border-[#e5e7eb] shrink-0">
+            <h2 className="m-0 text-[1.2rem] font-semibold text-[#111827]">Bulk Edit {transactionCount} Transactions</h2>
             <button
-              className="modal-close-btn"
+              className="bg-none border-none text-[1.5rem] leading-[1] cursor-pointer text-[#6b7280] px-[0.25rem] rounded-[4px] transition-[color,background] duration-150 hover:not-disabled:text-[#111827] hover:not-disabled:bg-[#f3f4f6] disabled:opacity-40 disabled:cursor-not-allowed"
               onClick={handleCancel}
               disabled={isSaving}
               aria-label="Close modal"
@@ -471,24 +423,28 @@ export default function BulkEditModal({
           </div>
 
           {validationError && (
-            <div className="modal-error">
+            <div className="flex items-center justify-between gap-[0.5rem] mx-[1.5rem] mt-[0.75rem] py-[0.6rem] px-[0.75rem] bg-[#fef2f2] border border-[#fecaca] rounded-[6px] text-[#dc2626] text-[0.875rem] shrink-0">
               {validationError}
-              <button onClick={() => setValidationError(null)} aria-label="Dismiss error">
+              <button
+                onClick={() => setValidationError(null)}
+                aria-label="Dismiss error"
+                className="bg-none border-none text-[#dc2626] text-[1.1rem] leading-[1] cursor-pointer p-0 shrink-0"
+              >
                 ×
               </button>
             </div>
           )}
 
-          <div className="bulk-edit-form">
-            <div className="form-section">
-              <h3>Category Hierarchy</h3>
-              <p className="form-hint">
+          <div className="flex-1 overflow-y-auto px-[1.5rem] py-[1rem] flex flex-col gap-[1.25rem]">
+            <div className="flex flex-col gap-[0.75rem]">
+              <h3 className="m-0 text-[0.95rem] font-semibold text-[#374151] uppercase tracking-[0.05em]">Category Hierarchy</h3>
+              <p className="m-0 text-[0.8rem] text-[#6b7280] leading-[1.4] italic">
                 Select at any level - parent levels will be set automatically. Lower levels will be
                 cleared when you change a higher level.
               </p>
 
-              <div className="form-field">
-                <label>Category</label>
+              <div className="flex flex-col gap-[0.3rem]">
+                <label className="text-[0.85rem] font-medium text-[#374151]">Category</label>
                 <DropdownWithCreate
                   value={updates.category_id}
                   onChange={handleCategoryChange}
@@ -503,8 +459,8 @@ export default function BulkEditModal({
                 />
               </div>
 
-              <div className="form-field">
-                <label>Sub-Category</label>
+              <div className="flex flex-col gap-[0.3rem]">
+                <label className="text-[0.85rem] font-medium text-[#374151]">Sub-Category</label>
                 <DropdownWithCreate
                   value={updates.sub_category_id}
                   onChange={handleSubCategoryChange}
@@ -519,8 +475,8 @@ export default function BulkEditModal({
                 />
               </div>
 
-              <div className="form-field">
-                <label>Type</label>
+              <div className="flex flex-col gap-[0.3rem]">
+                <label className="text-[0.85rem] font-medium text-[#374151]">Type</label>
                 <DropdownWithCreate
                   value={updates.type_id}
                   onChange={handleTypeChange}
@@ -535,8 +491,8 @@ export default function BulkEditModal({
                 />
               </div>
 
-              <div className="form-field">
-                <label>Party</label>
+              <div className="flex flex-col gap-[0.3rem]">
+                <label className="text-[0.85rem] font-medium text-[#374151]">Party</label>
                 <DropdownWithCreate
                   value={updates.party_id}
                   onChange={handlePartyChange}
@@ -552,10 +508,10 @@ export default function BulkEditModal({
               </div>
             </div>
 
-            <div className="form-section">
-              <h3>Flags</h3>
+            <div className="flex flex-col gap-[0.75rem]">
+              <h3 className="m-0 text-[0.95rem] font-semibold text-[#374151] uppercase tracking-[0.05em]">Flags</h3>
 
-              <div className="form-field checkbox-field">
+              <div className="flex items-center gap-[12px]">
                 <Checkbox
                   checked={updates.is_kids === true}
                   onChange={(checked) => handleCheckboxChange('is_kids', checked ? true : null)}
@@ -564,7 +520,7 @@ export default function BulkEditModal({
                 />
                 {updates.is_kids === true && (
                   <button
-                    className="clear-btn"
+                    className="py-[4px] px-[8px] text-[12px] bg-[#e0e0e0] border-none rounded-[4px] cursor-pointer hover:not-disabled:bg-[#d0d0d0] disabled:opacity-50 disabled:cursor-not-allowed"
                     onClick={() => handleCheckboxChange('is_kids', null)}
                     disabled={isSaving}
                     type="button"
@@ -574,7 +530,7 @@ export default function BulkEditModal({
                 )}
               </div>
 
-              <div className="form-field checkbox-field">
+              <div className="flex items-center gap-[12px]">
                 <Checkbox
                   checked={updates.is_one_off === true}
                   onChange={(checked) => handleCheckboxChange('is_one_off', checked ? true : null)}
@@ -583,7 +539,7 @@ export default function BulkEditModal({
                 />
                 {updates.is_one_off === true && (
                   <button
-                    className="clear-btn"
+                    className="py-[4px] px-[8px] text-[12px] bg-[#e0e0e0] border-none rounded-[4px] cursor-pointer hover:not-disabled:bg-[#d0d0d0] disabled:opacity-50 disabled:cursor-not-allowed"
                     onClick={() => handleCheckboxChange('is_one_off', null)}
                     disabled={isSaving}
                     type="button"
@@ -595,11 +551,21 @@ export default function BulkEditModal({
             </div>
           </div>
 
-          <div className="modal-actions">
-            <button onClick={handleCancel} className="cancel-button" disabled={isSaving} type="button">
+          <div className="flex justify-end gap-[0.75rem] px-[1.5rem] py-[1rem] border-t border-[#e5e7eb] shrink-0">
+            <button
+              onClick={handleCancel}
+              className="py-[0.5rem] px-[1.1rem] border border-[#d1d5db] rounded-[6px] bg-white text-[#374151] text-[0.9rem] cursor-pointer transition-[background,border-color] duration-150 hover:not-disabled:bg-[#f9fafb] hover:not-disabled:border-[#9ca3af] disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={isSaving}
+              type="button"
+            >
               Cancel
             </button>
-            <button onClick={handleSave} disabled={!canSave} className="save-button" type="button">
+            <button
+              onClick={handleSave}
+              disabled={!canSave}
+              className="py-[0.5rem] px-[1.25rem] border-none rounded-[6px] bg-[#2563eb] text-white text-[0.9rem] font-medium cursor-pointer transition-colors duration-150 hover:not-disabled:bg-[#1d4ed8] disabled:bg-[#93c5fd] disabled:cursor-not-allowed"
+              type="button"
+            >
               {isSaving ? 'Updating...' : `Update ${transactionCount} Transactions`}
             </button>
           </div>

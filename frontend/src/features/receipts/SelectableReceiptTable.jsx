@@ -10,7 +10,6 @@
 
 import { useState } from 'react';
 import ReceiptThumbnail from '@/components/Thumbnail';
-import './SelectableReceiptTable.css';
 
 /**
  * Receipt session table.
@@ -127,42 +126,69 @@ export default function SelectableReceiptTable({
     }
   };
 
+  /** Status → color class for the icon. */
+  const getStatusIconColor = (status) => {
+    switch (status) {
+      case 'saved':
+        return 'text-success';
+      case 'linked':
+        return 'text-primary';
+      default:
+        return 'text-[#ffc107]';
+    }
+  };
+
+  /** Status → border-left color for the row. */
+  const getStatusBorderClass = (status) => {
+    switch (status) {
+      case 'saved':
+        return 'border-l-4 border-l-success';
+      case 'linked':
+        return 'border-l-4 border-l-primary';
+      default:
+        return 'border-l-4 border-l-[#ffc107]';
+    }
+  };
+
   /**
    * Clickable column header with asc/desc indicator.
    * @param {{field: string, children: React.ReactNode}} props
    */
   const SortableHeader = ({ field, children }) => (
-    <th onClick={() => handleSort(field)} className="sortable-header">
+    <th
+      onClick={() => handleSort(field)}
+      className="sticky top-0 z-10 cursor-pointer select-none whitespace-nowrap border-b-2 border-[#dee2e6] bg-[#f8f9fa] px-2 py-3 text-left text-[0.8rem] font-semibold text-[#555] transition-colors hover:bg-[#e9ecef]"
+    >
       {children}
       {sortConfig.key === field && (
-        <span className="sort-indicator">{sortConfig.direction === 'asc' ? ' ↑' : ' ↓'}</span>
+        <span className="ml-[3px] text-[0.7rem] opacity-70">{sortConfig.direction === 'asc' ? ' ↑' : ' ↓'}</span>
       )}
     </th>
   );
 
   if (receipts.length === 0) {
     return (
-      <div className="empty-receipt-list">
-        <p>No receipts uploaded yet</p>
-        <p className="hint">Upload receipts using the dropzone above</p>
+      <div className="px-6 py-12 text-center text-text-light">
+        <p className="m-0 text-base font-medium">No receipts uploaded yet</p>
+        <p className="mt-2 text-[0.85rem] text-[#aaa]">Upload receipts using the dropzone above</p>
       </div>
     );
   }
 
   return (
-    <div className="selectable-receipt-table-container">
-      <table className="selectable-receipt-table">
+    <div className="max-h-[calc(100vh-380px)] flex-1 overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:rounded [&::-webkit-scrollbar-track]:bg-[#f1f1f1] [&::-webkit-scrollbar-thumb]:rounded [&::-webkit-scrollbar-thumb]:bg-text-light [&::-webkit-scrollbar-thumb:hover]:bg-[#555]">
+      <table className="w-full border-collapse text-[0.9rem]">
         <thead>
           <tr>
-            <th className="thumbnail-col">Image</th>
-            <th className="status-col">
+            <th className="sticky top-0 z-10 w-[70px] whitespace-nowrap border-b-2 border-[#dee2e6] bg-[#f8f9fa] p-[0.375rem] text-left text-[0.8rem] font-semibold text-[#555]">Image</th>
+            <th className="sticky top-0 z-10 w-9 whitespace-nowrap border-b-2 border-[#dee2e6] bg-[#f8f9fa] px-2 py-3 text-center text-[0.8rem] font-semibold text-[#555]">
               <span title="Status">●</span>
             </th>
             <SortableHeader field="filename">File</SortableHeader>
             <SortableHeader field="vendor">Vendor</SortableHeader>
             <SortableHeader field="date">Date</SortableHeader>
             <SortableHeader field="amount">Amount</SortableHeader>
-            <th className="actions-col"></th>
+            <th className="sticky top-0 z-10 w-9 whitespace-nowrap border-b-2 border-[#dee2e6] bg-[#f8f9fa] px-2 py-3 text-center text-[0.8rem] font-semibold text-[#555]"></th>
           </tr>
         </thead>
         <tbody>
@@ -174,43 +200,55 @@ export default function SelectableReceiptTable({
             return (
               <tr
                 key={receipt.receipt_id}
-                className={`receipt-row ${isSelected ? 'selected' : ''} status-${
-                  receipt.status || 'pending'
-                } ${isProcessed ? 'processed' : ''}`}
+                className={`cursor-pointer transition-all duration-150 ${getStatusBorderClass(receipt.status || 'pending')} ${
+                  isProcessed
+                    ? `opacity-60 bg-surface-alt ${isSelected ? 'bg-[#e0e7f0] opacity-80' : 'hover:bg-[#f5f5f5]'}`
+                    : isSelected
+                      ? 'bg-[#e7f1ff] hover:bg-[#d0e3ff]'
+                      : 'hover:bg-[#f8f9fa]'
+                }`}
                 onClick={() => !disabled && onSelectReceipt(receipt.receipt_id)}
               >
-                <td className="thumbnail-col">
-                  <ReceiptThumbnail
-                    src={`/api/receipts/${receipt.receipt_id}/image`}
-                    alt={`Receipt from ${extracted.vendor || 'Unknown'}`}
-                    maxWidth="60px"
-                    maxHeight="45px"
-                  />
+                <td className="w-[70px] border-b border-[#eee] p-[0.375rem] align-middle">
+                  <div className="overflow-hidden rounded bg-[#f5f5f5]">
+                    <ReceiptThumbnail
+                      src={`/api/receipts/${receipt.receipt_id}/image`}
+                      alt={`Receipt from ${extracted.vendor || 'Unknown'}`}
+                      maxWidth="60px"
+                      maxHeight="45px"
+                    />
+                  </div>
                 </td>
-                <td className="status-col">
+                <td className="w-9 border-b border-[#eee] p-2 text-center align-middle">
                   <span
-                    className={`status-icon status-${receipt.status || 'pending'}`}
+                    className={`inline-block text-[0.85rem] ${getStatusIconColor(receipt.status || 'pending')}`}
                     title={receipt.status || 'pending'}
                   >
                     {getStatusIcon(receipt.status)}
                   </span>
                 </td>
-                <td className="filename-col">
-                  <span className="filename" title={receipt.filename}>
+                <td className="min-w-[100px] max-w-[140px] border-b border-[#eee] p-2 align-middle">
+                  <span
+                    className="block overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[0.8rem] text-text-muted"
+                    title={receipt.filename}
+                  >
                     {formatFilename(receipt.filename)}
                   </span>
                 </td>
-                <td className="vendor-col">
-                  <span className="vendor-name" title={extracted.vendor || 'Unknown'}>
+                <td className="min-w-[100px] max-w-[130px] border-b border-[#eee] p-2 align-middle">
+                  <span
+                    className={`block overflow-hidden text-ellipsis whitespace-nowrap font-medium ${isProcessed ? 'text-text-muted' : ''}`}
+                    title={extracted.vendor || 'Unknown'}
+                  >
                     {extracted.vendor || 'Unknown'}
                   </span>
                 </td>
-                <td className="date-col">{formatDate(extracted.date)}</td>
-                <td className="amount-col">{formatAmount(extracted.amount)}</td>
-                <td className="actions-col">
+                <td className="min-w-[85px] whitespace-nowrap border-b border-[#eee] p-2 align-middle">{formatDate(extracted.date)}</td>
+                <td className="min-w-[80px] whitespace-nowrap border-b border-[#eee] p-2 text-right font-mono text-[0.85rem] align-middle">{formatAmount(extracted.amount)}</td>
+                <td className="w-9 border-b border-[#eee] p-2 text-center align-middle">
                   {receipt.status === 'pending' && (
                     <button
-                      className="btn-remove"
+                      className="cursor-pointer rounded border-none bg-transparent px-2 py-1 text-[0.9rem] leading-none text-[#bbb] transition-all duration-150 hover:enabled:bg-[#fee] hover:enabled:text-danger-alt disabled:cursor-not-allowed disabled:opacity-50"
                       onClick={(e) => {
                         e.stopPropagation();
                         onRemoveReceipt(receipt.receipt_id);

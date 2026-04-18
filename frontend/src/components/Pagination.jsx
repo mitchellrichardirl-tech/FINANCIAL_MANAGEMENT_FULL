@@ -4,37 +4,6 @@
  * Used under data tables (transactions, receipts, etc.).
  */
 
-import './Pagination.css';
-
-/**
- * Controlled Previous/Next pagination bar.
- *
- * Computes `totalPages` from `totalItems` / `itemsPerPage` and renders
- * nothing when the result set fits on a single page. The component only
- * emits intent via `onPageChange`; the parent owns `currentPage` and is
- * responsible for fetching/slicing data for that page.
- *
- * @component
- * @param {Object} props
- * @param {number} props.currentPage
- *        1-based index of the active page.
- * @param {number} props.totalItems
- *        Total number of items across all pages.
- * @param {number} props.itemsPerPage
- *        Page size used to compute page count and the "showing X–Y" range.
- * @param {(page: number) => void} props.onPageChange
- *        Called with the target page number (already bounds-checked;
- *        never `< 1` or `> totalPages`).
- * @returns {JSX.Element|null} `null` when `totalPages <= 1`.
- *
- * @example
- * <Pagination
- *   currentPage={page}
- *   totalItems={result.total}
- *   itemsPerPage={50}
- *   onPageChange={setPage}
- * />
- */
 export default function Pagination({
   currentPage,
   totalItems,
@@ -61,23 +30,23 @@ export default function Pagination({
   const endItem = Math.min(currentPage * itemsPerPage, totalItems);
 
   return (
-    <div className="pagination">
+    <div className="shrink-0 flex justify-center items-center gap-2 py-4 bg-bg">
       <button
         onClick={handlePrevious}
         disabled={currentPage === 1}
-        className="pagination-button"
+        className="py-[0.5em] px-[1em] disabled:opacity-50 disabled:cursor-not-allowed disabled:border-transparent"
       >
         Previous
       </button>
 
-      <span className="pagination-info">
+      <span className="text-[0.9em] text-text-light">
         Showing {startItem}-{endItem} of {totalItems}
       </span>
 
       <button
         onClick={handleNext}
         disabled={currentPage === totalPages}
-        className="pagination-button"
+        className="py-[0.5em] px-[1em] disabled:opacity-50 disabled:cursor-not-allowed disabled:border-transparent"
       >
         Next
       </button>

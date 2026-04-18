@@ -31,24 +31,15 @@ function todayIso() {
  * @param {Object} props
  * @param {boolean} props.isOpen
  * @param {() => void} props.onClose
- * @param {(opts: {
- *   transactionDate: string,
- *   description: string,
- *   amount: number,
- *   partyId: number,
- *   isWithdrawal: boolean,
- *   isCredit: boolean,
- *   isKids: boolean,
- *   isOneOff: boolean,
- * }) => Promise<void>} props.onConfirm
+ * @param {(opts: Object) => Promise<void>} props.onConfirm
  * @param {Array<Object>} props.categories
  * @param {Array<Object>} props.subCategories
  * @param {Array<Object>} props.types
  * @param {Array<Object>} props.parties
- * @param {(name:string, desc?:string)=>Promise<Object>} props.onCategoryCreated
- * @param {(name:string, categoryId:number, desc?:string)=>Promise<Object>} props.onSubCategoryCreated
- * @param {(name:string, subCategoryId:number, desc?:string)=>Promise<Object>} props.onTypeCreated
- * @param {(name:string, typeId:number, desc?:string)=>Promise<Object>} props.onPartyCreated
+ * @param {Function} props.onCategoryCreated
+ * @param {Function} props.onSubCategoryCreated
+ * @param {Function} props.onTypeCreated
+ * @param {Function} props.onPartyCreated
  * @returns {JSX.Element|null}
  */
 export default function CreateCashTransactionModal({
@@ -90,7 +81,6 @@ export default function CreateCashTransactionModal({
     parentId: null,
   });
 
-  /** Reset every time the modal opens. */
   useEffect(() => {
     if (!isOpen) return;
     setTransactionDate(todayIso());
@@ -107,7 +97,7 @@ export default function CreateCashTransactionModal({
     setSaving(false);
   }, [isOpen]);
 
-  // ── Option lists (same as the receipt modal) ─────────────────────
+  // ── Option lists ─────────────────────────────────────────────────
 
   const sortedCategories = useMemo(
     () => [...categories].sort((a, b) => a.category.localeCompare(b.category)),
@@ -234,7 +224,6 @@ export default function CreateCashTransactionModal({
         isKids,
         isOneOff,
       });
-      // Parent closes on success.
     } catch {
       setSaving(false);
     }
@@ -253,15 +242,18 @@ export default function CreateCashTransactionModal({
 
   return (
     <>
-      <div className="modal-overlay" onClick={handleBackdropClick}>
+      <div
+        className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] p-[1rem]"
+        onClick={handleBackdropClick}
+      >
         <div
-          className="modal-content generate-cash-modal"
+          className="bg-white rounded-[8px] shadow-[0_4px_24px_rgba(0,0,0,0.18)] flex flex-col max-h-[90vh] w-full max-w-[560px] overflow-hidden"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="modal-header">
-            <h2>New Cash Transaction</h2>
+          <div className="flex items-center justify-between px-[1.5rem] pt-[1.25rem] pb-[1rem] border-b border-[#e5e7eb] shrink-0">
+            <h2 className="m-0 text-[1.2rem] font-semibold text-[#111827]">New Cash Transaction</h2>
             <button
-              className="modal-close-btn"
+              className="bg-none border-none text-[1.5rem] leading-[1] cursor-pointer text-[#6b7280] px-[0.25rem] rounded-[4px] transition-[color,background] duration-150 hover:not-disabled:text-[#111827] hover:not-disabled:bg-[#f3f4f6] disabled:opacity-40 disabled:cursor-not-allowed"
               onClick={handleClose}
               disabled={saving}
               aria-label="Close modal"
@@ -270,38 +262,40 @@ export default function CreateCashTransactionModal({
             </button>
           </div>
 
-          <div className="bulk-edit-form">
-            {/* ── Details ── */}
-            <div className="form-section">
-              <h3>Details</h3>
-              <p className="form-hint">
+          <div className="flex-1 overflow-y-auto px-[1.5rem] py-[1rem] flex flex-col gap-[1.25rem]">
+            {/* Details */}
+            <div className="flex flex-col gap-[0.75rem]">
+              <h3 className="m-0 text-[0.95rem] font-semibold text-[#374151] uppercase tracking-[0.05em]">Details</h3>
+              <p className="m-0 text-[0.8rem] text-[#6b7280] leading-[1.4]">
                 A new transaction will be created on the <strong>Cash</strong>{' '}
                 account using these details.
               </p>
 
-              <div className="form-field">
-                <label>Date</label>
+              <div className="flex flex-col gap-[0.3rem]">
+                <label className="text-[0.85rem] font-medium text-[#374151]">Date</label>
                 <input
                   type="date"
                   value={transactionDate}
                   onChange={(e) => setTransactionDate(e.target.value)}
                   disabled={saving}
+                  className="py-[6px] px-[10px] border border-[#d1d5db] rounded-[4px] text-[14px] font-[inherit]"
                 />
               </div>
 
-              <div className="form-field">
-                <label>Description</label>
+              <div className="flex flex-col gap-[0.3rem]">
+                <label className="text-[0.85rem] font-medium text-[#374151]">Description</label>
                 <input
                   type="text"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="e.g. Coffee at Bewley's"
                   disabled={saving}
+                  className="py-[6px] px-[10px] border border-[#d1d5db] rounded-[4px] text-[14px] font-[inherit]"
                 />
               </div>
 
-              <div className="form-field">
-                <label>Amount</label>
+              <div className="flex flex-col gap-[0.3rem]">
+                <label className="text-[0.85rem] font-medium text-[#374151]">Amount</label>
                 <input
                   type="number"
                   step="0.01"
@@ -310,17 +304,18 @@ export default function CreateCashTransactionModal({
                   onChange={(e) => setAmount(e.target.value)}
                   placeholder="0.00"
                   disabled={saving}
+                  className="py-[6px] px-[10px] border border-[#d1d5db] rounded-[4px] text-[14px] font-[inherit]"
                 />
               </div>
             </div>
 
-            {/* ── Flags ── */}
-            <div className="form-section">
-              <h3>Transaction</h3>
-              <div className="form-field">
-                <label>Direction</label>
-                <div className="radio-row">
-                  <label className="radio-option">
+            {/* Flags */}
+            <div className="flex flex-col gap-[0.75rem]">
+              <h3 className="m-0 text-[0.95rem] font-semibold text-[#374151] uppercase tracking-[0.05em]">Transaction</h3>
+              <div className="flex flex-col gap-[0.3rem]">
+                <label className="text-[0.85rem] font-medium text-[#374151]">Direction</label>
+                <div className="flex gap-[20px] mt-[6px]">
+                  <label className="inline-flex items-center gap-[6px] font-normal cursor-pointer">
                     <input
                       type="radio"
                       name="new-cash-direction"
@@ -330,7 +325,7 @@ export default function CreateCashTransactionModal({
                     />
                     Withdrawal (cash out)
                   </label>
-                  <label className="radio-option">
+                  <label className="inline-flex items-center gap-[6px] font-normal cursor-pointer">
                     <input
                       type="radio"
                       name="new-cash-direction"
@@ -342,8 +337,8 @@ export default function CreateCashTransactionModal({
                   </label>
                 </div>
               </div>
-              <div className="form-field">
-                <label className="checkbox-option">
+              <div className="flex flex-col gap-[0.3rem]">
+                <label className="inline-flex items-center gap-[6px] font-normal cursor-pointer">
                   <input
                     type="checkbox"
                     checked={isCredit}
@@ -353,8 +348,8 @@ export default function CreateCashTransactionModal({
                   Mark as income
                 </label>
               </div>
-              <div className="form-field">
-                <label className="checkbox-option">
+              <div className="flex flex-col gap-[0.3rem]">
+                <label className="inline-flex items-center gap-[6px] font-normal cursor-pointer">
                   <input
                     type="checkbox"
                     checked={isKids}
@@ -364,8 +359,8 @@ export default function CreateCashTransactionModal({
                   Kids
                 </label>
               </div>
-              <div className="form-field">
-                <label className="checkbox-option">
+              <div className="flex flex-col gap-[0.3rem]">
+                <label className="inline-flex items-center gap-[6px] font-normal cursor-pointer">
                   <input
                     type="checkbox"
                     checked={isOneOff}
@@ -377,16 +372,16 @@ export default function CreateCashTransactionModal({
               </div>
             </div>
 
-            {/* ── Party cascade ── */}
-            <div className="form-section">
-              <h3>Party</h3>
-              <p className="form-hint">
+            {/* Party cascade */}
+            <div className="flex flex-col gap-[0.75rem]">
+              <h3 className="m-0 text-[0.95rem] font-semibold text-[#374151] uppercase tracking-[0.05em]">Party</h3>
+              <p className="m-0 text-[0.8rem] text-[#6b7280] leading-[1.4]">
                 Select the party for this transaction. You can create a new
                 one at any level.
               </p>
 
-              <div className="form-field">
-                <label>Category</label>
+              <div className="flex flex-col gap-[0.3rem]">
+                <label className="text-[0.85rem] font-medium text-[#374151]">Category</label>
                 <DropdownWithCreate
                   value={selectedCategoryId}
                   onChange={handleCategoryChange}
@@ -401,8 +396,8 @@ export default function CreateCashTransactionModal({
                 />
               </div>
 
-              <div className="form-field">
-                <label>Sub-Category</label>
+              <div className="flex flex-col gap-[0.3rem]">
+                <label className="text-[0.85rem] font-medium text-[#374151]">Sub-Category</label>
                 <DropdownWithCreate
                   value={selectedSubCategoryId}
                   onChange={handleSubCategoryChange}
@@ -419,8 +414,8 @@ export default function CreateCashTransactionModal({
                 />
               </div>
 
-              <div className="form-field">
-                <label>Type</label>
+              <div className="flex flex-col gap-[0.3rem]">
+                <label className="text-[0.85rem] font-medium text-[#374151]">Type</label>
                 <DropdownWithCreate
                   value={selectedTypeId}
                   onChange={handleTypeChange}
@@ -437,8 +432,8 @@ export default function CreateCashTransactionModal({
                 />
               </div>
 
-              <div className="form-field">
-                <label>Party</label>
+              <div className="flex flex-col gap-[0.3rem]">
+                <label className="text-[0.85rem] font-medium text-[#374151]">Party</label>
                 <DropdownWithCreate
                   value={selectedPartyId}
                   onChange={handlePartyChange}
@@ -455,9 +450,9 @@ export default function CreateCashTransactionModal({
             </div>
           </div>
 
-          <div className="modal-actions">
+          <div className="flex justify-end gap-[0.75rem] px-[1.5rem] py-[1rem] border-t border-[#e5e7eb] shrink-0">
             <button
-              className="cancel-button"
+              className="py-[0.5rem] px-[1.1rem] border border-[#d1d5db] rounded-[6px] bg-white text-[#374151] text-[0.9rem] cursor-pointer transition-[background,border-color] duration-150 hover:not-disabled:bg-[#f9fafb] hover:not-disabled:border-[#9ca3af] disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={handleClose}
               disabled={saving}
               type="button"
@@ -465,7 +460,7 @@ export default function CreateCashTransactionModal({
               Cancel
             </button>
             <button
-              className="save-button"
+              className="py-[0.5rem] px-[1.25rem] border-none rounded-[6px] bg-[#2563eb] text-white text-[0.9rem] font-medium cursor-pointer transition-colors duration-150 hover:not-disabled:bg-[#1d4ed8] disabled:bg-[#93c5fd] disabled:cursor-not-allowed"
               onClick={handleConfirm}
               disabled={!canSave}
               type="button"

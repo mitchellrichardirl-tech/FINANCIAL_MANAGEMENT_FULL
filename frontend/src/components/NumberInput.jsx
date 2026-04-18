@@ -4,21 +4,6 @@
  * cleared) instead of a string.
  */
 
-import './TextInput.css'; // shares base input styling
-
-/**
- * @component
- * @param {Object} props
- * @param {number|null|undefined} props.value
- * @param {(value: number|null) => void} props.onChange
- *        Called with the parsed number, or `null` when the field is
- *        cleared. `NaN` is never emitted.
- * @param {number} [props.min]
- * @param {number} [props.max]
- * @param {number} [props.step=1]
- * @param {boolean} [props.disabled=false]
- * @param {string} [props.id]
- */
 export default function NumberInput({
   value,
   onChange,
@@ -43,7 +28,7 @@ export default function NumberInput({
     <input
       id={id}
       type="number"
-      className="text-input number-input"
+      className="w-full box-border py-2 px-2.5 text-sm border border-border-input rounded bg-white text-[#212529] focus:outline-none focus:border-[#4a90e2] focus:shadow-[0_0_0_2px_rgba(74,144,226,0.2)] disabled:bg-[#f1f3f5] disabled:text-[#868e96] disabled:cursor-not-allowed"
       value={value ?? ''}
       onChange={handleChange}
       min={min}

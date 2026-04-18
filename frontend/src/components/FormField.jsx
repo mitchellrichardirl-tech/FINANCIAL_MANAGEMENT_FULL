@@ -7,20 +7,6 @@
  * or anything else.
  */
 
-import './FormField.css';
-
-/**
- * @component
- * @param {Object} props
- * @param {string} props.label              - Visible field label.
- * @param {React.ReactNode} props.children  - The input control.
- * @param {string} [props.help]             - Optional hint text shown below the control.
- * @param {string} [props.error]            - Validation error. When present, help text
- *                                            is hidden and the field gets error styling.
- * @param {boolean} [props.required=false]  - Adds a visual required marker.
- * @param {string} [props.htmlFor]          - Forwarded to the `<label>` for a11y when
- *                                            the child input has a matching `id`.
- */
 export default function FormField({
   label,
   children,
@@ -30,16 +16,16 @@ export default function FormField({
   htmlFor,
 }) {
   return (
-    <div className={`form-field ${error ? 'form-field--error' : ''}`}>
-      <label className="form-field__label" htmlFor={htmlFor}>
+    <div className={`flex flex-col gap-[6px] mb-4 ${error ? '[&_input]:border-danger [&_select]:border-danger' : ''}`}>
+      <label className="text-[13px] font-semibold text-[#333]" htmlFor={htmlFor}>
         {label}
-        {required && <span className="form-field__required" aria-hidden="true"> *</span>}
+        {required && <span className="text-danger" aria-hidden="true"> *</span>}
       </label>
-      <div className="form-field__control">{children}</div>
+      <div>{children}</div>
       {error ? (
-        <p className="form-field__error" role="alert">{error}</p>
+        <p className="m-0 text-xs text-danger" role="alert">{error}</p>
       ) : help ? (
-        <p className="form-field__help">{help}</p>
+        <p className="m-0 text-xs text-[#6c757d]">{help}</p>
       ) : null}
     </div>
   );

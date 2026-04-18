@@ -22,14 +22,14 @@ export default function StepIdentity({ editor }) {
 
   return (
     <div className="fe-step">
-      <h2>Name</h2>
-      <p className="fe-step__sub">
+      <h2 className="m-0 mb-1.5 text-xl">Name</h2>
+      <p className="m-0 mb-5 text-[#6c757d] text-sm">
         How this format appears in the format list and the account settings picker.
       </p>
 
       {duplicateNameError && (
-        <div className="fe-step-sample__error" role="alert">
-          <p>{duplicateNameError}</p>
+        <div className="px-4 py-3.5 border border-[#f5c2c7] bg-[#f8d7da] rounded text-[#842029] flex justify-between items-center gap-4" role="alert">
+          <p className="m-0">{duplicateNameError}</p>
         </div>
       )}
 
@@ -63,7 +63,7 @@ export default function StepIdentity({ editor }) {
       </FormField>
 
       {displayName && (
-        <p className="fe-step__sub">
+        <p className="m-0 mb-5 text-[#6c757d] text-sm">
           Will be shown as: <strong>{displayName}</strong>
         </p>
       )}

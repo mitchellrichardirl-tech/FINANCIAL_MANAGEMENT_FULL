@@ -14,7 +14,6 @@ import { useState, useEffect } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
-import './ImagePreview.css';
 import { createLogger } from '@/lib/logger';
 import { parseApiError, isNotFound } from '@/lib/apiErrors';
 
@@ -156,7 +155,7 @@ function ImagePreview({
   };
 
   if (error) {
-    return <div className="image-preview-error">{error}</div>;
+    return <div className="rounded-lg bg-[#f8d7da] p-5 text-center text-[#721c24]">{error}</div>;
   }
 
   if (!previewUrl && !isLoading) {
@@ -169,10 +168,10 @@ function ImagePreview({
     <>
       {/* ── Inline preview ── */}
       <div
-        className={`image-preview-container ${enableZoom ? 'zoomable' : ''}`}
+        className={`relative w-full ${enableZoom ? 'cursor-zoom-in' : ''}`}
         style={{ maxWidth }}
       >
-        {isLoading && <div className="image-preview-loading">Loading...</div>}
+        {isLoading && <div className="p-10 text-center text-text-muted">Loading...</div>}
 
         {fileType === 'image' && previewUrl && (
           <img
@@ -181,7 +180,7 @@ function ImagePreview({
             onLoad={handleImageLoad}
             onError={handleImageError}
             onClick={openModal}
-            className={`image-preview-img ${isLoading ? 'hidden' : ''}`}
+            className={`max-w-full rounded-lg shadow-[0_2px_8px_rgba(0,0,0,0.1)] block ${isLoading ? 'hidden' : ''}`}
             style={{ maxHeight }}
           />
         )}
@@ -203,8 +202,12 @@ function ImagePreview({
             </Document>
 
             {showPagination && (
-              <div className="image-preview-pagination">
-                <button onClick={goToPrevPage} disabled={pageNumber <= 1} className="pagination-btn">
+              <div className="mt-2.5 flex items-center justify-center gap-2.5">
+                <button
+                  onClick={goToPrevPage}
+                  disabled={pageNumber <= 1}
+                  className="cursor-pointer rounded border border-[#ccc] bg-white px-2.5 py-[5px] transition-colors hover:enabled:bg-nav-bg disabled:cursor-not-allowed disabled:opacity-50"
+                >
                   Previous
                 </button>
                 <span>
@@ -213,7 +216,7 @@ function ImagePreview({
                 <button
                   onClick={goToNextPage}
                   disabled={pageNumber >= numPages}
-                  className="pagination-btn"
+                  className="cursor-pointer rounded border border-[#ccc] bg-white px-2.5 py-[5px] transition-colors hover:enabled:bg-nav-bg disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Next
                 </button>
@@ -225,7 +228,7 @@ function ImagePreview({
         {enableZoom && !isLoading && previewUrl && (
           <div
             onClick={openModal}
-            className={`image-preview-zoom-hint ${showPagination ? 'with-pagination' : ''}`}
+            className={`absolute right-2 bg-black/60 text-white px-2 py-1 rounded text-xs cursor-pointer ${showPagination ? 'bottom-[50px]' : 'bottom-2'}`}
           >
             Click to enlarge
           </div>
@@ -234,14 +237,20 @@ function ImagePreview({
 
       {/* ── Fullscreen modal ── */}
       {isModalOpen && (
-        <div className="image-preview-modal" onClick={closeModal}>
-          <button className="modal-close-btn" onClick={closeModal}>
+        <div
+          className="fixed inset-0 z-[1000] flex cursor-zoom-out flex-col items-center justify-center bg-black/90 p-5"
+          onClick={closeModal}
+        >
+          <button
+            className="absolute right-5 top-5 z-[1001] border-none bg-transparent p-0 text-[32px] leading-none text-white cursor-pointer hover:text-[#ccc]"
+            onClick={closeModal}
+          >
             ×
           </button>
 
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+          <div className="flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
             {fileType === 'image' ? (
-              <img src={previewUrl} alt={alt} className="modal-image" />
+              <img src={previewUrl} alt={alt} className="max-w-[90vw] max-h-[90vh] object-contain" />
             ) : (
               <>
                 <Document file={previewUrl} onLoadSuccess={onDocumentLoadSuccess}>
@@ -254,11 +263,11 @@ function ImagePreview({
                 </Document>
 
                 {showPagination && (
-                  <div className="image-preview-pagination modal-pagination">
+                  <div className="mt-5 flex items-center justify-center gap-2.5 text-white">
                     <button
                       onClick={goToPrevPage}
                       disabled={pageNumber <= 1}
-                      className="pagination-btn"
+                      className="cursor-pointer rounded border border-[#ccc] bg-white px-4 py-2 transition-colors hover:enabled:bg-nav-bg disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       Previous
                     </button>
@@ -268,7 +277,7 @@ function ImagePreview({
                     <button
                       onClick={goToNextPage}
                       disabled={pageNumber >= numPages}
-                      className="pagination-btn"
+                      className="cursor-pointer rounded border border-[#ccc] bg-white px-4 py-2 transition-colors hover:enabled:bg-nav-bg disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       Next
                     </button>

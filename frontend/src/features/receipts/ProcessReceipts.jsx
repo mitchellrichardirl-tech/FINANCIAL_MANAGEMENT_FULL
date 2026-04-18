@@ -41,12 +41,11 @@ import {
 } from '@/features/transactions/api';
 import GenerateCashFromReceiptModal from './GenerateCashFromReceiptModal';
 import { ErrorCode } from '@/lib/apiErrors';
-import { useToast } from '@/components/ToastContext';
+import { useToast } from '@/stores/toastStore';
 import BulkUploadReceipts from './BulkUploadReceipts';
 import SelectableReceiptTable from './SelectableReceiptTable';
 import ImagePreview from './ImagePreview';
 import CandidateTransactions from './CandidateTransactions';
-import './ProcessReceipts.css';
 import { createLogger } from '@/lib/logger';
 
 /** @type {import('@/lib/logger').Logger} */
@@ -600,7 +599,7 @@ function ProcessReceipts() {
 
       if (err.code === ErrorCode.NOT_FOUND && err.entity === 'Transaction') {
         addToast({
-          message: 'That transaction no longer exists. Refreshing candidates…',
+          message: 'That transaction no longer exists. Refreshing candidates\u2026',
           type: 'info',
         });
         setCandidateRefreshKey((k) => k + 1);
@@ -736,23 +735,23 @@ function ProcessReceipts() {
   // ── Render ────────────────────────────────────────────────────────
 
   return (
-    <div className="process-receipts">
-      <div className="page-header">
-        <h1>Process Receipts</h1>
-        <div className="header-stats">
+    <div className="mx-auto max-w-[calc(100vw-4rem)] px-8 py-6">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+        <h1 className="m-0">Process Receipts</h1>
+        <div className="flex items-center gap-4">
           {receipts.length > 0 && (
-            <span className="stats-text">
+            <span className="rounded-[20px] bg-nav-bg px-4 py-2 text-[0.9rem] text-text-muted">
               {pendingCount} pending, {processedCount} processed
             </span>
           )}
         </div>
       </div>
 
-      <div className="three-column-layout">
+      <div className="grid min-h-[calc(100vh-200px)] grid-cols-[minmax(520px,600px)_minmax(400px,1fr)_minmax(600px,700px)] gap-8 max-[1600px]:grid-cols-[minmax(480px,550px)_minmax(350px,1fr)_minmax(500px,600px)] max-[1600px]:gap-6 max-[1400px]:grid-cols-[minmax(450px,500px)_minmax(320px,1fr)_minmax(450px,500px)] max-[1400px]:gap-5 max-[1200px]:grid-cols-1 max-[1200px]:grid-rows-[auto] min-[1920px]:grid-cols-[minmax(550px,650px)_minmax(450px,1fr)_minmax(650px,750px)]">
         {/* ── Left: upload + session list ── */}
-        <div className="column column-left">
-          <div className="column-section upload-section">
-            <h3>Upload Receipts</h3>
+        <div className="flex flex-col gap-6 min-[1401px]:min-w-[500px] max-[1400px]:min-w-[420px] max-[1200px]:min-w-full">
+          <div className="shrink-0 rounded-[10px] bg-surface p-5 shadow-[0_2px_8px_rgba(0,0,0,0.08)]">
+            <h3 className="m-0 mb-4 border-b-2 border-nav-bg pb-3 text-[1.1rem] text-text-dark">Upload Receipts</h3>
             <BulkUploadReceipts
               onReceiptProcessed={handleReceiptProcessed}
               onProcessingStart={handleProcessingStart}
@@ -767,13 +766,13 @@ function ProcessReceipts() {
             />
           </div>
 
-          <div className="column-section receipt-list-section">
-            <div className="section-header">
-              <h3>Receipts ({receipts.length})</h3>
+          <div className="flex flex-1 flex-col overflow-hidden rounded-[10px] bg-surface p-5 shadow-[0_2px_8px_rgba(0,0,0,0.08)]">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="m-0 border-none p-0 text-[1.1rem] text-text-dark">Receipts ({receipts.length})</h3>
               {receipts.length > 0 && (
                 <button
                   onClick={handleClearAll}
-                  className="btn-clear-all"
+                  className="cursor-pointer rounded border border-danger-alt bg-transparent px-3 py-1.5 text-[0.8rem] text-danger-alt transition-all duration-200 hover:enabled:bg-danger-alt hover:enabled:text-white disabled:cursor-not-allowed disabled:opacity-50"
                   disabled={isUploading || isSaving || isLinking}
                 >
                   Clear All
@@ -791,9 +790,9 @@ function ProcessReceipts() {
         </div>
 
         {/* ── Middle: image preview ── */}
-        <div className="column column-middle">
-          <div className="column-section image-section">
-            <h3>Receipt Image</h3>
+        <div className="flex flex-col gap-6 min-w-[350px] max-[1200px]:min-w-full">
+          <div className="flex flex-1 flex-col rounded-[10px] bg-surface p-5 shadow-[0_2px_8px_rgba(0,0,0,0.08)]">
+            <h3 className="m-0 mb-4 border-b-2 border-nav-bg pb-3 text-[1.1rem] text-text-dark">Receipt Image</h3>
             {selectedReceipt ? (
               <ImagePreview
                 src={`/api/receipts/${selectedReceipt.receipt_id}/image`}
@@ -801,7 +800,7 @@ function ProcessReceipts() {
                 maxHeight="600px"
               />
             ) : (
-              <div className="empty-state">
+              <div className="flex min-h-[300px] flex-1 items-center justify-center rounded-lg border-2 border-dashed border-[#e0e0e0] bg-[#fafafa] text-base text-[#999]">
                 {receipts.length === 0
                   ? 'Upload receipts to get started'
                   : 'Select a receipt to view'}
@@ -811,20 +810,20 @@ function ProcessReceipts() {
         </div>
 
         {/* ── Right: details form + candidate transactions ── */}
-        <div className="column column-right">
-          <div className="column-section details-section">
-            <h3>Receipt Details</h3>
+        <div className="flex flex-col gap-6 min-[1401px]:min-w-[580px] max-[1400px]:min-w-[420px] max-[1200px]:min-w-full">
+          <div className="shrink-0 rounded-[10px] bg-surface p-5 shadow-[0_2px_8px_rgba(0,0,0,0.08)]">
+            <h3 className="m-0 mb-4 border-b-2 border-nav-bg pb-3 text-[1.1rem] text-text-dark">Receipt Details</h3>
             {selectedReceipt ? (
-              <div className="receipt-form">
+              <div className="flex flex-col gap-5">
                 {fieldErrors._general && (
-                  <div className="form-error" role="alert">
+                  <div className="rounded-md bg-[#f8d7da] px-4 py-3 text-sm text-[#721c24]" role="alert">
                     {fieldErrors._general}
                   </div>
                 )}
 
-                <div className={`form-group ${fieldErrors.vendor ? 'has-error' : ''}`}>
-                  <label htmlFor="vendor">
-                    Vendor: <span className="required">*</span>
+                <div className="flex flex-col gap-1.5">
+                  <label htmlFor="vendor" className="text-[0.9rem] font-semibold text-border-dark">
+                    Vendor: <span className="text-danger-alt">*</span>
                   </label>
                   <input
                     id="vendor"
@@ -836,16 +835,17 @@ function ProcessReceipts() {
                     disabled={isLinking || isSaving || selectedReceipt.status !== 'pending'}
                     aria-invalid={!!fieldErrors.vendor}
                     aria-describedby={fieldErrors.vendor ? 'vendor-error' : undefined}
+                    className="rounded-md border border-border px-3 py-2.5 text-[0.95rem] transition-[border-color,box-shadow] duration-200 focus:border-primary focus:shadow-[0_0_0_3px_rgba(0,123,255,0.15)] focus:outline-none disabled:cursor-not-allowed disabled:bg-[#f5f5f5] disabled:text-[#999]"
                   />
                   {fieldErrors.vendor && (
-                    <span id="vendor-error" className="field-error">
+                    <span id="vendor-error" className="mt-1.5 block text-sm text-[#dc2626]">
                       {fieldErrors.vendor}
                     </span>
                   )}
                 </div>
 
-                <div className={`form-group ${fieldErrors.date ? 'has-error' : ''}`}>
-                  <label htmlFor="date">Date:</label>
+                <div className="flex flex-col gap-1.5">
+                  <label htmlFor="date" className="text-[0.9rem] font-semibold text-border-dark">Date:</label>
                   <input
                     id="date"
                     type="date"
@@ -854,16 +854,17 @@ function ProcessReceipts() {
                     disabled={isLinking || isSaving || selectedReceipt.status !== 'pending'}
                     aria-invalid={!!fieldErrors.date}
                     aria-describedby={fieldErrors.date ? 'date-error' : undefined}
+                    className="rounded-md border border-border px-3 py-2.5 text-[0.95rem] transition-[border-color,box-shadow] duration-200 focus:border-primary focus:shadow-[0_0_0_3px_rgba(0,123,255,0.15)] focus:outline-none disabled:cursor-not-allowed disabled:bg-[#f5f5f5] disabled:text-[#999]"
                   />
                   {fieldErrors.date && (
-                    <span id="date-error" className="field-error">
+                    <span id="date-error" className="mt-1.5 block text-sm text-[#dc2626]">
                       {fieldErrors.date}
                     </span>
                   )}
                 </div>
 
-                <div className={`form-group ${fieldErrors.amount ? 'has-error' : ''}`}>
-                  <label htmlFor="amount">Amount:</label>
+                <div className="flex flex-col gap-1.5">
+                  <label htmlFor="amount" className="text-[0.9rem] font-semibold text-border-dark">Amount:</label>
                   <input
                     id="amount"
                     type="number"
@@ -874,18 +875,19 @@ function ProcessReceipts() {
                     disabled={isLinking || isSaving || selectedReceipt.status !== 'pending'}
                     aria-invalid={!!fieldErrors.amount}
                     aria-describedby={fieldErrors.amount ? 'amount-error' : undefined}
+                    className="rounded-md border border-border px-3 py-2.5 text-[0.95rem] transition-[border-color,box-shadow] duration-200 focus:border-primary focus:shadow-[0_0_0_3px_rgba(0,123,255,0.15)] focus:outline-none disabled:cursor-not-allowed disabled:bg-[#f5f5f5] disabled:text-[#999]"
                   />
                   {fieldErrors.amount && (
-                    <span id="amount-error" className="field-error">
+                    <span id="amount-error" className="mt-1.5 block text-sm text-[#dc2626]">
                       {fieldErrors.amount}
                     </span>
                   )}
                 </div>
 
-                <div className="form-actions">
+                <div className="mt-2 flex gap-3">
                   <button
                     onClick={handleSave}
-                    className="btn-save"
+                    className="flex-1 cursor-pointer rounded-md border-none bg-success px-5 py-2.5 text-[0.95rem] font-semibold text-white transition-colors duration-200 hover:enabled:bg-success-hover disabled:cursor-not-allowed disabled:bg-[#ccc]"
                     disabled={!canSave}
                     title="Save receipt without linking to a transaction"
                   >
@@ -893,37 +895,47 @@ function ProcessReceipts() {
                   </button>
                   <button
                     onClick={handleOpenCashModal}
-                    className="btn-generate-cash"
+                    className="cursor-pointer rounded border-none bg-[#43a047] px-5 py-2.5 text-sm font-medium text-white transition-colors duration-200 hover:enabled:bg-[#2e7d32] disabled:cursor-not-allowed disabled:opacity-50"
                     disabled={!canGenerateCash}
                     title="Create a Cash-account transaction from this receipt"
                   >
                     Generate Cash
                   </button>
-                  <button onClick={handleDelete} className="btn-delete" disabled={!canDelete}>
+                  <button
+                    onClick={handleDelete}
+                    className="cursor-pointer rounded-md border-none bg-danger-alt px-5 py-2.5 font-medium text-white transition-colors duration-200 hover:enabled:bg-[#c82333] disabled:cursor-not-allowed disabled:bg-[#ccc]"
+                    disabled={!canDelete}
+                  >
                     {isSaving ? 'Deleting...' : 'Delete'}
                   </button>
                 </div>
 
                 {selectedReceipt.status !== 'pending' && (
-                  <div className={`status-badge status-${selectedReceipt.status}`}>
-                    {selectedReceipt.status === 'saved' && '✓ Saved'}
-                    {selectedReceipt.status === 'linked' && '✓ Linked to Transaction'}
+                  <div
+                    className={`mt-3 rounded-md p-2.5 text-center text-[0.9rem] font-semibold ${
+                      selectedReceipt.status === 'saved'
+                        ? 'bg-[#d4edda] text-[#155724]'
+                        : 'bg-[#cce5ff] text-[#004085]'
+                    }`}
+                  >
+                    {selectedReceipt.status === 'saved' && '\u2713 Saved'}
+                    {selectedReceipt.status === 'linked' && '\u2713 Linked to Transaction'}
                   </div>
                 )}
               </div>
             ) : (
-              <div className="empty-state">Select a receipt to edit details</div>
+              <div className="px-4 py-8 text-center text-[0.95rem] text-[#999]">Select a receipt to edit details</div>
             )}
           </div>
 
-          <div className="column-section candidates-section">
-            <h3>Link to Transaction</h3>
-            <div className="candidates-container">
+          <div className="flex flex-1 flex-col overflow-hidden rounded-[10px] bg-surface p-5 shadow-[0_2px_8px_rgba(0,0,0,0.08)]">
+            <h3 className="m-0 mb-4 border-b-2 border-nav-bg pb-3 text-[1.1rem] text-text-dark">Link to Transaction</h3>
+            <div className="min-h-0 flex-1 overflow-y-auto max-h-[calc(100vh-550px)] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:rounded [&::-webkit-scrollbar-track]:bg-[#f1f1f1] [&::-webkit-scrollbar-thumb]:rounded [&::-webkit-scrollbar-thumb]:bg-text-light [&::-webkit-scrollbar-thumb:hover]:bg-[#555]">
               {selectedReceipt ? (
                 selectedReceipt.status !== 'pending' ? (
-                  <div className="empty-state">This receipt has already been processed</div>
+                  <div className="px-4 py-8 text-center text-[0.95rem] text-[#999]">This receipt has already been processed</div>
                 ) : isLoadingCandidates ? (
-                  <div className="loading-candidates">Loading candidate transactions...</div>
+                  <div className="p-6 text-center text-[0.9rem] text-text-muted">Loading candidate transactions...</div>
                 ) : (
                   <CandidateTransactions
                     transactions={candidateTransactions}
@@ -933,7 +945,7 @@ function ProcessReceipts() {
                   />
                 )
               ) : (
-                <div className="empty-state">Select a receipt to find matching transactions</div>
+                <div className="px-4 py-8 text-center text-[0.95rem] text-[#999]">Select a receipt to find matching transactions</div>
               )}
             </div>
           </div>

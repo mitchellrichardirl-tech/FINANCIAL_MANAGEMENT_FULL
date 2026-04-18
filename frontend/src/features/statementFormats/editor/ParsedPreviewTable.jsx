@@ -5,8 +5,6 @@
  * sign, description came through.
  */
 
-import './ParsedPreviewTable.css';
-
 /**
  * @component
  * @param {Object} props
@@ -16,7 +14,7 @@ import './ParsedPreviewTable.css';
 export default function ParsedPreviewTable({ rows, total }) {
   if (!rows?.length) {
     return (
-      <div className="ppt-empty">
+      <div className="p-6 text-center text-[#6c757d] bg-[#f8f9fa] border border-dashed border-[#dee2e6] rounded-[6px]">
         No transactions were produced. Check the column mapping and any exclude
         patterns.
       </div>
@@ -26,32 +24,34 @@ export default function ParsedPreviewTable({ rows, total }) {
   const capped = total > rows.length;
 
   return (
-    <div className="ppt">
-      <div className="ppt__summary">
+    <div>
+      <div className="text-sm mb-2.5 text-text-dark">
         <strong>{total}</strong> transaction{total === 1 ? '' : 's'} parsed
         {capped && <> — showing the first {rows.length}</>}.
       </div>
 
-      <div className="ppt__scroll">
-        <table className="ppt__table">
+      <div className="max-h-[45vh] overflow-auto border border-[#dee2e6] rounded">
+        <table className="w-full border-collapse text-[13px] bg-surface">
           <thead>
             <tr>
-              <th>Date</th>
-              <th>Description</th>
-              <th className="ppt__num">Amount</th>
-              <th></th>
+              <th className="sticky top-0 bg-[#f8f9fa] font-semibold border-b-2 border-[#dee2e6] px-3 py-2 text-left">Date</th>
+              <th className="sticky top-0 bg-[#f8f9fa] font-semibold border-b-2 border-[#dee2e6] px-3 py-2 text-left">Description</th>
+              <th className="sticky top-0 bg-[#f8f9fa] font-semibold border-b-2 border-[#dee2e6] px-3 py-2 text-right tabular-nums whitespace-nowrap">Amount</th>
+              <th className="sticky top-0 bg-[#f8f9fa] font-semibold border-b-2 border-[#dee2e6] px-3 py-2 text-left"></th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r, i) => (
               <tr key={i}>
-                <td className="ppt__date">{fmtDate(r.transaction_date)}</td>
-                <td className="ppt__desc">{r.description}</td>
-                <td className={`ppt__num ${r.is_credit ? 'ppt__credit' : 'ppt__debit'}`}>
+                <td className="px-3 py-2 border-b border-[#f1f3f5] text-left whitespace-nowrap text-[#495057]">{fmtDate(r.transaction_date)}</td>
+                <td className="px-3 py-2 border-b border-[#f1f3f5] text-left break-words">{r.description}</td>
+                <td className={`px-3 py-2 border-b border-[#f1f3f5] text-right tabular-nums whitespace-nowrap ${r.is_credit ? 'text-[#166534]' : 'text-[#991b1b]'}`}>
                   {fmtAmount(r.amount)}
                 </td>
-                <td>
-                  <span className={`ppt__badge ${r.is_credit ? 'ppt__badge--cr' : 'ppt__badge--dr'}`}>
+                <td className="px-3 py-2 border-b border-[#f1f3f5] text-left">
+                  <span className={`inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-[3px] tracking-[0.04em] ${
+                    r.is_credit ? 'bg-[#f0fdf4] text-[#166534]' : 'bg-[#fef2f2] text-[#991b1b]'
+                  }`}>
                     {r.is_credit ? 'CR' : 'DR'}
                   </span>
                 </td>

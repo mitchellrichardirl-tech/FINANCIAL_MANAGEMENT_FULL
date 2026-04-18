@@ -1,0 +1,97 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #007bff;
+  --color-primary-hover: #0069d9;
+  --color-danger: #d9363e;
+  --color-danger-hover: #c12e35;
+  --color-danger-alt: #dc3545;
+  --color-success: #28a745;
+  --color-success-hover: #218838;
+  --color-warning: #f59e0b;
+  --color-ghost: #646cff;
+  --color-ghost-hover: #535bf2;
+
+  --color-surface: #ffffff;
+  --color-surface-alt: #f9f9f9;
+  --color-surface-dark: #1a1a1a;
+  --color-bg: #f5f6fa;
+  --color-nav-bg: #f0f0f0;
+
+  --color-text: #213547;
+  --color-text-muted: #666;
+  --color-text-light: #888;
+  --color-text-dark: #333;
+
+  --color-border: #ddd;
+  --color-border-dark: #444;
+  --color-border-input: #ced4da;
+
+  --color-toast-error-bg: #fef2f2;
+  --color-toast-error-border: #fca5a5;
+  --color-toast-error-text: #991b1b;
+  --color-toast-success-bg: #f0fdf4;
+  --color-toast-success-border: #86efac;
+  --color-toast-success-text: #166534;
+  --color-toast-info-bg: #eff6ff;
+  --color-toast-info-border: #93c5fd;
+  --color-toast-info-text: #1e40af;
+  --color-toast-warning-bg: #fef3c7;
+  --color-toast-warning-border: #f59e0b;
+  --color-toast-warning-text: #000;
+
+  --font-family-sans: system-ui, Avenir, Helvetica, Arial, sans-serif;
+}
+
+@layer base {
+  :root {
+    font-family: var(--font-family-sans);
+    line-height: 1.5;
+    font-weight: 400;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    overflow: hidden;
+    color: var(--color-text);
+    background-color: var(--color-surface);
+  }
+
+  #root {
+    height: 100%;
+  }
+
+  a {
+    font-weight: 500;
+    color: var(--color-ghost);
+    text-decoration: inherit;
+  }
+
+  a:hover {
+    color: var(--color-ghost-hover);
+  }
+}
+
+/* Animation keyframes used across the app */
+@keyframes slideIn {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+@keyframes btn-spin {
+  to { transform: rotate(360deg); }
+}
+
+@utility animate-slide-in {
+  animation: slideIn 0.2s ease-out;
+}
+
+@utility animate-spin-fast {
+  animation: btn-spin 0.6s linear infinite;
+}

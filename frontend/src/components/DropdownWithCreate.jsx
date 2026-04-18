@@ -6,7 +6,6 @@
  */
 
 import Dropdown from './Dropdown';
-import './DropdownWithCreate.css';
 import { createLogger } from '@/lib/logger';
 
 /** @type {import('@/lib/logger').Logger} */
@@ -88,7 +87,7 @@ export default function DropdownWithCreate({
   ] : options;
 
   return (
-    <div className="dropdown-with-create">
+    <div className="w-full">
       <Dropdown
         value={value}
         onChange={handleDropdownChange}

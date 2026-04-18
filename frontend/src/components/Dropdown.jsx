@@ -4,58 +4,6 @@
  * objects and normalizes the "nothing selected" state to `null`.
  */
 
-import './Dropdown.css';
-
-/**
- * Controlled select input backed by an array of option objects.
- *
- * Key behaviors:
- *  - **Null handling** — `value` may be `null`/`undefined`; the component
- *    maps that to an empty-string `<option>` internally and emits `null`
- *    (not `''`) back through `onChange` when the empty option is chosen.
- *  - **Placeholder vs. empty option** — when `includeEmpty` is `false`
- *    and nothing is selected, a disabled placeholder row is shown so the
- *    user must pick a real value. When `includeEmpty` is `true`, a
- *    selectable "clear" row (`emptyLabel`) is rendered instead.
- *  - **Configurable shape** — `valueKey` / `labelKey` let callers use
- *    their domain objects directly without reshaping to `{id, name}`.
- *
- * @component
- * @param {Object} props
- * @param {string|number|null|undefined} props.value
- *        Currently selected option value (matched against
- *        `option[valueKey]`). `null`/`undefined` means nothing selected.
- * @param {(value: string|null) => void} props.onChange
- *        Called with the selected option's value, or `null` when the
- *        empty option is chosen. Note: native `<select>` values are
- *        strings, so numeric ids come back as strings.
- * @param {Object[]} [props.options=[]]
- *        Option objects to render.
- * @param {boolean} [props.disabled=false]
- *        Disables the control.
- * @param {string} [props.placeholder='Select...']
- *        Text for the non-selectable placeholder row shown when
- *        `includeEmpty` is `false` and no value is selected.
- * @param {string} [props.valueKey='id']
- *        Property of each option object used as the `<option value>`.
- * @param {string} [props.labelKey='name']
- *        Property of each option object used as the visible label.
- * @param {boolean} [props.includeEmpty=false]
- *        When `true`, renders a selectable empty row (lets the user
- *        clear the selection back to `null`).
- * @param {string} [props.emptyLabel='Please Select']
- *        Label for the selectable empty row when `includeEmpty` is `true`.
- * @returns {JSX.Element}
- *
- * @example
- * <Dropdown
- *   value={txn.category_id}
- *   onChange={(id) => updateTxn(txn.id, { category_id: id })}
- *   options={categories}
- *   includeEmpty
- *   emptyLabel="Uncategorized"
- * />
- */
 export default function Dropdown({
   value,
   onChange,
@@ -78,7 +26,7 @@ export default function Dropdown({
       value={value === null || value === undefined ? '' : value}
       onChange={handleChange}
       disabled={disabled}
-      className={`dropdown ${value === null || value === '' ? 'dropdown-empty' : ''}`}
+      className={`p-[0.4em_0.8em] border border-border-dark rounded bg-surface-dark text-white/87 text-[0.9em] cursor-pointer w-full box-border hover:border-ghost focus:outline-2 focus:outline-ghost focus:outline-offset-1 disabled:cursor-not-allowed disabled:opacity-50 disabled:border-border-dark light:bg-surface-alt light:border-border light:text-text light:hover:border-ghost light:disabled:border-border ${value === null || value === '' ? 'text-text-light' : ''}`}
     >
       {includeEmpty && (
         <option value="">{emptyLabel}</option>

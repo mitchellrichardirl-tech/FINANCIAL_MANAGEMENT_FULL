@@ -23,9 +23,8 @@ import { useState, useMemo } from 'react';
 import DropdownWithCreate from '@/components/DropdownWithCreate';
 import Checkbox from '@/components/Checkbox';
 import RemapPartyPrompt from './RemapPartyPrompt';
-import './TransactionRow.css';
 import { createLogger } from '@/lib/logger';
-import { useToast } from '@/components/ToastContext';
+import { useToast } from '@/stores/toastStore';
 
 /** @type {import('@/lib/logger').Logger} */
 const logger = createLogger('TransactionRow');
@@ -422,11 +421,22 @@ export default function TransactionRow({
   /** Format a numeric amount to two decimals. */
   const formatAmount = (a) => (a == null ? '' : parseFloat(a).toFixed(2));
 
-  const renderViewCell = (value) => <span className="view-value">{value || '-'}</span>;
+  const renderViewCell = (value) => <span className="block py-[4px]">{value || '-'}</span>;
 
   const renderCheckboxCell = (value) => (
-    <span className={`check-indicator ${value ? 'checked' : ''}`}>{value ? '✓' : ''}</span>
+    <span className={`block text-center font-bold text-[16px] ${value ? 'text-[#4caf50]' : ''}`}>{value ? '✓' : ''}</span>
   );
+
+  // Row class computation
+  const rowClasses = [
+    'transition-colors duration-200',
+    isEditing ? 'bg-[#fff9e6] shadow-[inset_0_0_0_2px_#f0c36d]' : '',
+    isSelected && !isEditing ? 'bg-[#e7f3ff]' : '',
+    error ? 'shadow-[inset_0_0_0_2px_#f44336]' : '',
+  ].filter(Boolean).join(' ');
+
+  // Common cell classes for truncation
+  const truncCell = 'txn-truncate-cell';
 
   return (
     <>
@@ -439,27 +449,23 @@ export default function TransactionRow({
         />
       )}
 
-      <tr
-        className={`transaction-row ${isEditing ? 'editing' : ''} ${
-          isSelected ? 'selected' : ''
-        } ${error ? 'has-error' : ''}`}
-      >
+      <tr className={rowClasses}>
         {/* Selection checkbox */}
-        <td className="select-cell">
+        <td className="w-[40px] text-center! p-[8px] border-b border-[#e9ecef] align-middle text-[14px]">
           <Checkbox checked={isSelected} onChange={onSelectionChange} disabled={isEditing} />
         </td>
 
         {/* Description (read-only) */}
-        <td className="description-cell" title={transaction.description}>
+        <td className={`${truncCell} txn-desc-cell w-[20%] min-w-[200px] p-[8px] border-b border-[#e9ecef] align-middle text-[14px] whitespace-normal leading-[1.4]`} title={transaction.description}>
           {transaction.description}
         </td>
 
         {/* Cleaned Description (editable) */}
-        <td className="cleaned-description-cell">
+        <td className={`${truncCell} txn-cleaned-desc-cell w-[15%] min-w-[150px] p-[8px] border-b border-[#e9ecef] align-middle text-[14px]`}>
           {isEditing ? (
             <input
               type="text"
-              className="edit-input"
+              className="w-full py-[6px] px-[8px] border border-border rounded-[4px] text-[14px] font-[inherit] text-left"
               value={draft.cleaned_description}
               onChange={(e) =>
                 setDraft((prev) => ({ ...prev, cleaned_description: e.target.value }))
@@ -472,13 +478,13 @@ export default function TransactionRow({
         </td>
 
         {/* Date (read-only) */}
-        <td className="date-cell">{formatDate(transaction.transaction_date)}</td>
+        <td className="w-[10%] whitespace-nowrap tabular-nums p-[8px] border-b border-[#e9ecef] align-middle text-[14px]">{formatDate(transaction.transaction_date)}</td>
 
         {/* Amount (read-only) */}
-        <td className="amount-cell">{formatAmount(transaction.amount)}</td>
+        <td className="w-[10%] text-right! p-[8px] border-b border-[#e9ecef] align-middle text-[14px] text-[#212529]">{formatAmount(transaction.amount)}</td>
 
         {/* Is Credit */}
-        <td className="lodgment-cell">
+        <td className="w-[80px] text-center! p-[8px] border-b border-[#e9ecef] align-middle text-[14px]">
           {isEditing ? (
             <Checkbox
               checked={draft.is_credit}
@@ -490,12 +496,12 @@ export default function TransactionRow({
         </td>
 
         {/* Account (read-only) */}
-        <td className="account-cell" title={transaction.account_name || ''}>
+        <td className={`${truncCell} w-[10%] p-[8px] border-b border-[#e9ecef] align-middle text-[14px]`} title={transaction.account_name || ''}>
           {transaction.account_name || '-'}
         </td>
 
         {/* Party */}
-        <td className="party-cell" title={isEditing ? '' : transaction.party_name || ''}>
+        <td className={`txn-party-cell w-[10%] p-[8px] border-b border-[#e9ecef] align-middle text-[14px] flex items-center gap-[0.4rem] max-w-0 overflow-hidden text-ellipsis whitespace-nowrap`} title={isEditing ? '' : transaction.party_name || ''}>
           {isEditing ? (
             <DropdownWithCreate
               value={draft.party_id}
@@ -514,7 +520,7 @@ export default function TransactionRow({
               {renderViewCell(transaction.party_name)}
               {transaction.party_id && onRemapParty && (
                 <button
-                  className="remap-party-btn"
+                  className="txn-remap-party-btn"
                   onClick={() => onRemapParty(transaction.party_id)}
                   title={`Remap party: ${transaction.party_name}`}
                   type="button"
@@ -527,7 +533,7 @@ export default function TransactionRow({
         </td>
 
         {/* Type */}
-        <td className="type-cell" title={isEditing ? '' : transaction.type_name || ''}>
+        <td className={`${truncCell} w-[10%] p-[8px] border-b border-[#e9ecef] align-middle text-[14px]`} title={isEditing ? '' : transaction.type_name || ''}>
           {isEditing ? (
             <DropdownWithCreate
               value={draft.type_id}
@@ -547,7 +553,7 @@ export default function TransactionRow({
         </td>
 
         {/* Sub-Category */}
-        <td className="sub-category-cell" title={isEditing ? '' : transaction.sub_category_name || ''}>
+        <td className={`${truncCell} w-[10%] p-[8px] border-b border-[#e9ecef] align-middle text-[14px]`} title={isEditing ? '' : transaction.sub_category_name || ''}>
           {isEditing ? (
             <DropdownWithCreate
               value={draft.sub_category_id}
@@ -567,7 +573,7 @@ export default function TransactionRow({
         </td>
 
         {/* Category */}
-        <td className="category-cell" title={isEditing ? '' : transaction.category_name || ''}>
+        <td className={`${truncCell} w-[10%] p-[8px] border-b border-[#e9ecef] align-middle text-[14px]`} title={isEditing ? '' : transaction.category_name || ''}>
           {isEditing ? (
             <DropdownWithCreate
               value={draft.category_id}
@@ -587,7 +593,7 @@ export default function TransactionRow({
         </td>
 
         {/* Is Kids */}
-        <td className="kids-cell">
+        <td className="w-[80px] text-center! p-[8px] border-b border-[#e9ecef] align-middle text-[14px]">
           {isEditing ? (
             <Checkbox
               checked={draft.is_kids}
@@ -599,7 +605,7 @@ export default function TransactionRow({
         </td>
 
         {/* Is One-Off */}
-        <td className="one-off-cell">
+        <td className="w-[80px] text-center! p-[8px] border-b border-[#e9ecef] align-middle text-[14px]">
           {isEditing ? (
             <Checkbox
               checked={draft.is_one_off}
@@ -611,18 +617,18 @@ export default function TransactionRow({
         </td>
 
         {/* Actions */}
-        <td className="actions-cell">
+        <td className="w-[60px] text-center! p-[8px] border-b border-[#e9ecef] align-middle text-[14px]">
           {error && (
-            <span className="row-error" title="Save failed — see notification">
+            <span className="text-[#f44336] mr-[8px] cursor-help" title="Save failed — see notification">
               ⚠
             </span>
           )}
           {isEditing ? (
-            <div className="edit-actions">
+            <div className="flex gap-[4px] justify-center">
               <button
                 onClick={saveChanges}
                 disabled={isSaving}
-                className="btn-save"
+                className="py-[6px] px-[10px] border-none rounded-[4px] cursor-pointer text-[14px] transition-[background-color,opacity] duration-200 bg-[#4caf50] text-white hover:bg-[#388e3c] disabled:opacity-50 disabled:cursor-not-allowed"
                 title="Save changes"
               >
                 {isSaving ? '...' : '✓'}
@@ -630,14 +636,18 @@ export default function TransactionRow({
               <button
                 onClick={cancelEditing}
                 disabled={isSaving}
-                className="btn-cancel"
+                className="py-[6px] px-[10px] border-none rounded-[4px] cursor-pointer text-[14px] transition-[background-color,opacity] duration-200 bg-[#f44336] text-white hover:bg-[#d32f2f] disabled:opacity-50 disabled:cursor-not-allowed"
                 title="Cancel"
               >
                 ✕
               </button>
             </div>
           ) : (
-            <button onClick={startEditing} className="btn-edit" title="Edit transaction">
+            <button
+              onClick={startEditing}
+              className="py-[6px] px-[10px] border-none rounded-[4px] cursor-pointer text-[14px] transition-[background-color,opacity] duration-200 bg-[#2196f3] text-white hover:bg-[#1976d2]"
+              title="Edit transaction"
+            >
               ✎
             </button>
           )}

@@ -59,22 +59,22 @@ function FilePreview({ files, onRemove, disabled = false }) {
   };
 
   return (
-    <div className="file-preview-list">
+    <div className="flex flex-col gap-2 mt-2">
       {files.map((file, index) => (
-        <div key={`${file.name}-${index}`} className="file-preview-item">
-          <span className="file-icon">{getFileIcon(file)}</span>
-          <div className="file-info">
-            <span className="file-name" title={file.name}>
+        <div key={`${file.name}-${index}`} className="flex items-center gap-3 p-2 bg-[#f9f9f9] border border-border rounded">
+          <span className="text-lg">{getFileIcon(file)}</span>
+          <div className="flex flex-col flex-1 min-w-0">
+            <span className="text-sm truncate" title={file.name}>
               {file.name.length > 30
                 ? `${file.name.substring(0, 27)}...`
                 : file.name
               }
             </span>
-            <span className="file-size">{formatFileSize(file.size)}</span>
+            <span className="text-xs text-text-light">{formatFileSize(file.size)}</span>
           </div>
           <button
             onClick={() => onRemove(index)}
-            className="btn-remove-file"
+            className="border-none bg-transparent text-text-light cursor-pointer text-base hover:text-danger disabled:opacity-50 disabled:cursor-not-allowed"
             disabled={disabled}
             title="Remove file"
           >

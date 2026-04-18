@@ -14,7 +14,6 @@
 import { createPortal } from 'react-dom';
 import { useState, useEffect } from 'react';
 import { ErrorCode } from '@/lib/apiErrors';
-import './CreateCategoryModal.css';
 import { createLogger } from '@/lib/logger';
 
 /** @type {import('@/lib/logger').Logger} */
@@ -22,7 +21,6 @@ const logger = createLogger('CreateCategoryModal');
 
 /**
  * UI copy for each taxonomy level.
- * @type {Object<string, {title: string, nameLabel: string, namePlaceholder: string, parentLabel: ?string}>}
  */
 const TYPE_CONFIG = {
   category: {
@@ -51,43 +49,20 @@ const TYPE_CONFIG = {
   },
 };
 
-/**
- * Error codes considered "name-field" scoped. These are shown inline
- * under the input rather than in a banner.
- *
- * @type {Set<string>}
- */
 const NAME_FIELD_CODES = new Set([ErrorCode.DUPLICATE_NAME, ErrorCode.REQUIRED_FIELD]);
 
 /**
  * Modal for creating a category, sub-category, type, or party.
  *
  * @component
- * @param {Object} props
- * @param {boolean} props.isOpen - Visibility flag.
- * @param {() => void} props.onClose - Called to close the modal (Cancel, ×, backdrop).
- * @param {(name: string, parentId: ?number, description: string) => Promise<Object>} props.onSave
- *        Async callback that creates the item. Should throw on failure
- *        (the modal catches and displays the error).
- * @param {'category'|'sub_category'|'type'|'party'} props.type
- *        Taxonomy level being created.
- * @param {string} [props.parentName]
- *        Display name of the parent entity (shown read-only).
- * @param {?number} [props.parentId]
- *        ID passed to `onSave` for non-root levels.
- * @returns {JSX.Element|null}
  */
 export default function CreateCategoryModal({ isOpen, onClose, onSave, type, parentName, parentId }) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-
-  /** General/banner error. */
   const [error, setError] = useState(null);
-  /** Inline error under the name input. */
   const [nameError, setNameError] = useState(null);
 
-  // Reset form when opened
   useEffect(() => {
     if (isOpen) {
       setName('');
@@ -99,10 +74,6 @@ export default function CreateCategoryModal({ isOpen, onClose, onSave, type, par
 
   const config = TYPE_CONFIG[type] || TYPE_CONFIG.category;
 
-  /**
-   * Validate, call `onSave`, and route errors to the appropriate UI
-   * location.
-   */
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -117,17 +88,15 @@ export default function CreateCategoryModal({ isOpen, onClose, onSave, type, par
 
     try {
       await onSave(name.trim(), parentId, description.trim());
-      // Parent closes modal on success
     } catch (err) {
       logger.error('Error creating item:', err);
 
       const message = err.userMessage || err.message || 'Failed to create item';
 
-      // Determine whether the error is name-field scoped
       const isNameField =
         NAME_FIELD_CODES.has(err.code) ||
         err.field === 'name' ||
-        err.field === type || // backend may send field='category', 'type', …
+        err.field === type ||
         err.field === 'sub_category';
 
       if (isNameField) {
@@ -140,7 +109,6 @@ export default function CreateCategoryModal({ isOpen, onClose, onSave, type, par
     }
   };
 
-  /** Clear field error as user types. */
   const handleNameChange = (e) => {
     setName(e.target.value);
     if (nameError) setNameError(null);
@@ -157,12 +125,15 @@ export default function CreateCategoryModal({ isOpen, onClose, onSave, type, par
   if (!isOpen) return null;
 
   return createPortal(
-    <div className="modal-backdrop" onClick={handleBackdropClick}>
-      <div className="modal-content create-modal">
-        <div className="modal-header">
-          <h2>{config.title}</h2>
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000]"
+      onClick={handleBackdropClick}
+    >
+      <div className="bg-white rounded-[8px] shadow-[0_4px_20px_rgba(0,0,0,0.2)] w-full max-w-[450px] max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="flex justify-between items-center py-[16px] px-[20px] border-b border-[#eee]">
+          <h2 className="m-0 text-[18px] font-semibold text-text-dark">{config.title}</h2>
           <button
-            className="modal-close"
+            className="bg-none border-none text-[24px] text-text-muted cursor-pointer p-0 leading-[1] transition-colors duration-200 hover:not-disabled:text-text-dark disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={handleClose}
             disabled={isSaving}
             aria-label="Close"
@@ -172,22 +143,22 @@ export default function CreateCategoryModal({ isOpen, onClose, onSave, type, par
         </div>
 
         <form onSubmit={handleSubmit}>
-          <div className="modal-body">
+          <div className="p-[20px] overflow-y-auto">
             {error && (
-              <div className="modal-error" role="alert">
+              <div className="bg-[#ffebee] text-[#c62828] py-[10px] px-[12px] rounded-[4px] mb-[16px] text-[14px]" role="alert">
                 {error}
               </div>
             )}
 
             {config.parentLabel && parentName && (
-              <div className="form-group">
-                <label>{config.parentLabel}</label>
-                <div className="parent-value">{parentName}</div>
+              <div className="mb-[16px]">
+                <label className="block mb-[6px] font-medium text-[#555] text-[14px]">{config.parentLabel}</label>
+                <div className="py-[10px] px-[12px] bg-[#f5f5f5] rounded-[4px] text-text-dark text-[14px]">{parentName}</div>
               </div>
             )}
 
-            <div className={`form-group ${nameError ? 'has-error' : ''}`}>
-              <label htmlFor="item-name">{config.nameLabel} *</label>
+            <div className={`mb-[16px] ${nameError ? '[&_input]:border-[#dc2626] [&_input]:bg-[#fef2f2] [&_input:focus]:outline-[#dc2626]' : ''}`}>
+              <label htmlFor="item-name" className="block mb-[6px] font-medium text-[#555] text-[14px]">{config.nameLabel} *</label>
               <input
                 id="item-name"
                 type="text"
@@ -198,16 +169,17 @@ export default function CreateCategoryModal({ isOpen, onClose, onSave, type, par
                 autoFocus
                 aria-invalid={!!nameError}
                 aria-describedby={nameError ? 'item-name-error' : undefined}
+                className="w-full py-[10px] px-[12px] border border-border rounded-[4px] text-[14px] box-border transition-[border-color,box-shadow] duration-200 focus:border-[#2196f3] focus:outline-none focus:shadow-[0_0_0_3px_rgba(33,150,243,0.1)] disabled:bg-[#f5f5f5] disabled:cursor-not-allowed"
               />
               {nameError && (
-                <span id="item-name-error" className="field-error" role="alert">
+                <span id="item-name-error" className="block mt-[0.375rem] text-[0.875rem] text-[#dc2626]" role="alert">
                   {nameError}
                 </span>
               )}
             </div>
 
-            <div className="form-group">
-              <label htmlFor="item-description">Description (optional)</label>
+            <div className="mb-0">
+              <label htmlFor="item-description" className="block mb-[6px] font-medium text-[#555] text-[14px]">Description (optional)</label>
               <textarea
                 id="item-description"
                 value={description}
@@ -215,15 +187,25 @@ export default function CreateCategoryModal({ isOpen, onClose, onSave, type, par
                 placeholder="Enter description"
                 disabled={isSaving}
                 rows={3}
+                className="w-full py-[10px] px-[12px] border border-border rounded-[4px] text-[14px] box-border transition-[border-color,box-shadow] duration-200 resize-y min-h-[80px] focus:border-[#2196f3] focus:outline-none focus:shadow-[0_0_0_3px_rgba(33,150,243,0.1)] disabled:bg-[#f5f5f5] disabled:cursor-not-allowed"
               />
             </div>
           </div>
 
-          <div className="modal-footer">
-            <button type="button" className="btn-secondary" onClick={handleClose} disabled={isSaving}>
+          <div className="flex justify-end gap-[12px] py-[16px] px-[20px] border-t border-[#eee] bg-[#fafafa]">
+            <button
+              type="button"
+              className="py-[10px] px-[20px] border-none rounded-[4px] text-[14px] font-medium cursor-pointer transition-[background-color,opacity] duration-200 bg-[#e0e0e0] text-text-dark hover:not-disabled:bg-[#d0d0d0] disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={handleClose}
+              disabled={isSaving}
+            >
               Cancel
             </button>
-            <button type="submit" className="btn-primary" disabled={isSaving || !name.trim()}>
+            <button
+              type="submit"
+              className="py-[10px] px-[20px] border-none rounded-[4px] text-[14px] font-medium cursor-pointer transition-[background-color,opacity] duration-200 bg-[#2196f3] text-white hover:not-disabled:bg-[#1976d2] disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={isSaving || !name.trim()}
+            >
               {isSaving ? 'Creating...' : 'Create'}
             </button>
           </div>

@@ -20,7 +20,6 @@
 
 import { useState, useRef } from 'react';
 import FilePreview from '@/components/FilePreview';
-import './BulkUploadReceipts.css';
 import { API_BASE_URL } from '@/lib/apiClient';
 import { createLogger } from '@/lib/logger';
 import { AppError } from '@/lib/errors';
@@ -241,9 +240,9 @@ function BulkUploadReceipts({
   };
 
   return (
-    <div className={`bulk-upload-receipts ${compact ? 'compact' : ''}`}>
+    <div className={`flex flex-col gap-4 ${compact ? '[&_.dropzone-zone]:p-4 [&_.dropzone-icon]:text-2xl [&_.dropzone-text]:text-sm' : ''}`}>
       <div
-        className={`dropzone ${isProcessing ? 'disabled' : ''}`}
+        className={`dropzone-zone rounded-lg border-2 border-dashed border-[#ccc] bg-[#fafafa] text-center transition-all ${compact ? 'p-4' : 'p-6'} ${isProcessing ? 'opacity-60 cursor-not-allowed' : 'hover:border-primary hover:bg-[#f0f7ff]'} [&.drag-over]:border-primary [&.drag-over]:bg-[#e7f1ff] [&.drag-over]:border-solid`}
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -256,26 +255,30 @@ function BulkUploadReceipts({
           onChange={handleFileSelect}
           disabled={isProcessing}
           id="bulk-file-input"
-          className="file-input-hidden"
+          className="hidden"
         />
-        <label htmlFor="bulk-file-input" className="dropzone-label">
-          <div className="dropzone-content">
-            <span className="dropzone-icon">{compact ? '📁' : '📁'}</span>
-            <span className="dropzone-text">
+        <label htmlFor="bulk-file-input" className={`block ${isProcessing ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
+          <div className="flex flex-col items-center gap-2">
+            <span className={compact ? 'text-2xl' : 'text-[2rem]'}>{compact ? '\u{1F4C1}' : '\u{1F4C1}'}</span>
+            <span className={`${compact ? 'text-sm' : 'text-[0.9rem]'} text-text-dark`}>
               {compact ? 'Drop files or click to select' : 'Drop files here or click to select'}
             </span>
-            {!compact && <span className="dropzone-hint">Supports JPG, PNG, PDF</span>}
+            {!compact && <span className="text-xs text-text-muted">Supports JPG, PNG, PDF</span>}
           </div>
         </label>
       </div>
 
       {files.length > 0 && (
-        <div className="selected-files-section">
-          <div className="selected-files-header">
-            <span className="file-count">
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[0.8rem] text-text-muted">
               {files.length} file{files.length !== 1 ? 's' : ''}
             </span>
-            <button onClick={clearFiles} className="btn-clear-files" disabled={isProcessing}>
+            <button
+              onClick={clearFiles}
+              className="cursor-pointer rounded-[3px] border border-[#999] bg-transparent px-2 py-0.5 text-xs text-text-muted hover:enabled:border-danger-alt hover:enabled:text-danger-alt"
+              disabled={isProcessing}
+            >
               Clear
             </button>
           </div>
@@ -285,7 +288,7 @@ function BulkUploadReceipts({
           <button
             onClick={processReceipts}
             disabled={isProcessing || files.length === 0}
-            className="btn-process"
+            className="cursor-pointer rounded border-none bg-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:enabled:bg-[#0056b3] disabled:cursor-not-allowed disabled:bg-[#ccc]"
           >
             {isProcessing
               ? `Processing ${progress.current}/${progress.total}...`
@@ -295,10 +298,10 @@ function BulkUploadReceipts({
       )}
 
       {isProcessing && (
-        <div className="processing-progress">
-          <div className="progress-bar">
+        <div className="mt-2">
+          <div className="h-1 w-full overflow-hidden rounded-sm bg-[#e0e0e0]">
             <div
-              className="progress-fill"
+              className="h-full bg-primary transition-[width] duration-300 ease-linear"
               style={{
                 width: `${progress.total > 0 ? (progress.current / progress.total) * 100 : 0}%`,
               }}

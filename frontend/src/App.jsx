@@ -3,28 +3,25 @@ import UploadStatement from '@/features/statements';
 import CategorizeTransactions from '@/features/transactions/CategorizeTransactions';
 import ProcessReceipts from '@/features/receipts/ProcessReceipts';
 import { StatementFormatsPage, FormatEditorPage } from '@/features/statementFormats';
-import { ToastProvider } from '@/components/ToastContext';
-import './App.css';
+import ToastContainer from '@/components/ToastContainer';
 
 function App() {
   return (
-    <ToastProvider>
+    <>
       <Router>
-        <div className="app">
-          {/* Navigation header */}
-          <nav className="nav-menu">
-              <Link to="/">Home</Link>
-            <Link to="/upload">Upload Statement</Link>
-            <Link to="/categorize">Categorize Transactions</Link>
-            <Link to="/process-receipts">Process Receipts</Link>
-            <Link to="/statement-formats">Statement Formats</Link>
+        <div className="h-full flex flex-col overflow-hidden">
+          <nav className="shrink-0 px-5 py-4 bg-nav-bg border-b border-border flex gap-5 justify-center">
+            <Link to="/" className="text-text-dark no-underline font-medium px-3 py-2 rounded hover:bg-[#e0e0e0] transition-colors">Home</Link>
+            <Link to="/upload" className="text-text-dark no-underline font-medium px-3 py-2 rounded hover:bg-[#e0e0e0] transition-colors">Upload Statement</Link>
+            <Link to="/categorize" className="text-text-dark no-underline font-medium px-3 py-2 rounded hover:bg-[#e0e0e0] transition-colors">Categorize Transactions</Link>
+            <Link to="/process-receipts" className="text-text-dark no-underline font-medium px-3 py-2 rounded hover:bg-[#e0e0e0] transition-colors">Process Receipts</Link>
+            <Link to="/statement-formats" className="text-text-dark no-underline font-medium px-3 py-2 rounded hover:bg-[#e0e0e0] transition-colors">Statement Formats</Link>
           </nav>
 
-          {/* Main content area */}
-          <main className="main-content">
+          <main className="flex-1 min-h-0 overflow-hidden flex justify-center bg-bg">
             <Routes>
               <Route path="/" element={
-                <div className="home-page">
+                <div className="w-full max-w-[1200px] p-5 overflow-auto h-full box-border">
                   <h1>Transaction Manager</h1>
                   <p>Welcome! Use the navigation above to get started.</p>
                 </div>
@@ -39,7 +36,8 @@ function App() {
           </main>
         </div>
       </Router>
-    </ToastProvider>
+      <ToastContainer />
+    </>
   );
 }
 

@@ -8,19 +8,17 @@
 import { useNavigate } from 'react-router-dom';
 
 import Button from '@/components/Button';
-import { useToast } from '@/components/ToastContext';
+import { useToast } from '@/stores/toastStore';
 
 import { STEP, STEP_LABELS } from '../constants';
 import { useFormatEditor } from './useFormatEditor';
-import Stepper from './Stepper';
+import Stepper from './stepper';
 
 import StepSampleFile from './steps/StepSampleFile';
 import StepIdentity from './steps/StepIdentity';
 import StepColumns from './steps/StepColumns';
 import StepDefaults from './steps/StepDefaults';
 import StepPreview from './steps/StepPreview';
-
-import './FormatEditor.css';
 
 /**
  * @component
@@ -54,15 +52,17 @@ export default function FormatEditor({ mode, initialDraft, numericId, schema }) 
   };
 
   return (
-    <div className="format-editor">
-      <Stepper
-        labels={STEP_LABELS}
-        current={step}
-        maxReachable={maxStepReached}
-        onStepClick={goToStep}
-      />
+    <div className="flex-1 min-h-0 flex flex-col">
+      <div className="shrink-0">
+        <Stepper
+          labels={STEP_LABELS}
+          current={step}
+          maxReachable={maxStepReached}
+          onStepClick={goToStep}
+        />
+      </div>
 
-      <div className="format-editor__body">
+      <div className="flex-1 min-h-0 overflow-y-auto px-1 pt-2 pb-6">
         {step === STEP.SAMPLE && <StepSampleFile editor={editor} />}
         {step === STEP.IDENTITY && <StepIdentity editor={editor} />}
         {step === STEP.COLUMNS && <StepColumns editor={editor} />}
@@ -70,13 +70,13 @@ export default function FormatEditor({ mode, initialDraft, numericId, schema }) 
         {step === STEP.PREVIEW && <StepPreview editor={editor} />}
       </div>
 
-      <div className="format-editor__footer">
-        <div className="format-editor__footer-left">
+      <div className="shrink-0 flex justify-between items-center pt-4 border-t border-[#e9ecef]">
+        <div>
           <Button variant="ghost" onClick={() => navigate('/statement-formats')}>
             Cancel
           </Button>
         </div>
-        <div className="format-editor__footer-right">
+        <div className="flex gap-2.5">
           {step > STEP.SAMPLE && (
             <Button variant="secondary" onClick={prevStep} disabled={saving}>
               Back

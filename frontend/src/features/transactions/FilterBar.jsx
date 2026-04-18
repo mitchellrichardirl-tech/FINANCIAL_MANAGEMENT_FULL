@@ -17,7 +17,6 @@
 import { useState, useEffect } from 'react';
 import Dropdown from '@/components/Dropdown';
 import Checkbox from '@/components/Checkbox';
-import './FilterBar.css';
 import { createLogger } from '@/lib/logger';
 
 /** @type {import('@/lib/logger').Logger} */
@@ -246,13 +245,16 @@ export default function FilterBar({
     setCleanedDescriptionInput('');
   };
 
-  return (
-    <div className="filter-bar">
-      <h3>Filters</h3>
+  const inputClasses = "py-[0.4em] px-[0.8em] border border-border rounded-[4px] bg-surface-alt text-text text-[0.9em] font-[inherit] hover:border-ghost focus:outline-2 focus:outline-ghost focus:outline-offset-1";
+  const textInputClasses = `${inputClasses} placeholder:text-[#999] placeholder:italic`;
 
-      <div className="filter-grid">
-        <div className="filter-item">
-          <label>Account</label>
+  return (
+    <div className="bg-[rgba(100,108,255,0.05)] p-[1.5rem] rounded-[8px] mb-[2rem]">
+      <h3 className="mt-0 mb-[1rem] text-[1.2em]">Filters</h3>
+
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-[1rem] mb-[1rem]">
+        <div className="flex flex-col gap-[0.5rem]">
+          <label className="text-[0.9em] font-medium text-text-light">Account</label>
           <Dropdown
             value={filters.account_id}
             onChange={(value) => handleFilterChange('account_id', value)}
@@ -264,8 +266,8 @@ export default function FilterBar({
           />
         </div>
 
-        <div className="filter-item">
-          <label>Category</label>
+        <div className="flex flex-col gap-[0.5rem]">
+          <label className="text-[0.9em] font-medium text-text-light">Category</label>
           <Dropdown
             value={filters.category_id}
             onChange={(value) => handleFilterChange('category_id', value)}
@@ -277,8 +279,8 @@ export default function FilterBar({
           />
         </div>
 
-        <div className="filter-item">
-          <label>Sub-Category</label>
+        <div className="flex flex-col gap-[0.5rem]">
+          <label className="text-[0.9em] font-medium text-text-light">Sub-Category</label>
           <Dropdown
             value={filters.sub_category_id}
             onChange={(value) => handleFilterChange('sub_category_id', value)}
@@ -291,8 +293,8 @@ export default function FilterBar({
           />
         </div>
 
-        <div className="filter-item">
-          <label>Type</label>
+        <div className="flex flex-col gap-[0.5rem]">
+          <label className="text-[0.9em] font-medium text-text-light">Type</label>
           <Dropdown
             value={filters.type_id}
             onChange={(value) => handleFilterChange('type_id', value)}
@@ -305,8 +307,8 @@ export default function FilterBar({
           />
         </div>
 
-        <div className="filter-item">
-          <label>Party</label>
+        <div className="flex flex-col gap-[0.5rem]">
+          <label className="text-[0.9em] font-medium text-text-light">Party</label>
           <Dropdown
             value={filters.party_id}
             onChange={(value) => handleFilterChange('party_id', value)}
@@ -324,8 +326,8 @@ export default function FilterBar({
           />
         </div>
 
-        <div className="filter-item">
-          <label>Description</label>
+        <div className="flex flex-col gap-[0.5rem]">
+          <label className="text-[0.9em] font-medium text-text-light">Description</label>
           <input
             type="text"
             value={descriptionInput}
@@ -333,12 +335,12 @@ export default function FilterBar({
             onBlur={handleDescriptionBlur}
             onKeyDown={handleDescriptionKeyDown}
             placeholder="Filter by description..."
-            className="text-input"
+            className={textInputClasses}
           />
         </div>
 
-        <div className="filter-item">
-          <label>Cleaned Description</label>
+        <div className="flex flex-col gap-[0.5rem]">
+          <label className="text-[0.9em] font-medium text-text-light">Cleaned Description</label>
           <input
             type="text"
             value={cleanedDescriptionInput}
@@ -346,31 +348,31 @@ export default function FilterBar({
             onBlur={handleCleanedDescriptionBlur}
             onKeyDown={handleDescriptionKeyDown}
             placeholder="Filter by cleaned..."
-            className="text-input"
+            className={textInputClasses}
           />
         </div>
 
-        <div className="filter-item">
-          <label>Start Date</label>
+        <div className="flex flex-col gap-[0.5rem]">
+          <label className="text-[0.9em] font-medium text-text-light">Start Date</label>
           <input
             type="date"
             value={filters.start_date}
             onChange={(e) => handleFilterChange('start_date', e.target.value)}
-            className="date-input"
+            className={inputClasses}
           />
         </div>
 
-        <div className="filter-item">
-          <label>End Date</label>
+        <div className="flex flex-col gap-[0.5rem]">
+          <label className="text-[0.9em] font-medium text-text-light">End Date</label>
           <input
             type="date"
             value={filters.end_date}
             onChange={(e) => handleFilterChange('end_date', e.target.value)}
-            className="date-input"
+            className={inputClasses}
           />
         </div>
 
-        <div className="filter-item filter-checkbox">
+        <div className="flex flex-col gap-[0.5rem] justify-center pt-[1.4rem]">
           <Checkbox
             checked={filters.is_kids === true}
             onChange={(checked) => handleCheckboxFilter('is_kids', checked)}
@@ -378,7 +380,7 @@ export default function FilterBar({
           />
         </div>
 
-        <div className="filter-item filter-checkbox">
+        <div className="flex flex-col gap-[0.5rem] justify-center pt-[1.4rem]">
           <Checkbox
             checked={filters.is_one_off === true}
             onChange={(checked) => handleCheckboxFilter('is_one_off', checked)}
@@ -387,7 +389,7 @@ export default function FilterBar({
         </div>
       </div>
 
-      <button onClick={clearFilters} className="clear-filters-button">
+      <button onClick={clearFilters} className="mt-[0.5rem]">
         Clear Filters
       </button>
     </div>

@@ -97,7 +97,7 @@ function ReceiptThumbnail({
   };
 
   if (error) {
-    return <div className="receipt-thumbnail-error">{error}</div>;
+    return <div className="text-xs text-danger italic">{error}</div>;
   }
 
   if (!previewUrl && !isLoading) {
@@ -107,11 +107,11 @@ function ReceiptThumbnail({
   return (
     <>
       <div
-        className={'receipt-thumbnail-container'}
+        className="inline-block overflow-hidden"
         style={{ maxWidth }}
       >
         {isLoading && (
-          <div className="receipt-thumbnail-loading">Loading...</div>
+          <div className="text-xs text-text-light">Loading...</div>
         )}
 
         {fileType === 'image' && previewUrl && (
@@ -120,7 +120,7 @@ function ReceiptThumbnail({
             alt={alt}
             onLoad={handleImageLoad}
             onError={handleImageError}
-            className={`receipt-thumbnail${isLoading ? 'hidden' : ''}`}
+            className={`w-full h-auto object-contain ${isLoading ? 'hidden' : ''}`}
             style={{ maxHeight }}
           />
         )}
@@ -130,19 +130,19 @@ function ReceiptThumbnail({
             className={isLoading ? 'hidden' : ''}
           >
             <Document
-              key={previewUrl}                            // ← NEW
+              key={previewUrl}
               file={previewUrl}
               onLoadSuccess={onDocumentLoadSuccess}
               onLoadError={onDocumentLoadError}
               loading=""
             >
-              {pdfReady && (                              // ← NEW
+              {pdfReady && (
                 <Page
                   pageNumber={1}
                   height={parseInt(maxHeight)}
                   renderTextLayer={false}
                   renderAnnotationLayer={false}
-                  onLoadError={(err) => {                 // ← NEW
+                  onLoadError={(err) => {
                     logger.warn('PDF page load error:', err.message);
                   }}
                 />

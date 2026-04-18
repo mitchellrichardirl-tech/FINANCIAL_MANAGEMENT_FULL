@@ -7,8 +7,6 @@
  * and the format editor.
  */
 
-import './ColumnMismatchPanel.css';
-
 /**
  * @typedef {Object} ColumnMismatch
  * @property {string}   message     - User-facing summary.
@@ -53,37 +51,55 @@ export default function ColumnMismatchPanel({ error, onDismiss, actions = [] }) 
     );
 
   return (
-    <div className="column-mismatch-panel" role="alert">
-      <div className="cmp-header">
+    <div className="my-[16px] p-[16px_20px] bg-[#fef2f2] border border-[#fca5a5] border-l-[4px] border-l-[#dc2626] rounded-[6px]" role="alert">
+      <div className="flex justify-between items-start mb-[12px]">
         <div>
-          <strong>Column mismatch</strong>
-          <p className="cmp-message">{message}</p>
+          <strong className="text-[#991b1b] text-[15px]">Column mismatch</strong>
+          <p className="m-[4px_0_0] text-[#7f1d1d] text-[14px]">{message}</p>
         </div>
-        <button className="cmp-close" onClick={onDismiss} aria-label="Dismiss">
+        <button
+          className="bg-none border-none text-[20px] text-[#991b1b] cursor-pointer p-[0_4px] leading-none"
+          onClick={onDismiss}
+          aria-label="Dismiss"
+        >
           ×
         </button>
       </div>
 
-      <div className="cmp-comparison">
-        <div className="cmp-column">
-          <h4>
+      <div className="grid grid-cols-2 gap-[24px] my-[16px] p-[12px] bg-white rounded-[4px]">
+        <div>
+          <h4 className="m-[0_0_8px] text-[13px] uppercase tracking-[0.02em] text-[#6b7280]">
             Expected by <em>{formatName || 'this format'}</em>
           </h4>
-          <ul>
+          <ul className="list-none m-0 p-0 font-mono text-[13px]">
             {required.map((col) => (
-              <li key={col} className={missingSet.has(col) ? 'cmp-missing' : 'cmp-present'}>
+              <li
+                key={col}
+                className={
+                  missingSet.has(col)
+                    ? 'p-[3px_8px] rounded-[3px] mb-[2px] text-[#991b1b] bg-[#fef2f2] font-semibold'
+                    : 'p-[3px_8px] rounded-[3px] mb-[2px] text-[#166534] bg-[#f0fdf4]'
+                }
+              >
                 {missingSet.has(col) ? '✗' : '✓'} {col}
               </li>
             ))}
           </ul>
         </div>
 
-        <div className="cmp-column">
-          <h4>Found in file</h4>
-          <ul>
-            {found.length === 0 && <li className="cmp-empty">(no columns)</li>}
+        <div>
+          <h4 className="m-[0_0_8px] text-[13px] uppercase tracking-[0.02em] text-[#6b7280]">Found in file</h4>
+          <ul className="list-none m-0 p-0 font-mono text-[13px]">
+            {found.length === 0 && <li className="p-[3px_8px] rounded-[3px] mb-[2px] text-[#9ca3af] italic">(no columns)</li>}
             {found.map((col) => (
-              <li key={col} className={requiredSet.has(col) ? 'cmp-present' : 'cmp-extra'}>
+              <li
+                key={col}
+                className={
+                  requiredSet.has(col)
+                    ? 'p-[3px_8px] rounded-[3px] mb-[2px] text-[#166534] bg-[#f0fdf4]'
+                    : 'p-[3px_8px] rounded-[3px] mb-[2px] text-[#6b7280]'
+                }
+              >
                 {requiredSet.has(col) ? '✓' : '·'} {col}
               </li>
             ))}
@@ -91,7 +107,7 @@ export default function ColumnMismatchPanel({ error, onDismiss, actions = [] }) 
         </div>
       </div>
 
-      <div className="cmp-hint">
+      <div className="text-[13px] text-[#78350f] mb-[12px] [&_p]:m-[4px_0]">
         {hasLookalike && (
           <p>
             💡 The file has a column that looks similar — check if the header spelling
@@ -105,9 +121,13 @@ export default function ColumnMismatchPanel({ error, onDismiss, actions = [] }) 
       </div>
 
       {actions.length > 0 && (
-        <div className="cmp-actions">
+        <div className="flex gap-[8px]">
           {actions.map((a) => (
-            <button key={a.label} onClick={a.onClick} className="cmp-btn-secondary">
+            <button
+              key={a.label}
+              onClick={a.onClick}
+              className="p-[6px_14px] text-[13px] bg-white border border-[#d1d5db] rounded-[4px] cursor-pointer hover:bg-[#f9fafb] hover:border-[#9ca3af]"
+            >
               {a.label}
             </button>
           ))}
