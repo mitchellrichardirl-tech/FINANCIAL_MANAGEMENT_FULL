@@ -1,27 +1,5 @@
-/**
- * @file ConfirmDialog.jsx
- * Minimal blocking confirmation modal. Controlled via `open`; no portal
- * — relies on fixed positioning, which is fine at this app's scale.
- */
-
 import Button from './Button';
-import './ConfirmDialog.css';
 
-/**
- * @component
- * @param {Object} props
- * @param {boolean} props.open
- * @param {string} props.title
- * @param {React.ReactNode} [props.children] - Body content. Supersedes `message` if both given.
- * @param {string} [props.message]           - Plain-text body when you don't need JSX.
- * @param {string} [props.confirmLabel='Confirm']
- * @param {string} [props.cancelLabel='Cancel']
- * @param {'primary'|'danger'} [props.confirmVariant='primary']
- * @param {boolean} [props.confirmDisabled=false]
- * @param {boolean} [props.loading=false]    - Applied to the confirm button.
- * @param {() => void} props.onConfirm
- * @param {() => void} props.onCancel
- */
 export default function ConfirmDialog({
   open,
   title,
@@ -38,19 +16,27 @@ export default function ConfirmDialog({
   if (!open) return null;
 
   return (
-    <div className="confirm-dialog__backdrop" onClick={onCancel}>
+    <div
+      onClick={onCancel}
+      className="fixed inset-0 bg-black/40 flex items-center justify-center z-[1000]"
+    >
       <div
-        className="confirm-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirm-dialog-title"
         onClick={(e) => e.stopPropagation()}
+        className="bg-white rounded-md w-[90%] max-w-[440px] py-5 px-6 shadow-[0_10px_40px_rgba(0,0,0,0.2)]"
       >
-        <h3 id="confirm-dialog-title" className="confirm-dialog__title">{title}</h3>
-        <div className="confirm-dialog__body">
+        <h3
+          id="confirm-dialog-title"
+          className="m-0 mb-3 text-lg font-semibold"
+        >
+          {title}
+        </h3>
+        <div className="text-sm text-[#444] mb-5 [&>p]:m-0 [&>p]:mb-2">
           {children ?? <p>{message}</p>}
         </div>
-        <div className="confirm-dialog__actions">
+        <div className="flex justify-end gap-[10px]">
           <Button variant="secondary" onClick={onCancel} disabled={loading}>
             {cancelLabel}
           </Button>

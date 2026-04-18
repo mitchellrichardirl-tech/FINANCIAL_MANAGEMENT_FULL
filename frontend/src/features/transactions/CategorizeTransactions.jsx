@@ -1,203 +1,96 @@
-/**
- * @file CategorizeTransactions.jsx
- * Top-level page for reviewing and categorizing imported bank
- * transactions.
- *
- * Responsibilities:
- *  - Load and own all reference data (accounts, taxonomy, uploads).
- *  - Fetch transactions with server-side filtering, sorting, and paging.
- *  - Wire up inline-edit, bulk-edit, and party-remap flows.
- *  - Surface success/error feedback via toasts.
- *
- * Child components:
- *  - {@link TransactionTable} — sortable, filterable grid.
- *  - {@link Pagination}
- *  - {@link BulkEditModal} — multi-select mass update.
- *  - {@link RemapPartyModal} — move a party to a different type.
- */
-
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { useToast } from '@/components/ToastContext';
 import {
-  getTransactions,
-  updateTransaction,
-  bulkUpdateTransactions,
-  generateCashTransactions,
-  createCashTransaction,
-  getCategories,
-  getSubCategories,
-  getTypes,
-  getParties,
-  getUploads,
-  createCategory,
-  createSubCategory,
-  createType,
-  createParty,
-  remapParty,
-} from './api';
-import { getAccounts } from '@/features/statements/api';
+  useTransactions,
+  useAccounts,
+  useUploads,
+  useCategories,
+  useSubCategories,
+  useTypes,
+  useParties,
+  useUpdateTransaction,
+  useBulkUpdateTransactions,
+  useGenerateCashTransactions,
+  useCreateCashTransaction,
+  useCreateCategory,
+  useCreateSubCategory,
+  useCreateType,
+  useCreateParty,
+  useRemapParty,
+} from './hooks';
 import TransactionTable from './TransactionTable';
 import Pagination from '@/components/Pagination';
 import BulkEditModal from './BulkEditModal';
 import RemapPartyModal from './RemapPartyModal';
 import GenerateCashModal from './GenerateCashModal';
 import CreateCashTransactionModal from './CreateCashTransactionModal';
-import './CategorizeTransactions.css';
 import { createLogger } from '@/lib/logger';
 
-/** @type {import('@/lib/logger').Logger} */
 const logger = createLogger('CategorizeTransactions');
-
-/** Page size for server-side pagination. */
 const ITEMS_PER_PAGE = 100;
 
-/**
- * Main categorization view.
- *
- * @component
- * @returns {JSX.Element}
- */
 export default function CategorizeTransactions() {
   const { addToast } = useToast();
 
-  // ── Data state ────────────────────────────────────────────────────
-  const [transactions, setTransactions] = useState([]);
-  const [accounts, setAccounts] = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [subCategories, setSubCategories] = useState([]);
-  const [types, setTypes] = useState([]);
-  const [parties, setParties] = useState([]);
-  const [uploads, setUploads] = useState([]);
-
-  // ── UI state ──────────────────────────────────────────────────────
-  const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
-  /**
-   * Approximate total — API doesn't return a count, so we infer:
-   *  - If a full page is returned, assume at least one more exists.
-   *  - Otherwise clamp to actual count.
-   */
-  const [totalTransactions, setTotalTransactions] = useState(0);
   const [filters, setFilters] = useState({});
   const [selectedTransactions, setSelectedTransactions] = useState([]);
-  const [isBulkEditOpen, setIsBulkEditOpen] = useState(false)
+  const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
   const [isGenerateCashOpen, setIsGenerateCashOpen] = useState(false);
   const [isCreateCashOpen, setIsCreateCashOpen] = useState(false);
   const [sortField, setSortField] = useState('transaction_date');
   const [sortDir, setSortDir] = useState('desc');
-  /**
-   * When set, the remap modal is open. If a number, that party is
-   * preselected; if `true`, the modal opens empty.
-   * @type {?number|true}
-   */
   const [remapPartyId, setRemapPartyId] = useState(null);
-  /** Optional target type to pre-fill in the remap modal. */
   const [remapTargetTypeId, setRemapTargetTypeId] = useState(null);
 
   const isRemapOpen = remapPartyId !== null;
 
-  // ── Effects: load data on mount / filter change ───────────────────
-
-  useEffect(() => {
-    loadReferenceData();
-  }, []);
-
-  useEffect(() => {
-    loadTransactions();
-  }, [filters, currentPage, sortField, sortDir]);
-
-  // ── Data loaders ──────────────────────────────────────────────────
-
-  /**
-   * Fetch all reference (lookup) data in parallel.
-   * Errors are toasted; we don't block the UI.
-   */
-  const loadReferenceData = async () => {
-    try {
-      const [
-        accountsData,
-        categoriesData,
-        subCategoriesData,
-        typesData,
-        partiesData,
-        uploadsData,
-      ] = await Promise.all([
-        getAccounts(),
-        getCategories(),
-        getSubCategories(),
-        getTypes(),
-        getParties(),
-        getUploads(),
-      ]);
-      setAccounts(accountsData);
-      setCategories(categoriesData);
-      setSubCategories(subCategoriesData);
-      setTypes(typesData);
-      setParties(partiesData);
-      setUploads(uploadsData.data || uploadsData);
-    } catch (err) {
-      logger.error('Error loading reference data:', err);
-      addToast({
-        message: `Failed to load reference data: ${err.userMessage || err.message}`,
-        type: 'error',
-      });
-    }
+  const queryFilters = {
+    ...Object.fromEntries(
+      Object.entries(filters).filter(
+        ([, v]) => v !== null && v !== undefined && v !== ''
+      )
+    ),
+    limit: ITEMS_PER_PAGE,
+    offset: (currentPage - 1) * ITEMS_PER_PAGE,
+    ...(sortField ? { sort_by: sortField, sort_dir: sortDir } : {}),
   };
 
-  /**
-   * Fetch a page of transactions matching the current filters and
-   * sort order. Updates `transactions` and `totalTransactions`.
-   */
-  const loadTransactions = async () => {
-    setLoading(true);
-    try {
-      const cleanFilters = Object.entries(filters).reduce((acc, [key, value]) => {
-        if (value !== null && value !== undefined && value !== '') acc[key] = value;
-        return acc;
-      }, {});
+  const txnQuery = useTransactions(queryFilters);
+  const accountsQuery = useAccounts();
+  const uploadsQuery = useUploads();
+  const categoriesQuery = useCategories();
+  const subCategoriesQuery = useSubCategories();
+  const typesQuery = useTypes();
+  const partiesQuery = useParties();
 
-      cleanFilters.limit = ITEMS_PER_PAGE;
-      cleanFilters.offset = (currentPage - 1) * ITEMS_PER_PAGE;
-      if (sortField) {
-        cleanFilters.sort_by = sortField;
-        cleanFilters.sort_dir = sortDir;
-      }
+  const updateTxn = useUpdateTransaction();
+  const bulkUpdateTxn = useBulkUpdateTransactions();
+  const generateCash = useGenerateCashTransactions();
+  const createCash = useCreateCashTransaction();
+  const createCategoryMutation = useCreateCategory();
+  const createSubCategoryMutation = useCreateSubCategory();
+  const createTypeMutation = useCreateType();
+  const createPartyMutation = useCreateParty();
+  const remapPartyMutation = useRemapParty();
 
-      const data = await getTransactions(cleanFilters);
-      setTransactions(data);
-      setTotalTransactions(
-        data.length === ITEMS_PER_PAGE
-          ? currentPage * ITEMS_PER_PAGE + 1
-          : (currentPage - 1) * ITEMS_PER_PAGE + data.length
-      );
-    } catch (err) {
-      logger.error('Error loading transactions:', err);
-      addToast({
-        message: `Failed to load transactions: ${err.userMessage || err.message}`,
-        type: 'error',
-      });
-      setTransactions([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const transactions = txnQuery.data || [];
+  const accounts = accountsQuery.data || [];
+  const categories = categoriesQuery.data || [];
+  const subCategories = subCategoriesQuery.data || [];
+  const types = typesQuery.data || [];
+  const parties = partiesQuery.data || [];
+  const uploadsRaw = uploadsQuery.data;
+  const uploads = uploadsRaw?.data || uploadsRaw || [];
 
-  // ── Mutation handlers ─────────────────────────────────────────────
+  const totalTransactions =
+    transactions.length === ITEMS_PER_PAGE
+      ? currentPage * ITEMS_PER_PAGE + 1
+      : (currentPage - 1) * ITEMS_PER_PAGE + transactions.length;
 
-  /**
-   * Persist changes to a single transaction (inline edit).
-   *
-   * @param {number} transactionId
-   * @param {Object} updates
-   * @returns {Promise<Object>} The updated transaction.
-   */
   const handleTransactionUpdate = async (transactionId, updates) => {
     try {
-      const updated = await updateTransaction(transactionId, updates);
-      setTransactions((prev) =>
-        prev.map((t) => (t.id === transactionId ? { ...t, ...updated } : t))
-      );
-      return updated;
+      return await updateTxn.mutateAsync({ id: transactionId, updates });
     } catch (err) {
       addToast({
         message: `Failed to update transaction: ${err.userMessage || err.message}`,
@@ -207,18 +100,11 @@ export default function CategorizeTransactions() {
     }
   };
 
-  /**
-   * Apply `updates` to all selected transactions.
-   * Called from {@link BulkEditModal}.
-   */
   const handleBulkUpdate = async (updates) => {
     if (selectedTransactions.length === 0) throw new Error('No transactions selected');
-
     const count = selectedTransactions.length;
-    setLoading(true);
     try {
-      await bulkUpdateTransactions(selectedTransactions, updates);
-      await loadTransactions();
+      await bulkUpdateTxn.mutateAsync({ ids: selectedTransactions, updates });
       setSelectedTransactions([]);
       setIsBulkEditOpen(false);
       addToast({
@@ -227,47 +113,17 @@ export default function CategorizeTransactions() {
         duration: 3000,
       });
     } catch (err) {
-      const msg = err.message || 'Failed to update transactions';
-      addToast({
-        message: msg.userMessage || msg.message || 'Failed to update transactions',
-        type: 'error',
-      });
-      throw new Error(msg);
-    } finally {
-      setLoading(false);
+      const msg = err.userMessage || err.message || 'Failed to update transactions';
+      addToast({ message: msg, type: 'error' });
+      throw err;
     }
   };
 
-   /**
-   * Generate Cash-account counterpart transactions for all selected
-   * transactions. Called from {@link GenerateCashModal}.
-   *
-   * On success:
-   *  - Reloads the transaction list.
-   *  - Refreshes accounts (the Cash account may have just been
-   *    created) and uploads (a synthetic upload record is added per
-   *    batch).
-   *  - Clears the selection and closes the modal.
-   *  - Toasts a summary of created / skipped / rejected counts.
-   */
   const handleGenerateCash = async () => {
-    if (selectedTransactions.length === 0) {
-      throw new Error('No transactions selected');
-    }
-
-    setLoading(true);
+    if (selectedTransactions.length === 0) throw new Error('No transactions selected');
     try {
-      const response = await generateCashTransactions(selectedTransactions);
+      const response = await generateCash.mutateAsync(selectedTransactions);
       const result = response?.data ?? response;
-
-      // Refresh everything affected by the generation.
-      const [accountsData, uploadsData] = await Promise.all([
-        getAccounts(),
-        getUploads(),
-      ]);
-      setAccounts(accountsData);
-      setUploads(uploadsData.data || uploadsData);
-      await loadTransactions();
 
       setSelectedTransactions([]);
       setIsGenerateCashOpen(false);
@@ -293,29 +149,12 @@ export default function CategorizeTransactions() {
         type: 'error',
       });
       throw err;
-    } finally {
-      setLoading(false);
     }
   };
 
-  /**
-   * Create a single Cash-account transaction from manually entered data.
-   * Called from {@link CreateCashTransactionModal}.
-   */
   const handleCreateCashTransaction = async (opts) => {
-    setLoading(true);
     try {
-      await createCashTransaction(opts);
-
-      // Refresh anything the new transaction could affect.
-      const [accountsData, uploadsData] = await Promise.all([
-        getAccounts(),
-        getUploads(),
-      ]);
-      setAccounts(accountsData);
-      setUploads(uploadsData.data || uploadsData);
-      await loadTransactions();
-
+      await createCash.mutateAsync(opts);
       setIsCreateCashOpen(false);
       addToast({
         message: 'Cash transaction created',
@@ -329,21 +168,12 @@ export default function CategorizeTransactions() {
         type: 'error',
       });
       throw err;
-    } finally {
-      setLoading(false);
     }
   };
 
-  /**
-   * Remap a party to a new parent type.
-   * Called from {@link RemapPartyModal}.
-   */
   const handleRemapParty = async (partyId, newTypeId) => {
     try {
-      const result = await remapParty(partyId, newTypeId);
-      const [partiesData] = await Promise.all([getParties(), loadTransactions()]);
-      setParties(partiesData);
-
+      const result = await remapPartyMutation.mutateAsync({ partyId, newTypeId });
       const merged = result?.data?.action === 'merged';
       addToast({
         message: merged
@@ -362,103 +192,54 @@ export default function CategorizeTransactions() {
     }
   };
 
-  // ── Create-item factory ───────────────────────────────────────────
-
-  /**
-   * Factory producing create handlers for each taxonomy level.
-   *
-   * Each handler:
-   *  1. Calls the create API.
-   *  2. Refetches the list and updates local state.
-   *  3. Toasts success.
-   *  4. Returns the newly created record so callers can auto-select it.
-   *
-   * @param {string} label - Human label for toast (e.g. "Category").
-   * @param {Function} createFn - API function.
-   * @param {Function} refetchFn - Refetch list from API.
-   * @param {Function} setFn - State setter.
-   * @param {Function} findFn - Locate the new item in the refreshed list.
-   */
   const makeCreateHandler = useCallback(
-    (label, createFn, refetchFn, setFn, findFn) =>
+    (label, mutation, finder) =>
       async (...args) => {
         try {
-          const response = await createFn(...args);
-          const fresh = await refetchFn();
-          setFn(fresh);
+          let payload;
+          if (label === 'Category') {
+            payload = { name: args[0], description: args[1] };
+          } else {
+            payload = { name: args[0], description: args[2] };
+            if (label === 'Sub-category') payload.categoryId = args[1];
+            if (label === 'Type') payload.subCategoryId = args[1];
+            if (label === 'Party') payload.typeId = args[1];
+          }
+          const created = await mutation.mutateAsync(payload);
           addToast({
             message: `${label} "${args[0]}" created`,
             type: 'success',
             duration: 2500,
           });
-          return findFn(fresh, ...args) || response;
+          return created;
         } catch (err) {
-          throw err; // let caller (modal) handle inline error
+          throw err;
         }
       },
     [addToast]
   );
 
-  const handleCategoryCreated = makeCreateHandler(
-    'Category',
-    createCategory,
-    getCategories,
-    setCategories,
-    (list, name) => list.find((c) => c.category === name)
-  );
+  const handleCategoryCreated = makeCreateHandler('Category', createCategoryMutation);
+  const handleSubCategoryCreated = makeCreateHandler('Sub-category', createSubCategoryMutation);
+  const handleTypeCreated = makeCreateHandler('Type', createTypeMutation);
+  const handlePartyCreated = makeCreateHandler('Party', createPartyMutation);
 
-  const handleSubCategoryCreated = makeCreateHandler(
-    'Sub-category',
-    createSubCategory,
-    getSubCategories,
-    setSubCategories,
-    (list, name, categoryId) =>
-      list.find((sc) => sc.sub_category === name && sc.category_id === categoryId)
-  );
-
-  const handleTypeCreated = makeCreateHandler(
-    'Type',
-    createType,
-    getTypes,
-    setTypes,
-    (list, name, subCategoryId) =>
-      list.find((t) => t.type === name && t.sub_category_id === subCategoryId)
-  );
-
-  const handlePartyCreated = makeCreateHandler(
-    'Party',
-    createParty,
-    getParties,
-    setParties,
-    (list, name, typeId) => list.find((p) => p.name === name && p.type_id === typeId)
-  );
-
-  // ── Misc handlers ─────────────────────────────────────────────────
-
-  /** Replace filter state and reset to page 1. */
   const handleFilterChange = useCallback((newFilters) => {
     setFilters(newFilters);
     setCurrentPage(1);
   }, []);
 
-  /** Navigate to a new page and clear selection. */
   const handlePageChange = (page) => {
     setCurrentPage(page);
     setSelectedTransactions([]);
   };
 
-  /** Change sort column/direction and reset to page 1. */
   const handleSortChange = useCallback((field, dir) => {
     setSortField(field);
     setSortDir(dir);
     setCurrentPage(1);
   }, []);
 
-  /**
-   * Find an existing party by name+type, or create one if missing.
-   * Used by {@link TransactionRow} when the user chooses "this txn only"
-   * after a type conflict.
-   */
   const handleFindOrCreateParty = useCallback(
     async (name, typeId) => {
       const existing = parties.find(
@@ -471,11 +252,6 @@ export default function CategorizeTransactions() {
     [parties, handlePartyCreated]
   );
 
-  /**
-   * Open the remap-party modal.
-   * @param {?number} partyId - Pre-selected party, or `null`/`true` to open empty.
-   * @param {?number} targetTypeId - Optionally pre-fill target type.
-   */
   const handleOpenRemap = useCallback((partyId = null, targetTypeId = null) => {
     setRemapPartyId(partyId ?? true);
     setRemapTargetTypeId(targetTypeId);
@@ -486,11 +262,6 @@ export default function CategorizeTransactions() {
     setRemapTargetTypeId(null);
   };
 
-  /**
-   * Format an ISO date string for the uploads dropdown.
-   * @param {?string} dateString
-   * @returns {string}
-   */
   const formatUploadDate = (dateString) => {
     if (!dateString) return 'Unknown date';
     const date = new Date(dateString);
@@ -504,27 +275,30 @@ export default function CategorizeTransactions() {
   const initialPartyId = typeof remapPartyId === 'number' ? remapPartyId : null;
 
   return (
-    <div className="categorize-transactions">
-      <div className="page-header">
-        <h1>Categorize Transactions</h1>
-        <div className="header-actions">
+    <div className="w-full max-w-[1600px] h-full mx-auto p-5 box-border flex flex-col overflow-hidden">
+      <div className="shrink-0 flex justify-between items-center mb-4">
+        <h1 className="m-0 text-[28px] font-semibold text-[#333]">Categorize Transactions</h1>
+        <div className="flex items-center gap-2.5">
           <button
+            type="button"
             onClick={() => setIsCreateCashOpen(true)}
-            className="new-cash-button"
+            className="py-2.5 px-5 bg-[#2196f3] text-white border-0 rounded text-sm font-medium cursor-pointer hover:bg-[#1976d2]"
           >
             + New Cash Transaction
           </button>
           {selectedTransactions.length > 0 && (
             <>
               <button
+                type="button"
                 onClick={() => setIsBulkEditOpen(true)}
-                className="bulk-edit-button"
+                className="py-2.5 px-5 bg-[#2196f3] text-white border-0 rounded text-sm font-medium cursor-pointer hover:bg-[#1976d2]"
               >
                 Bulk Edit ({selectedTransactions.length})
               </button>
               <button
+                type="button"
                 onClick={() => setIsGenerateCashOpen(true)}
-                className="generate-cash-button"
+                className="py-2.5 px-5 bg-[#43a047] text-white border-0 rounded text-sm font-medium cursor-pointer hover:bg-[#2e7d32]"
               >
                 Generate Cash ({selectedTransactions.length})
               </button>
@@ -533,9 +307,11 @@ export default function CategorizeTransactions() {
         </div>
       </div>
 
-      <div className="filters-section">
-        <div className="filter-group">
-          <label htmlFor="upload-filter">Filter by Upload:</label>
+      <div className="mb-5 p-4 bg-[#f8f9fa] rounded border border-[#dee2e6]">
+        <div className="flex items-center gap-2.5">
+          <label htmlFor="upload-filter" className="font-medium text-[#495057] whitespace-nowrap">
+            Filter by Upload:
+          </label>
           <select
             id="upload-filter"
             value={filters.upload_id || ''}
@@ -543,6 +319,7 @@ export default function CategorizeTransactions() {
               const value = e.target.value;
               handleFilterChange({ ...filters, upload_id: value ? parseInt(value) : null });
             }}
+            className="py-2 px-3 border border-[#ced4da] rounded text-sm min-w-[250px] bg-white focus:outline-none focus:border-[#4a90e2] focus:shadow-[0_0_0_2px_rgba(74,144,226,0.2)]"
           >
             <option value="">All Uploads</option>
             {uploads.map((upload) => (

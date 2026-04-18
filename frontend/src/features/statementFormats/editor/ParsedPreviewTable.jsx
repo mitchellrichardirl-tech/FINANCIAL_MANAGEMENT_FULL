@@ -1,22 +1,7 @@
-/**
- * @file editor/ParsedPreviewTable.jsx
- * Compact read-only table of `previewFormat()` output rows. Shows just
- * enough to verify the mapping worked: date parsed, amount has the right
- * sign, description came through.
- */
-
-import './ParsedPreviewTable.css';
-
-/**
- * @component
- * @param {Object} props
- * @param {Object[]} props.rows  - `preview_rows` from the preview endpoint.
- * @param {number}   props.total - `total_parsed` (rows may be a capped subset).
- */
 export default function ParsedPreviewTable({ rows, total }) {
   if (!rows?.length) {
     return (
-      <div className="ppt-empty">
+      <div className="py-6 px-6 text-center text-[#6c757d] bg-[#f8f9fa] border border-dashed border-[#dee2e6] rounded-md">
         No transactions were produced. Check the column mapping and any exclude
         patterns.
       </div>
@@ -26,32 +11,43 @@ export default function ParsedPreviewTable({ rows, total }) {
   const capped = total > rows.length;
 
   return (
-    <div className="ppt">
-      <div className="ppt__summary">
+    <div>
+      <div className="text-sm mb-2.5 text-[#333]">
         <strong>{total}</strong> transaction{total === 1 ? '' : 's'} parsed
         {capped && <> — showing the first {rows.length}</>}.
       </div>
-
-      <div className="ppt__scroll">
-        <table className="ppt__table">
+      <div className="max-h-[45vh] overflow-auto border border-[#dee2e6] rounded">
+        <table className="w-full border-collapse text-[13px] bg-white">
           <thead>
             <tr>
-              <th>Date</th>
-              <th>Description</th>
-              <th className="ppt__num">Amount</th>
-              <th></th>
+              {['Date', 'Description', 'Amount', ''].map((h, i) => (
+                <th
+                  key={i}
+                  className={`sticky top-0 bg-[#f8f9fa] font-semibold border-b-2 border-[#dee2e6] py-2 px-3 ${i === 2 ? 'text-right' : 'text-left'}`}
+                >
+                  {h}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {rows.map((r, i) => (
               <tr key={i}>
-                <td className="ppt__date">{fmtDate(r.transaction_date)}</td>
-                <td className="ppt__desc">{r.description}</td>
-                <td className={`ppt__num ${r.is_credit ? 'ppt__credit' : 'ppt__debit'}`}>
+                <td className="py-2 px-3 border-b border-[#f1f3f5] whitespace-nowrap text-[#495057]">
+                  {fmtDate(r.transaction_date)}
+                </td>
+                <td className="py-2 px-3 border-b border-[#f1f3f5] break-words">
+                  {r.description}
+                </td>
+                <td
+                  className={`py-2 px-3 border-b border-[#f1f3f5] text-right whitespace-nowrap tabular-nums ${r.is_credit ? 'text-[#166534]' : 'text-[#991b1b]'}`}
+                >
                   {fmtAmount(r.amount)}
                 </td>
-                <td>
-                  <span className={`ppt__badge ${r.is_credit ? 'ppt__badge--cr' : 'ppt__badge--dr'}`}>
+                <td className="py-2 px-3 border-b border-[#f1f3f5]">
+                  <span
+                    className={`inline-block text-[10px] font-semibold py-0.5 px-1.5 rounded tracking-wide ${r.is_credit ? 'bg-[#f0fdf4] text-[#166534]' : 'bg-[#fef2f2] text-[#991b1b]'}`}
+                  >
                     {r.is_credit ? 'CR' : 'DR'}
                   </span>
                 </td>
@@ -66,11 +62,9 @@ export default function ParsedPreviewTable({ rows, total }) {
 
 function fmtDate(v) {
   if (!v) return '';
-  // Backend may send ISO strings or already-formatted dates; be lenient.
   const d = new Date(v);
   return Number.isNaN(d.getTime()) ? String(v) : d.toISOString().slice(0, 10);
 }
-
 function fmtAmount(v) {
   const n = Number(v);
   if (!Number.isFinite(n)) return String(v ?? '');

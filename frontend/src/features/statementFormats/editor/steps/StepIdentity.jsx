@@ -1,16 +1,6 @@
-/**
- * @file editor/steps/StepIdentity.jsx
- * Step 2 — bank name + account type. Combined as `display_name` in the
- * format list and the upload page's account picker.
- */
-
 import FormField from '@/components/FormField';
 import TextInput from '@/components/TextInput';
 
-/**
- * @component
- * @param {{ editor: ReturnType<import('../useFormatEditor').useFormatEditor> }} props
- */
 export default function StepIdentity({ editor }) {
   const { draft, updateDraft, validation, duplicateNameError } = editor;
   const errors = validation.errorsByField;
@@ -21,24 +11,22 @@ export default function StepIdentity({ editor }) {
       : '';
 
   return (
-    <div className="fe-step">
-      <h2>Name</h2>
-      <p className="fe-step__sub">
+    <div>
+      <h2 className="m-0 mb-1.5 text-xl">Name</h2>
+      <p className="m-0 mb-5 text-[#6c757d] text-sm">
         How this format appears in the format list and the account settings picker.
       </p>
 
       {duplicateNameError && (
-        <div className="fe-step-sample__error" role="alert">
-          <p>{duplicateNameError}</p>
+        <div
+          className="py-3.5 px-4 border border-[#f5c2c7] bg-[#f8d7da] rounded text-[#842029] mb-4"
+          role="alert"
+        >
+          <p className="m-0">{duplicateNameError}</p>
         </div>
       )}
 
-      <FormField
-        label="Bank name"
-        required
-        error={errors.bank_name}
-        htmlFor="bank-name"
-      >
+      <FormField label="Bank name" required error={errors.bank_name} htmlFor="bank-name">
         <TextInput
           id="bank-name"
           value={draft.bank_name}
@@ -63,7 +51,7 @@ export default function StepIdentity({ editor }) {
       </FormField>
 
       {displayName && (
-        <p className="fe-step__sub">
+        <p className="m-0 mb-5 text-[#6c757d] text-sm">
           Will be shown as: <strong>{displayName}</strong>
         </p>
       )}

@@ -1,12 +1,4 @@
-/**
- * @file editor/fields/AmountModeRadio.jsx
- * Three-way radio for the amount configuration strategy, with a short
- * description per option so the user can self-diagnose which shape
- * their bank uses.
- */
-
 import { AMOUNT_MODE, AMOUNT_MODE_LABELS } from '../../constants';
-import './AmountModeRadio.css';
 
 const DESCRIPTIONS = {
   [AMOUNT_MODE.SPLIT]:
@@ -17,40 +9,34 @@ const DESCRIPTIONS = {
     'One amount column (always positive) plus a separate column that says "CR" or "DR".',
 };
 
-/**
- * @component
- * @param {Object} props
- * @param {string} props.value    - Current `AMOUNT_MODE`.
- * @param {(mode: string) => void} props.onChange
- */
 export default function AmountModeRadio({ value, onChange }) {
   return (
-    <fieldset className="amount-mode-radio">
-      <legend className="amount-mode-radio__legend">
+    <fieldset className="border-0 p-0 m-0 mb-5">
+      <legend className="font-semibold text-[13px] text-[#333] p-0 mb-2.5">
         How does this bank report amounts?
       </legend>
-      {Object.values(AMOUNT_MODE).map((mode) => (
-        <label
-          key={mode}
-          className={`amount-mode-radio__option ${
-            value === mode ? 'amount-mode-radio__option--selected' : ''
-          }`}
-        >
-          <input
-            type="radio"
-            name="amountMode"
-            value={mode}
-            checked={value === mode}
-            onChange={() => onChange(mode)}
-          />
-          <div>
-            <div className="amount-mode-radio__label">
-              {AMOUNT_MODE_LABELS[mode]}
+      {Object.values(AMOUNT_MODE).map((mode) => {
+        const selected = value === mode;
+        return (
+          <label
+            key={mode}
+            className={`flex items-start gap-2.5 py-3 px-3.5 border rounded mb-2 cursor-pointer transition-[border-color,background] duration-[120ms] hover:border-[#adb5bd] ${selected ? 'border-[#007bff] bg-[#f0f8ff]' : 'border-[#dee2e6]'}`}
+          >
+            <input
+              type="radio"
+              name="amountMode"
+              value={mode}
+              checked={selected}
+              onChange={() => onChange(mode)}
+              className="mt-[3px] shrink-0"
+            />
+            <div>
+              <div className="font-medium text-sm">{AMOUNT_MODE_LABELS[mode]}</div>
+              <div className="text-xs text-[#6c757d] mt-0.5">{DESCRIPTIONS[mode]}</div>
             </div>
-            <div className="amount-mode-radio__desc">{DESCRIPTIONS[mode]}</div>
-          </div>
-        </label>
-      ))}
+          </label>
+        );
+      })}
     </fieldset>
   );
 }

@@ -1,66 +1,12 @@
-/**
- * @file TransactionRow.jsx
- * Single row of {@link TransactionTable} with inline edit mode.
- *
- * In **view mode** each cell shows the denormalized value
- * (`transaction.*_name`) with a row-level "Edit" button and an optional
- * "Remap party" quick-action.
- *
- * In **edit mode** the taxonomy columns switch to
- * {@link DropdownWithCreate} selects that:
- *  - Cascade upward: selecting a party auto-fills type → subcat → cat.
- *  - Cascade downward: selecting a higher level clears lower levels.
- *  - Detect conflicts: changing a parent when a party is already
- *    selected triggers a {@link RemapPartyPrompt} asking whether to
- *    remap the party globally or just for this transaction.
- *
- * The row does **not** call the API directly; it invokes callbacks
- * (`onUpdate`, `onFindOrCreateParty`) and lets the parent handle
- * persistence and cache invalidation.
- */
-
 import { useState, useMemo } from 'react';
 import DropdownWithCreate from '@/components/DropdownWithCreate';
 import Checkbox from '@/components/Checkbox';
 import RemapPartyPrompt from './RemapPartyPrompt';
-import './TransactionRow.css';
 import { createLogger } from '@/lib/logger';
 import { useToast } from '@/components/ToastContext';
 
-/** @type {import('@/lib/logger').Logger} */
 const logger = createLogger('TransactionRow');
 
-/**
- * Editable transaction table row.
- *
- * @component
- * @param {Object} props
- *
- * @param {Object} props.transaction
- *        The transaction record. Expected to have `id`, denormalized
- *        `*_name` strings for display, and `*_id` foreign keys.
- * @param {Array<Object>} props.accounts - All accounts (unused in edit but kept for parity).
- * @param {Array<Object>} props.allCategories
- * @param {Array<Object>} props.allSubCategories
- * @param {Array<Object>} props.allTypes
- * @param {Array<Object>} props.allParties
- *
- * @param {(txnId: number, updates: Object) => Promise<void>} props.onUpdate
- *        Persist edits. Should throw on failure (the row catches it and
- *        marks itself in error).
- * @param {(type: string, parentId: ?number, parentName: string, onSuccess: Function) => void} props.onOpenCreateModal
- *        Open the table's shared create-taxonomy modal.
- *
- * @param {boolean} props.isSelected - Row checkbox state.
- * @param {(checked: boolean) => void} props.onSelectionChange
- *
- * @param {(partyId: number) => void} props.onRemapParty
- *        Open the global remap modal for a party.
- * @param {(partyName: string, typeId: number) => Promise<number>} props.onFindOrCreateParty
- *        Find or create a party under a type; returns the new/found id.
- *
- * @returns {JSX.Element}
- */
 export default function TransactionRow({
   transaction,
   accounts,
@@ -78,44 +24,17 @@ export default function TransactionRow({
   const { addToast } = useToast();
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  /** `true` when the last save attempt failed. Renders a ⚠ indicator. */
   const [error, setError] = useState(null);
-  /**
-   * Working copy of editable fields while in edit mode.
-   * Committed to the server only on explicit Save.
-   */
   const [draft, setDraft] = useState(null);
-
-  // ── Conflict state ────────────────────────────────────────────────
-  /**
-   * When the user changes a parent (category/subcat/type) while a party
-   * is selected, we pause and ask what to do.
-   *
-   * @typedef {Object} Conflict
-   * @property {Object} oldDraft      - Draft snapshot before the change.
-   * @property {number} oldPartyId    - Party that was selected.
-   * @property {string} oldPartyName  - Display name.
-   * @property {Object} newDraftAfter - Draft that would result if user proceeds.
-   */
   const [conflict, setConflict] = useState(null);
-
-  /**
-   * When the user chooses "this transaction only" we defer party
-   * creation until save time. Store the name + target type here.
-   * @type {?{partyName: string, typeId: number}}
-   */
   const [reuseParty, setReuseParty] = useState(null);
 
-  // ── Edit lifecycle ────────────────────────────────────────────────
-
-  /** Enter edit mode: snapshot current values into `draft`. */
   const startEditing = () => {
     setDraft({
       category_id:
         allCategories.find((c) => c.category === transaction.category_name)?.id ?? null,
       sub_category_id:
-        allSubCategories.find((sc) => sc.sub_category === transaction.sub_category_name)?.id ??
-        null,
+        allSubCategories.find((sc) => sc.sub_category === transaction.sub_category_name)?.id ?? null,
       type_id: allTypes.find((t) => t.type === transaction.type_name)?.id ?? null,
       party_id: transaction.party_id ?? null,
       is_kids: transaction.is_kids || false,
@@ -129,7 +48,6 @@ export default function TransactionRow({
     setIsEditing(true);
   };
 
-  /** Exit edit mode, discarding unsaved changes. */
   const cancelEditing = () => {
     setDraft(null);
     setConflict(null);
@@ -138,12 +56,6 @@ export default function TransactionRow({
     setIsEditing(false);
   };
 
-  // ── Draft builders for hierarchy changes ──────────────────────────
-
-  /**
-   * Produce a new draft after the user selects a different type.
-   * Auto-fills category + subcat; clears party (belongs to old type).
-   */
   const buildDraftAfterTypeChange = (currentDraft, newTypeId) => {
     const type = newTypeId ? allTypes.find((t) => t.id === newTypeId) : null;
     const subCategory = type
@@ -158,7 +70,6 @@ export default function TransactionRow({
     };
   };
 
-  /** New draft after sub-category change; clears type & party. */
   const buildDraftAfterSubCategoryChange = (currentDraft, newSubCategoryId) => {
     const subCategory = newSubCategoryId
       ? allSubCategories.find((sc) => sc.id === newSubCategoryId)
@@ -172,7 +83,6 @@ export default function TransactionRow({
     };
   };
 
-  /** New draft after category change; clears subcat/type/party. */
   const buildDraftAfterCategoryChange = (currentDraft, newCategoryId) => ({
     ...currentDraft,
     category_id: newCategoryId,
@@ -181,20 +91,12 @@ export default function TransactionRow({
     party_id: null,
   });
 
-  // ── Conflict detection ────────────────────────────────────────────
-
-  /**
-   * If a party is already selected and the user changes a parent level,
-   * show the conflict prompt instead of applying the change immediately.
-   */
   const maybeShowConflict = (currentDraft, newDraftAfter, applyImmediately) => {
     if (!currentDraft.party_id) {
       applyImmediately(newDraftAfter);
       return;
     }
-
     const oldParty = allParties.find((p) => p.id === currentDraft.party_id);
-
     setConflict({
       oldDraft: currentDraft,
       oldPartyId: currentDraft.party_id,
@@ -203,30 +105,21 @@ export default function TransactionRow({
     });
   };
 
-  // ── Change handlers (category → subcat → type → party) ───────────
-
   const handleCategoryChange = (categoryId) => {
     const id = categoryId ? parseInt(categoryId) : null;
-    const newDraftAfter = buildDraftAfterCategoryChange(draft, id);
-    maybeShowConflict(draft, newDraftAfter, setDraft);
+    maybeShowConflict(draft, buildDraftAfterCategoryChange(draft, id), setDraft);
   };
 
   const handleSubCategoryChange = (subCategoryId) => {
     const id = subCategoryId ? parseInt(subCategoryId) : null;
-    const newDraftAfter = buildDraftAfterSubCategoryChange(draft, id);
-    maybeShowConflict(draft, newDraftAfter, setDraft);
+    maybeShowConflict(draft, buildDraftAfterSubCategoryChange(draft, id), setDraft);
   };
 
   const handleTypeChange = (typeId) => {
     const id = typeId ? parseInt(typeId) : null;
-    const newDraftAfter = buildDraftAfterTypeChange(draft, id);
-    maybeShowConflict(draft, newDraftAfter, setDraft);
+    maybeShowConflict(draft, buildDraftAfterTypeChange(draft, id), setDraft);
   };
 
-  /**
-   * Selecting a party syncs **upward** (fills type/subcat/cat) — no
-   * conflict, because the party drives the hierarchy.
-   */
   const handlePartyChange = (partyId) => {
     const id = partyId ? parseInt(partyId) : null;
     const party = allParties.find((p) => p.id === id);
@@ -244,9 +137,6 @@ export default function TransactionRow({
     setReuseParty(null);
   };
 
-  // ── Conflict prompt handlers ──────────────────────────────────────
-
-  /** User chose "Remap all transactions" — delegate to parent modal. */
   const handleRemapAll = () => {
     if (!conflict) return;
     const { oldPartyId, newDraftAfter } = conflict;
@@ -257,7 +147,6 @@ export default function TransactionRow({
     cancelEditing();
   };
 
-  /** User chose "This transaction only" — defer party find/create to save. */
   const handleThisOnly = () => {
     if (!conflict) return;
     const { oldPartyName, newDraftAfter } = conflict;
@@ -266,19 +155,12 @@ export default function TransactionRow({
     setDraft(newDraftAfter);
   };
 
-  /** User cancelled the conflict prompt — restore draft. */
   const handleCancelConflict = () => {
     if (!conflict) return;
     setDraft(conflict.oldDraft);
     setConflict(null);
   };
 
-  // ── Persist ───────────────────────────────────────────────────────
-
-  /**
-   * Actually call `onUpdate` with the final payload.
-   * @param {?number} partyId - Resolved party id (may differ from `draft.party_id`).
-   */
   const persistSave = async (partyId) => {
     if (!draft) return;
     setIsSaving(true);
@@ -295,20 +177,14 @@ export default function TransactionRow({
       setDraft(null);
       setReuseParty(null);
     } catch {
-      // Parent already toasted the API error.
       setError(true);
     } finally {
       setIsSaving(false);
     }
   };
 
-  /**
-   * Public save entry point. Resolves deferred party creation if
-   * `reuseParty` is set, then calls {@link persistSave}.
-   */
   const saveChanges = async () => {
     if (!draft) return;
-
     if (reuseParty) {
       const targetTypeId = draft.type_id ?? reuseParty.typeId;
       if (!targetTypeId) {
@@ -330,11 +206,8 @@ export default function TransactionRow({
       }
       return;
     }
-
     await persistSave(draft.party_id);
   };
-
-  // ── Filtered dropdown options ─────────────────────────────────────
 
   const filteredSubCategories = useMemo(() => {
     if (!isEditing || !draft?.category_id) return allSubCategories;
@@ -364,8 +237,6 @@ export default function TransactionRow({
     }
     return allParties;
   }, [isEditing, draft?.category_id, draft?.sub_category_id, draft?.type_id, filteredTypes, allParties]);
-
-  // ── Create handlers (open modal, apply id on success) ─────────────
 
   const handleCreateCategory = () => {
     onOpenCreateModal('category', null, '', (newCategory) => {
@@ -414,19 +285,28 @@ export default function TransactionRow({
     });
   };
 
-  // ── Display helpers ───────────────────────────────────────────────
-
-  /** Format an ISO date string as `YYYY-MM-DD`. */
   const formatDate = (ds) => (ds ? new Date(ds).toISOString().split('T')[0] : '');
-
-  /** Format a numeric amount to two decimals. */
   const formatAmount = (a) => (a == null ? '' : parseFloat(a).toFixed(2));
 
-  const renderViewCell = (value) => <span className="view-value">{value || '-'}</span>;
-
-  const renderCheckboxCell = (value) => (
-    <span className={`check-indicator ${value ? 'checked' : ''}`}>{value ? '✓' : ''}</span>
+  const renderViewCell = (value) => (
+    <span className="block py-1 px-0">{value || '-'}</span>
   );
+  const renderCheckboxCell = (value) => (
+    <span className="block text-center text-[#4caf50] font-bold text-base">
+      {value ? '✓' : ''}
+    </span>
+  );
+
+  const baseCellCls = 'p-2 border-b border-[#e9ecef] text-left align-middle text-sm';
+  const truncCellCls = `${baseCellCls} max-w-0 overflow-hidden text-ellipsis whitespace-nowrap`;
+  const editInputCls =
+    'w-full py-1.5 px-2 border border-[#ddd] rounded text-sm font-inherit text-left';
+
+  let rowCls = 'transition-colors duration-200';
+  if (isEditing) rowCls += ' bg-[#fff9e6] shadow-[inset_0_0_0_2px_#f0c36d]';
+  else if (isSelected) rowCls += ' bg-[#e7f3ff]';
+  else rowCls += ' even:bg-[#f8f9fa] hover:bg-[#e9ecef]';
+  if (error) rowCls += ' shadow-[inset_0_0_0_2px_#f44336]';
 
   return (
     <>
@@ -439,27 +319,21 @@ export default function TransactionRow({
         />
       )}
 
-      <tr
-        className={`transaction-row ${isEditing ? 'editing' : ''} ${
-          isSelected ? 'selected' : ''
-        } ${error ? 'has-error' : ''}`}
-      >
-        {/* Selection checkbox */}
-        <td className="select-cell">
+      <tr className={rowCls}>
+        <td className={`${baseCellCls} w-10 text-center`}>
           <Checkbox checked={isSelected} onChange={onSelectionChange} disabled={isEditing} />
         </td>
-
-        {/* Description (read-only) */}
-        <td className="description-cell" title={transaction.description}>
+        <td
+          className={`${truncCellCls} w-[20%] min-w-[200px] hover:overflow-visible hover:whitespace-normal hover:break-words`}
+          title={transaction.description}
+        >
           {transaction.description}
         </td>
-
-        {/* Cleaned Description (editable) */}
-        <td className="cleaned-description-cell">
+        <td className={`${truncCellCls} w-[15%] min-w-[150px] hover:overflow-visible hover:whitespace-normal hover:break-words`}>
           {isEditing ? (
             <input
               type="text"
-              className="edit-input"
+              className={editInputCls}
               value={draft.cleaned_description}
               onChange={(e) =>
                 setDraft((prev) => ({ ...prev, cleaned_description: e.target.value }))
@@ -470,15 +344,13 @@ export default function TransactionRow({
             renderViewCell(transaction.cleaned_description)
           )}
         </td>
-
-        {/* Date (read-only) */}
-        <td className="date-cell">{formatDate(transaction.transaction_date)}</td>
-
-        {/* Amount (read-only) */}
-        <td className="amount-cell">{formatAmount(transaction.amount)}</td>
-
-        {/* Is Credit */}
-        <td className="lodgment-cell">
+        <td className={`${baseCellCls} w-[10%] whitespace-nowrap tabular-nums`}>
+          {formatDate(transaction.transaction_date)}
+        </td>
+        <td className={`${baseCellCls} w-[10%] !text-right text-[#212529]`}>
+          {formatAmount(transaction.amount)}
+        </td>
+        <td className={`${baseCellCls} w-20 !text-center`}>
           {isEditing ? (
             <Checkbox
               checked={draft.is_credit}
@@ -488,14 +360,10 @@ export default function TransactionRow({
             renderCheckboxCell(transaction.is_credit)
           )}
         </td>
-
-        {/* Account (read-only) */}
-        <td className="account-cell" title={transaction.account_name || ''}>
+        <td className={`${truncCellCls} w-[10%]`} title={transaction.account_name || ''}>
           {transaction.account_name || '-'}
         </td>
-
-        {/* Party */}
-        <td className="party-cell" title={isEditing ? '' : transaction.party_name || ''}>
+        <td className={`${truncCellCls} w-[10%] !flex items-center gap-[0.4rem] group`} title={isEditing ? '' : transaction.party_name || ''}>
           {isEditing ? (
             <DropdownWithCreate
               value={draft.party_id}
@@ -514,10 +382,10 @@ export default function TransactionRow({
               {renderViewCell(transaction.party_name)}
               {transaction.party_id && onRemapParty && (
                 <button
-                  className="remap-party-btn"
+                  type="button"
                   onClick={() => onRemapParty(transaction.party_id)}
                   title={`Remap party: ${transaction.party_name}`}
-                  type="button"
+                  className="shrink-0 bg-none border border-transparent rounded text-[#6b7280] text-[0.8rem] leading-none py-px px-1 cursor-pointer opacity-0 group-hover:opacity-100 hover:text-[#2563eb] hover:border-[#93c5fd] hover:bg-[#eff6ff]"
                 >
                   ✎
                 </button>
@@ -525,9 +393,7 @@ export default function TransactionRow({
             </>
           )}
         </td>
-
-        {/* Type */}
-        <td className="type-cell" title={isEditing ? '' : transaction.type_name || ''}>
+        <td className={`${truncCellCls} w-[10%]`} title={isEditing ? '' : transaction.type_name || ''}>
           {isEditing ? (
             <DropdownWithCreate
               value={draft.type_id}
@@ -545,9 +411,7 @@ export default function TransactionRow({
             renderViewCell(transaction.type_name)
           )}
         </td>
-
-        {/* Sub-Category */}
-        <td className="sub-category-cell" title={isEditing ? '' : transaction.sub_category_name || ''}>
+        <td className={`${truncCellCls} w-[10%]`} title={isEditing ? '' : transaction.sub_category_name || ''}>
           {isEditing ? (
             <DropdownWithCreate
               value={draft.sub_category_id}
@@ -565,9 +429,7 @@ export default function TransactionRow({
             renderViewCell(transaction.sub_category_name)
           )}
         </td>
-
-        {/* Category */}
-        <td className="category-cell" title={isEditing ? '' : transaction.category_name || ''}>
+        <td className={`${truncCellCls} w-[10%]`} title={isEditing ? '' : transaction.category_name || ''}>
           {isEditing ? (
             <DropdownWithCreate
               value={draft.category_id}
@@ -585,9 +447,7 @@ export default function TransactionRow({
             renderViewCell(transaction.category_name)
           )}
         </td>
-
-        {/* Is Kids */}
-        <td className="kids-cell">
+        <td className={`${baseCellCls} w-20 !text-center`}>
           {isEditing ? (
             <Checkbox
               checked={draft.is_kids}
@@ -597,9 +457,7 @@ export default function TransactionRow({
             renderCheckboxCell(transaction.is_kids)
           )}
         </td>
-
-        {/* Is One-Off */}
-        <td className="one-off-cell">
+        <td className={`${baseCellCls} w-20 !text-center`}>
           {isEditing ? (
             <Checkbox
               checked={draft.is_one_off}
@@ -609,35 +467,40 @@ export default function TransactionRow({
             renderCheckboxCell(transaction.is_one_off)
           )}
         </td>
-
-        {/* Actions */}
-        <td className="actions-cell">
+        <td className={`${baseCellCls} w-[60px] !text-center`}>
           {error && (
-            <span className="row-error" title="Save failed — see notification">
+            <span className="text-[#f44336] mr-2 cursor-help" title="Save failed — see notification">
               ⚠
             </span>
           )}
           {isEditing ? (
-            <div className="edit-actions">
+            <div className="flex gap-1 justify-center">
               <button
+                type="button"
                 onClick={saveChanges}
                 disabled={isSaving}
-                className="btn-save"
                 title="Save changes"
+                className="py-1.5 px-2.5 border-0 rounded cursor-pointer text-sm bg-[#4caf50] text-white hover:enabled:bg-[#388e3c] disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isSaving ? '...' : '✓'}
               </button>
               <button
+                type="button"
                 onClick={cancelEditing}
                 disabled={isSaving}
-                className="btn-cancel"
                 title="Cancel"
+                className="py-1.5 px-2.5 border-0 rounded cursor-pointer text-sm bg-[#f44336] text-white hover:enabled:bg-[#d32f2f] disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 ✕
               </button>
             </div>
           ) : (
-            <button onClick={startEditing} className="btn-edit" title="Edit transaction">
+            <button
+              type="button"
+              onClick={startEditing}
+              title="Edit transaction"
+              className="py-1.5 px-2.5 border-0 rounded cursor-pointer text-sm bg-[#2196f3] text-white hover:bg-[#1976d2]"
+            >
               ✎
             </button>
           )}

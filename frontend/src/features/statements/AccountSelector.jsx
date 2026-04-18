@@ -1,95 +1,43 @@
-/**
- * @file AccountSelector.jsx
- * Dropdown for selecting an existing account or creating a new one
- * inline.
- *
- * When "Create new account…" is selected, the dropdown is replaced by
- * a form. On success, the new account is appended to the list and
- * auto-selected.
- */
-
+import { useForm } from 'react-hook-form';
 import { useState } from 'react';
-import { createAccount } from './api';
+import { useCreateAccount } from './hooks';
 import { ErrorCode } from '@/lib/apiErrors';
-
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('AccountSelector');
 
-/**
- * Maps backend field names to form input ids for error routing.
- * @type {Record<string, string>}
- */
 const FIELD_MAP = {
   account_name: 'accountName',
   account_type: 'accountType',
   statement_format: 'statementFormat',
 };
 
-/** Error codes that should highlight the name field specifically. */
 const NAME_FIELD_CODES = new Set([ErrorCode.DUPLICATE_NAME, ErrorCode.REQUIRED_FIELD]);
 
-/**
- * Account selector with inline create form.
- *
- * @component
- * @param {Object} props
- *
- * @param {Array<Object>} props.accounts
- *        List of existing accounts.
- * @param {number|string} props.selectedAccountId
- *        Currently selected account id (empty string = none).
- * @param {(id: number|string) => void} props.onAccountChange
- *        Called when selection changes.
- * @param {(account: Object) => void} props.onAccountCreated
- *        Called after a new account is created so the parent can
- *        append it to the list.
- * @param {boolean} [props.disabled=false]
- * @param {Array<{key: string, name: string}>} [props.statementFormats=[]]
- *        Available statement format presets.
- *
- * @returns {JSX.Element}
- */
 function AccountSelector({
   accounts,
   selectedAccountId,
   onAccountChange,
-  onAccountCreated,
   disabled,
   statementFormats = [],
 }) {
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [newAccountName, setNewAccountName] = useState('');
-  const [newAccountType, setNewAccountType] = useState('bank');
-  const [newStatementFormat, setNewStatementFormat] = useState('');
-  const [creating, setCreating] = useState(false);
-  /**
-   * Field-level errors.
-   * `_general` holds errors that don't map to a specific field.
-   * @type {[Record<string, string>, Function]}
-   */
-  const [fieldErrors, setFieldErrors] = useState({});
+  const [generalError, setGeneralError] = useState(null);
+  const createAccount = useCreateAccount();
+
+  const {
+    register,
+    handleSubmit,
+    reset: resetForm,
+    setError,
+    clearErrors,
+    formState: { errors },
+  } = useForm({
+    defaultValues: { accountName: '', accountType: 'bank', statementFormat: '' },
+  });
 
   logger.info('Available statement formats:', statementFormats);
 
-  /**
-   * Clear a single field error (called as user types).
-   * @param {string} field
-   */
-  const clearFieldError = (field) => {
-    if (fieldErrors[field]) {
-      setFieldErrors((prev) => {
-        const next = { ...prev };
-        delete next[field];
-        return next;
-      });
-    }
-  };
-
-  /**
-   * Handle dropdown change. If "CREATE_NEW" is selected, switch to
-   * the inline form.
-   */
   const handleChange = (e) => {
     const value = e.target.value;
     if (value === 'CREATE_NEW') {
@@ -101,150 +49,84 @@ function AccountSelector({
     }
   };
 
-  /**
-   * Submit the create-account form.
-   */
-  const handleCreateAccount = async (e) => {
-    e.preventDefault();
-    setFieldErrors({});
-
-    if (!newAccountName.trim()) {
-      setFieldErrors({ accountName: 'Account name is required' });
-      return;
-    }
-
-    setCreating(true);
+  const onSubmit = async (data) => {
+    setGeneralError(null);
+    clearErrors();
     try {
-      const newAccount = await createAccount(
-        newAccountName,
-        newAccountType,
-        newStatementFormat || null
-      );
-
-      onAccountCreated(newAccount);
+      const newAccount = await createAccount.mutateAsync({
+        accountName: data.accountName,
+        accountType: data.accountType,
+        statementFormat: data.statementFormat || null,
+      });
       onAccountChange(newAccount.id);
-
-      // Reset form
       setShowCreateForm(false);
-      setNewAccountName('');
-      setNewAccountType('bank');
-      setNewStatementFormat('');
+      resetForm();
     } catch (err) {
       const message = err.userMessage || err.message || 'Failed to create account';
-
       const mappedField = err.field ? FIELD_MAP[err.field] : null;
-
       if (mappedField) {
-        setFieldErrors({ [mappedField]: message });
+        setError(mappedField, { type: 'server', message });
       } else if (NAME_FIELD_CODES.has(err.code)) {
-        setFieldErrors({ accountName: message });
+        setError('accountName', { type: 'server', message });
       } else {
-        setFieldErrors({ _general: message });
+        setGeneralError(message);
       }
-    } finally {
-      setCreating(false);
     }
   };
 
-  /** Cancel and return to the dropdown. */
   const handleCancel = () => {
     setShowCreateForm(false);
-    setFieldErrors({});
-    setNewAccountName('');
-    setNewAccountType('bank');
-    setNewStatementFormat('');
+    setGeneralError(null);
+    clearErrors();
+    resetForm();
   };
 
-  /**
-   * Resolve a format key to its display name.
-   * @param {?string} formatKey
-   */
   const getFormatName = (formatKey) => {
     if (!formatKey) return null;
     const format = statementFormats.find((f) => f.identifier === formatKey);
     return format ? format.name : formatKey;
   };
 
-  // ── Render: create form ───────────────────────────────────────────
+  const creating = createAccount.isPending;
+  const errCls = (has) =>
+    `p-2 w-full max-w-[400px] border rounded ${has ? 'border-[#dc2626] bg-[#fef2f2]' : 'border-[#ccc] bg-white'}`;
 
   if (showCreateForm) {
     return (
-      <div
-        style={{
-          marginTop: '20px',
-          padding: '20px',
-          border: '1px solid #ddd',
-          borderRadius: '4px',
-          backgroundColor: '#f9f9f9',
-        }}
-      >
-        <h3 style={{ marginTop: 0 }}>Create New Account</h3>
+      <div className="mt-5 p-5 border border-[#ddd] rounded bg-[#f9f9f9]">
+        <h3 className="mt-0 text-lg font-semibold">Create New Account</h3>
 
-        <form onSubmit={handleCreateAccount}>
-          {fieldErrors._general && (
-            <div style={{ color: '#dc2626', marginBottom: '15px' }} role="alert">
-              {fieldErrors._general}
-            </div>
+        <form onSubmit={handleSubmit(onSubmit)}>
+          {generalError && (
+            <div className="text-[#dc2626] mb-4" role="alert">{generalError}</div>
           )}
 
-          {/* Account Name */}
-          <div style={{ marginBottom: '15px' }}>
-            <label htmlFor="accountName" style={{ display: 'block', marginBottom: '5px' }}>
-              Account Name:
-            </label>
+          <div className="mb-4">
+            <label htmlFor="accountName" className="block mb-1">Account Name:</label>
             <input
               id="accountName"
               type="text"
-              value={newAccountName}
-              onChange={(e) => {
-                setNewAccountName(e.target.value);
-                clearFieldError('accountName');
-              }}
+              {...register('accountName', { required: 'Account name is required' })}
               placeholder="e.g., My Checking Account"
               disabled={creating}
-              aria-invalid={!!fieldErrors.accountName}
-              aria-describedby={fieldErrors.accountName ? 'accountName-error' : undefined}
-              style={{
-                padding: '8px',
-                width: '100%',
-                maxWidth: '400px',
-                border: `1px solid ${fieldErrors.accountName ? '#dc2626' : '#ccc'}`,
-                borderRadius: '4px',
-                backgroundColor: fieldErrors.accountName ? '#fef2f2' : 'white',
-              }}
+              aria-invalid={!!errors.accountName}
+              className={errCls(!!errors.accountName)}
             />
-            {fieldErrors.accountName && (
-              <span
-                id="accountName-error"
-                style={{ display: 'block', marginTop: '4px', color: '#dc2626', fontSize: '14px' }}
-                role="alert"
-              >
-                {fieldErrors.accountName}
+            {errors.accountName && (
+              <span className="block mt-1 text-[#dc2626] text-sm" role="alert">
+                {errors.accountName.message}
               </span>
             )}
           </div>
 
-          {/* Account Type */}
-          <div style={{ marginBottom: '15px' }}>
-            <label htmlFor="accountType" style={{ display: 'block', marginBottom: '5px' }}>
-              Account Type:
-            </label>
+          <div className="mb-4">
+            <label htmlFor="accountType" className="block mb-1">Account Type:</label>
             <select
               id="accountType"
-              value={newAccountType}
-              onChange={(e) => {
-                setNewAccountType(e.target.value);
-                clearFieldError('accountType');
-              }}
+              {...register('accountType')}
               disabled={creating}
-              aria-invalid={!!fieldErrors.accountType}
-              style={{
-                padding: '8px',
-                width: '100%',
-                maxWidth: '400px',
-                border: `1px solid ${fieldErrors.accountType ? '#dc2626' : '#ccc'}`,
-                borderRadius: '4px',
-              }}
+              aria-invalid={!!errors.accountType}
+              className={errCls(!!errors.accountType)}
             >
               <option value="bank">Bank Account</option>
               <option value="credit">Credit Card</option>
@@ -252,37 +134,21 @@ function AccountSelector({
               <option value="investment">Investment</option>
               <option value="other">Other</option>
             </select>
-            {fieldErrors.accountType && (
-              <span
-                style={{ display: 'block', marginTop: '4px', color: '#dc2626', fontSize: '14px' }}
-                role="alert"
-              >
-                {fieldErrors.accountType}
+            {errors.accountType && (
+              <span className="block mt-1 text-[#dc2626] text-sm" role="alert">
+                {errors.accountType.message}
               </span>
             )}
           </div>
 
-          {/* Statement Format */}
-          <div style={{ marginBottom: '15px' }}>
-            <label htmlFor="statementFormat" style={{ display: 'block', marginBottom: '5px' }}>
-              Statement Format:
-            </label>
+          <div className="mb-4">
+            <label htmlFor="statementFormat" className="block mb-1">Statement Format:</label>
             <select
               id="statementFormat"
-              value={newStatementFormat}
-              onChange={(e) => {
-                setNewStatementFormat(e.target.value);
-                clearFieldError('statementFormat');
-              }}
+              {...register('statementFormat')}
               disabled={creating}
-              aria-invalid={!!fieldErrors.statementFormat}
-              style={{
-                padding: '8px',
-                width: '100%',
-                maxWidth: '400px',
-                border: `1px solid ${fieldErrors.statementFormat ? '#dc2626' : '#ccc'}`,
-                borderRadius: '4px',
-              }}
+              aria-invalid={!!errors.statementFormat}
+              className={errCls(!!errors.statementFormat)}
             >
               <option value="">-- None (configure later) --</option>
               {statementFormats.map((format) => (
@@ -291,32 +157,21 @@ function AccountSelector({
                 </option>
               ))}
             </select>
-            {fieldErrors.statementFormat && (
-              <span
-                style={{ display: 'block', marginTop: '4px', color: '#dc2626', fontSize: '14px' }}
-                role="alert"
-              >
-                {fieldErrors.statementFormat}
+            {errors.statementFormat && (
+              <span className="block mt-1 text-[#dc2626] text-sm" role="alert">
+                {errors.statementFormat.message}
               </span>
             )}
-            <small style={{ display: 'block', marginTop: '4px', color: '#666' }}>
+            <small className="block mt-1 text-[#666]">
               Required for importing bank statements. Can be set later.
             </small>
           </div>
 
-          <div style={{ display: 'flex', gap: '10px' }}>
+          <div className="flex gap-[10px]">
             <button
               type="submit"
               disabled={creating}
-              style={{
-                padding: '8px 20px',
-                backgroundColor: '#28a745',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: creating ? 'not-allowed' : 'pointer',
-                opacity: creating ? 0.6 : 1,
-              }}
+              className="py-2 px-5 bg-[#28a745] text-white border-0 rounded cursor-pointer hover:enabled:bg-[#218838] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {creating ? 'Creating...' : 'Create Account'}
             </button>
@@ -324,14 +179,7 @@ function AccountSelector({
               type="button"
               onClick={handleCancel}
               disabled={creating}
-              style={{
-                padding: '8px 20px',
-                backgroundColor: '#6c757d',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer',
-              }}
+              className="py-2 px-5 bg-[#6c757d] text-white border-0 rounded cursor-pointer"
             >
               Cancel
             </button>
@@ -341,24 +189,13 @@ function AccountSelector({
     );
   }
 
-  // ── Render: dropdown ──────────────────────────────────────────────
-
   return (
     <select
       id="account"
       value={selectedAccountId}
       onChange={handleChange}
       disabled={disabled}
-      style={{
-        padding: '10px',
-        fontSize: '14px',
-        border: '1px solid #ccc',
-        borderRadius: '4px',
-        width: '100%',
-        height: '42px',
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        backgroundColor: disabled ? '#f5f5f5' : 'white',
-      }}
+      className={`p-[10px] text-sm border border-[#ccc] rounded w-full h-[42px] ${disabled ? 'cursor-not-allowed bg-[#f5f5f5]' : 'cursor-pointer bg-white'}`}
     >
       <option value="">-- Select an account to import into --</option>
       <option value="CREATE_NEW">➕ Create new account...</option>
@@ -368,7 +205,6 @@ function AccountSelector({
           const displayLabel = formatLabel
             ? `${account.account_name} (${account.account_type}) — ${formatLabel}`
             : `${account.account_name} (${account.account_type}) — ⚠️ No format`;
-
           return (
             <option key={account.id} value={account.id}>
               {displayLabel}

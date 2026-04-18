@@ -1,49 +1,25 @@
-/**
- * @file editor/steps/StepPreview.jsx
- * Step 5 — run the draft config against the sample rows and show what
- * the pipeline would produce. Save button lives in the FormatEditor
- * footer; this step only handles the dry-run.
- *
- * States:
- *   - no sample        → prompt to go back to Step 1
- *   - loading          → spinner line
- *   - column mismatch  → ColumnMismatchPanel with a jump-back action
- *   - other error      → inline message + retry
- *   - success          → ParsedPreviewTable + ProcessingWarningsPanel
- */
-
 import { useEffect } from 'react';
-
 import Button from '@/components/Button';
 import ColumnMismatchPanel from '@/features/statements/ColumnMismatchPanel';
 import ProcessingWarningsPanel from '@/features/statements/ProcessingWarningsPanel';
-
 import { STEP } from '../../constants';
 import ParsedPreviewTable from '../ParsedPreviewTable';
-import './StepPreview.css';
 
-/**
- * @component
- * @param {{ editor: ReturnType<import('../useFormatEditor').useFormatEditor> }} props
- */
 export default function StepPreview({ editor }) {
   const { sampleRows, preview, runPreview, goToStep } = editor;
   const hasSample = sampleRows.length > 0;
 
-  // Auto-run once on entry. The step unmounts when navigating away, so
-  // re-entering after edits triggers a fresh run.
   useEffect(() => {
     if (hasSample) runPreview();
-    // mount-only by design
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
-    <div className="fe-step fe-step-preview">
-      <div className="fe-step-preview__header">
+    <div>
+      <div className="flex justify-between items-start gap-4 mb-4">
         <div>
-          <h2>Preview &amp; save</h2>
-          <p className="fe-step__sub">
+          <h2 className="m-0 mb-1.5 text-xl">Preview &amp; save</h2>
+          <p className="m-0 mb-5 text-[#6c757d] text-sm">
             This is what the import pipeline would produce from your sample file. Check
             dates, signs and descriptions, then save.
           </p>
@@ -56,8 +32,8 @@ export default function StepPreview({ editor }) {
       </div>
 
       {!hasSample && (
-        <div className="fe-step-preview__nosample">
-          <p>
+        <div className="py-5 px-5 bg-[#e7f3ff] border-l-4 border-[#4a90e2] rounded flex justify-between items-center gap-4">
+          <p className="m-0 text-sm text-[#1c4d7a]">
             No sample file loaded — preview isn&apos;t available. You can still save the
             format, or go back and upload a sample to test it first.
           </p>
@@ -68,7 +44,7 @@ export default function StepPreview({ editor }) {
       )}
 
       {hasSample && preview.loading && (
-        <p className="fe-step-preview__status">Running preview…</p>
+        <p className="text-[#6c757d] py-6 text-center">Running preview…</p>
       )}
 
       {preview.mismatch && (
@@ -82,8 +58,11 @@ export default function StepPreview({ editor }) {
       )}
 
       {preview.error && !preview.mismatch && (
-        <div className="fe-step-preview__error" role="alert">
-          <p>{preview.error}</p>
+        <div
+          role="alert"
+          className="py-3.5 px-4 border border-[#f5c2c7] bg-[#f8d7da] rounded text-[#842029] flex justify-between items-center gap-4 mb-4"
+        >
+          <p className="m-0">{preview.error}</p>
           <Button variant="secondary" onClick={runPreview}>Retry</Button>
         </div>
       )}
@@ -95,10 +74,12 @@ export default function StepPreview({ editor }) {
             heading="⚠️ Preview completed with warnings"
             context="preview"
           />
-          <ParsedPreviewTable
-            rows={preview.result.preview_rows}
-            total={preview.result.total_parsed}
-          />
+          <div className="mt-4">
+            <ParsedPreviewTable
+              rows={preview.result.preview_rows}
+              total={preview.result.total_parsed}
+            />
+          </div>
         </>
       )}
     </div>

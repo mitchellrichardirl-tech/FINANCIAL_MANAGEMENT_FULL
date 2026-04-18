@@ -1,22 +1,5 @@
-/**
- * @file ChipInput.jsx
- * Editable list of short strings rendered as removable chips. Enter
- * commits the current draft; click × to remove. Used for
- * `currency_symbols` and `exclude_patterns`.
- */
-
 import { useState } from 'react';
-import './ChipInput.css';
 
-/**
- * @component
- * @param {Object} props
- * @param {string[]} props.value
- * @param {(next: string[]) => void} props.onChange
- * @param {string} [props.placeholder='Add…']
- * @param {boolean} [props.disabled=false]
- * @param {boolean} [props.allowDuplicates=false]
- */
 export default function ChipInput({
   value = [],
   onChange,
@@ -37,9 +20,7 @@ export default function ChipInput({
     setDraft('');
   };
 
-  const removeAt = (idx) => {
-    onChange(value.filter((_, i) => i !== idx));
-  };
+  const removeAt = (idx) => onChange(value.filter((_, i) => i !== idx));
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter') {
@@ -51,29 +32,34 @@ export default function ChipInput({
   };
 
   return (
-    <div className={`chip-input ${disabled ? 'chip-input--disabled' : ''}`}>
+    <div
+      className={`flex flex-wrap items-center gap-[6px] py-[6px] px-2 border border-[#ced4da] rounded bg-white min-h-[38px] box-border focus-within:border-[#4a90e2] focus-within:shadow-[0_0_0_2px_rgba(74,144,226,0.2)] ${disabled ? 'bg-[#f1f3f5]' : ''}`}
+    >
       {value.map((chip, i) => (
-        <span key={`${chip}-${i}`} className="chip-input__chip">
+        <span
+          key={`${chip}-${i}`}
+          className="inline-flex items-center gap-1 bg-[#e7f3ff] text-[#0b5ed7] rounded-xl py-[2px] pr-[6px] pl-[10px] text-[13px]"
+        >
           {chip}
           <button
             type="button"
-            className="chip-input__remove"
             onClick={() => removeAt(i)}
             disabled={disabled}
             aria-label={`Remove ${chip}`}
+            className="border-0 bg-transparent text-current cursor-pointer text-[15px] leading-none px-[2px] disabled:cursor-not-allowed"
           >
             ×
           </button>
         </span>
       ))}
       <input
-        className="chip-input__field"
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={handleKeyDown}
         onBlur={commit}
         placeholder={placeholder}
         disabled={disabled}
+        className="flex-1 min-w-[80px] border-0 outline-none text-sm py-1 px-[2px] bg-transparent"
       />
     </div>
   );

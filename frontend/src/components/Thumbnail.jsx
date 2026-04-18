@@ -9,67 +9,45 @@ pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/b
 
 function ReceiptThumbnail({
   src,
-  alt = "File thumbnail",
-  maxWidth = "50px",
-  maxHeight = "100px"
+  alt = 'File thumbnail',
+  maxWidth = '50px',
+  maxHeight = '100px',
 }) {
   const [previewUrl, setPreviewUrl] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [fileType, setFileType] = useState(null);
-  /**
-   * True once react-pdf's `<Document>` has parsed the PDF and its
-   * proxy is safe to query. `<Page>` is only rendered when this is
-   * true, preventing it from calling `getPage()` on a proxy that
-   * hasn't finished loading or has been destroyed.
-   */
-  const [pdfReady, setPdfReady] = useState(false);       // ← NEW
+  const [pdfReady, setPdfReady] = useState(false);
 
   useEffect(() => {
     if (!src) {
       setPreviewUrl(null);
       setIsLoading(false);
-      setPdfReady(false);                                 // ← NEW
+      setPdfReady(false);
       return;
     }
 
     setError(null);
     setIsLoading(true);
-    setPdfReady(false);                                   // ← NEW
+    setPdfReady(false);
 
     fetch(src, { method: 'HEAD' })
       .then(async (response) => {
         if (!response.ok) {
           const parsed = await parseApiError(response);
-
-          if (isNotFound(parsed)) {
-            throw new Error('Image no longer available');
-          }
-
+          if (isNotFound(parsed)) throw new Error('Image no longer available');
           throw new Error(getUserMessage(parsed, 'Loading thumbnail'));
         }
-
         const contentType = response.headers.get('Content-Type');
-
-        if (!contentType) {
-          throw new Error('Unknown file type');
-        }
-
+        if (!contentType) throw new Error('Unknown file type');
         const isImage = contentType.startsWith('image/');
         const isPDF = contentType.includes('application/pdf');
-
-        if (!isImage && !isPDF) {
-          throw new Error('Unsupported file type');
-        }
-
+        if (!isImage && !isPDF) throw new Error('Unsupported file type');
         setFileType(isImage ? 'image' : 'pdf');
         setPreviewUrl(src);
-
-        if (isImage) {
-          setIsLoading(true);
-        }
+        if (isImage) setIsLoading(true);
       })
-      .catch(err => {
+      .catch((err) => {
         logger.warn('Thumbnail load failed:', err.message);
         setError(err.message);
         setIsLoading(false);
@@ -77,81 +55,62 @@ function ReceiptThumbnail({
   }, [src]);
 
   const onDocumentLoadSuccess = () => {
-    setPdfReady(true);                                    // ← NEW
+    setPdfReady(true);
     setIsLoading(false);
   };
-
-  const onDocumentLoadError = (error) => {
-    logger.error('Error loading PDF:', error);
-    setPdfReady(false);                                   // ← NEW
+  const onDocumentLoadError = (err) => {
+    logger.error('Error loading PDF:', err);
+    setPdfReady(false);
     setError('Failed to load PDF');
     setIsLoading(false);
   };
-
   const handleImageLoad = () => setIsLoading(false);
-
-  const handleImageError = (error) => {
-    logger.error('Error loading image:', error);
+  const handleImageError = (err) => {
+    logger.error('Error loading image:', err);
     setError('Failed to load image');
     setIsLoading(false);
   };
 
-  if (error) {
-    return <div className="receipt-thumbnail-error">{error}</div>;
-  }
-
-  if (!previewUrl && !isLoading) {
-    return null;
-  }
+  if (error) return <div className="text-xs text-[#dc3545]">{error}</div>;
+  if (!previewUrl && !isLoading) return null;
 
   return (
-    <>
-      <div
-        className={'receipt-thumbnail-container'}
-        style={{ maxWidth }}
-      >
-        {isLoading && (
-          <div className="receipt-thumbnail-loading">Loading...</div>
-        )}
-
-        {fileType === 'image' && previewUrl && (
-          <img
-            src={previewUrl}
-            alt={alt}
-            onLoad={handleImageLoad}
-            onError={handleImageError}
-            className={`receipt-thumbnail${isLoading ? 'hidden' : ''}`}
-            style={{ maxHeight }}
-          />
-        )}
-
-        {fileType === 'pdf' && previewUrl && (
-          <div
-            className={isLoading ? 'hidden' : ''}
+    <div className="rounded overflow-hidden bg-[#f5f5f5]" style={{ maxWidth }}>
+      {isLoading && <div className="text-xs text-[#666] p-1">Loading...</div>}
+      {fileType === 'image' && previewUrl && (
+        <img
+          src={previewUrl}
+          alt={alt}
+          onLoad={handleImageLoad}
+          onError={handleImageError}
+          className={isLoading ? 'hidden' : 'block'}
+          style={{ maxHeight }}
+        />
+      )}
+      {fileType === 'pdf' && previewUrl && (
+        <div className={isLoading ? 'hidden' : ''}>
+          <Document
+            key={previewUrl}
+            file={previewUrl}
+            onLoadSuccess={onDocumentLoadSuccess}
+            onLoadError={onDocumentLoadError}
+            loading=""
           >
-            <Document
-              key={previewUrl}                            // ← NEW
-              file={previewUrl}
-              onLoadSuccess={onDocumentLoadSuccess}
-              onLoadError={onDocumentLoadError}
-              loading=""
-            >
-              {pdfReady && (                              // ← NEW
-                <Page
-                  pageNumber={1}
-                  height={parseInt(maxHeight)}
-                  renderTextLayer={false}
-                  renderAnnotationLayer={false}
-                  onLoadError={(err) => {                 // ← NEW
-                    logger.warn('PDF page load error:', err.message);
-                  }}
-                />
-              )}
-            </Document>
-          </div>
-        )}
-      </div>
-    </>
+            {pdfReady && (
+              <Page
+                pageNumber={1}
+                height={parseInt(maxHeight)}
+                renderTextLayer={false}
+                renderAnnotationLayer={false}
+                onLoadError={(err) => {
+                  logger.warn('PDF page load error:', err.message);
+                }}
+              />
+            )}
+          </Document>
+        </div>
+      )}
+    </div>
   );
 }
 

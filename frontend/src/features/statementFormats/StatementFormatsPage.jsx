@@ -1,68 +1,56 @@
-/**
- * @file StatementFormatsPage.jsx
- * Route: `/statement-formats`. Lists built-in and user-defined formats
- * and links into the editor for create / edit / clone.
- */
-
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-
 import Button from '@/components/Button';
 import { useToast } from '@/components/ToastContext';
-
-import { useStatementFormats } from './useStatementFormats';
+import { useFormats } from './hooks';
 import FormatList from './FormatList';
 import DeleteFormatDialog from './DeleteFormatDialog';
-import './StatementFormatsPage.css';
 
 export default function StatementFormatsPage() {
   const navigate = useNavigate();
   const { addToast } = useToast();
-  const { formats, loading, error, refetch } = useStatementFormats();
+  const formatsQuery = useFormats();
+  const formats = formatsQuery.data || [];
+  const loading = formatsQuery.isLoading;
+  const error = formatsQuery.error;
 
-  // Format pending deletion — null when dialog closed.
   const [deleting, setDeleting] = useState(null);
 
-  const { userFormats, builtinFormats } = useMemo(() => {
-    const userFormats = formats.filter((f) => f.source === 'user');
-    const builtinFormats = formats.filter((f) => f.source === 'builtin');
-    return { userFormats, builtinFormats };
-  }, [formats]);
+  const { userFormats, builtinFormats } = useMemo(() => ({
+    userFormats: formats.filter((f) => f.source === 'user'),
+    builtinFormats: formats.filter((f) => f.source === 'builtin'),
+  }), [formats]);
 
-  const handleClone = (format) => {
+  const handleClone = (format) =>
     navigate('/statement-formats/new', { state: { cloneFrom: format.identifier } });
-  };
-
-  const handleEdit = (format) => {
-    navigate(`/statement-formats/${format.identifier}`);
-  };
-
+  const handleEdit = (format) => navigate(`/statement-formats/${format.identifier}`);
   const handleDeleted = () => {
     setDeleting(null);
     addToast({ type: 'success', message: 'Format deleted.' });
-    refetch();
+    formatsQuery.refetch();
   };
 
   return (
-    <div className="sfp">
-      <header className="sfp__header">
+    <div className="w-full max-w-[960px] h-full mx-auto pt-6 px-5 pb-[60px] box-border overflow-y-auto">
+      <header className="flex justify-between items-start gap-5 mb-7">
         <div>
-          <h1>Statement Formats</h1>
-          <p className="sfp__sub">
+          <h1 className="m-0 mb-1 text-2xl font-semibold">Statement Formats</h1>
+          <p className="m-0 text-[#6c757d] text-sm">
             Define how each bank&apos;s CSV/Excel export maps to transactions.
           </p>
         </div>
-        <Button onClick={() => navigate('/statement-formats/new')}>
-          + New format
-        </Button>
+        <Button onClick={() => navigate('/statement-formats/new')}>+ New format</Button>
       </header>
 
-      {loading && <p className="sfp__status">Loading formats…</p>}
+      {loading && <p className="text-[#6c757d]">Loading formats…</p>}
 
       {error && (
-        <div className="sfp__error" role="alert">
-          <p>{error.userMessage || error.message || 'Failed to load formats.'}</p>
-          <Button variant="secondary" onClick={refetch}>Retry</Button>
+        <div
+          role="alert"
+          className="py-3.5 px-4 border border-[#f5c2c7] bg-[#f8d7da] rounded text-[#842029] flex justify-between items-center gap-4"
+        >
+          <p className="m-0">{error.userMessage || error.message || 'Failed to load formats.'}</p>
+          <Button variant="secondary" onClick={() => formatsQuery.refetch()}>Retry</Button>
         </div>
       )}
 
@@ -76,7 +64,6 @@ export default function StatementFormatsPage() {
             onClone={handleClone}
             onDelete={(f) => setDeleting(f)}
           />
-
           <FormatList
             title="Built-in formats"
             formats={builtinFormats}

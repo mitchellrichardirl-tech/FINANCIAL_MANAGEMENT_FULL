@@ -1,36 +1,15 @@
-/**
- * @file editor/FormatEditorPage.jsx
- * Route component for `/statement-formats/new` and
- * `/statement-formats/:identifier`.
- *
- * Responsibilities kept *out* of `<FormatEditor>` so that component can
- * assume its props are ready:
- *   - resolve mode + identifier / cloneFrom
- *   - fetch initial config (edit / clone) and convert to draft shape
- *   - fetch the defaults schema
- *   - guard against editing built-ins
- */
-
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-
 import Button from '@/components/Button';
 import { useToast } from '@/components/ToastContext';
 import { parseApiError, getUserMessage } from '@/lib/apiErrors';
 import { createLogger } from '@/lib/logger';
-
-import { fetchFormat, fetchFormatSchema } from '../api';
+import { useFormat, useFormatSchema } from '../hooks';
 import { emptyDraft, fromApiShape } from '../configModel';
 import FormatEditor from './FormatEditor';
-import './FormatEditorPage.css';
 
 const logger = createLogger('statementFormats:FormatEditorPage');
 
-/**
- * @component
- * @param {Object} props
- * @param {'create'|'edit'} props.mode
- */
 export default function FormatEditorPage({ mode }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -39,73 +18,50 @@ export default function FormatEditorPage({ mode }) {
 
   const cloneFrom = mode === 'create' ? location.state?.cloneFrom : null;
 
-  const [state, setState] = useState({
-    loading: true,
-    error: null,
-    initialDraft: null,
-    numericId: null,
-    schema: null,
-  });
-
   useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      try {
-        // Edit mode: built-ins aren't editable — redirect with a hint.
-        if (mode === 'edit' && identifier && !identifier.startsWith('user:')) {
-          addToast({
-            type: 'info',
-            message: 'Built-in formats can’t be edited — clone one instead.',
-          });
-          navigate('/statement-formats', { replace: true });
-          return;
-        }
-
-        const schemaPromise = fetchFormatSchema();
-
-        let initialDraft = emptyDraft();
-        let numericId = null;
-
-        if (mode === 'edit') {
-          const detail = await fetchFormat(identifier);
-          initialDraft = fromApiShape(detail.config);
-          numericId = Number(identifier.split(':')[1]);
-        } else if (cloneFrom) {
-          const detail = await fetchFormat(cloneFrom);
-          const draft = fromApiShape(detail.config);
-          // Nudge the name so saving doesn't immediately 409.
-          draft.account_type = draft.account_type
-            ? `${draft.account_type} (Copy)`
-            : draft.account_type;
-          initialDraft = draft;
-        }
-
-        const schema = await schemaPromise;
-
-        if (!cancelled) {
-          setState({ loading: false, error: null, initialDraft, numericId, schema });
-        }
-      } catch (err) {
-        const parsed = await parseApiError(err);
-        logger.error('Editor bootstrap failed', parsed);
-        if (!cancelled) {
-          setState((s) => ({
-            ...s,
-            loading: false,
-            error: getUserMessage(parsed, 'Loading format'),
-          }));
-        }
-      }
+    if (mode === 'edit' && identifier && !identifier.startsWith('user:')) {
+      addToast({
+        type: 'info',
+        message: 'Built-in formats can\u2019t be edited \u2014 clone one instead.',
+      });
+      navigate('/statement-formats', { replace: true });
     }
-
-    load();
-    return () => {
-      cancelled = true;
-    };
-    // `addToast` / `navigate` are stable; intentionally excluded to avoid re-running.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, identifier, cloneFrom]);
+  }, [mode, identifier]);
+
+  const editIdentifier = mode === 'edit' ? identifier : null;
+  const formatQuery = useFormat(editIdentifier || cloneFrom);
+  const schemaQuery = useFormatSchema();
+
+  const loading = (editIdentifier || cloneFrom) ? formatQuery.isLoading : false;
+  const schemaLoading = schemaQuery.isLoading;
+  const error = formatQuery.error || schemaQuery.error;
+
+  let initialDraft = emptyDraft();
+  let numericId = null;
+
+  if (mode === 'edit' && formatQuery.data) {
+    initialDraft = fromApiShape(formatQuery.data.config);
+    numericId = Number(identifier.split(':')[1]);
+  } else if (cloneFrom && formatQuery.data) {
+    const draft = fromApiShape(formatQuery.data.config);
+    draft.account_type = draft.account_type
+      ? `${draft.account_type} (Copy)`
+      : draft.account_type;
+    initialDraft = draft;
+  }
+
+  const errorMessage = error
+    ? (() => {
+        try {
+          const parsed = parseApiError(error);
+          if (parsed?.then) return null;
+          return getUserMessage(parsed, 'Loading format');
+        } catch {
+          return error.userMessage || error.message || 'Loading format';
+        }
+      })()
+    : null;
 
   const title =
     mode === 'edit'
@@ -115,34 +71,35 @@ export default function FormatEditorPage({ mode }) {
         : 'New statement format';
 
   return (
-    <div className="format-editor-page">
-      <header className="format-editor-page__header">
-        <div>
-          <h1>{title}</h1>
-          <p className="format-editor-page__sub">
-            Describe how this bank&apos;s export maps to transactions, then test it
-            against a sample file.
-          </p>
-        </div>
+    <div className="w-full max-w-[960px] h-full mx-auto pt-6 px-5 box-border flex flex-col overflow-hidden">
+      <header className="shrink-0 mb-5">
+        <h1 className="m-0 mb-1 text-2xl font-semibold">{title}</h1>
+        <p className="m-0 text-[#6c757d] text-sm">
+          Describe how this bank&apos;s export maps to transactions, then test it
+          against a sample file.
+        </p>
       </header>
 
-      {state.loading && <p className="format-editor-page__status">Loading…</p>}
+      {(loading || schemaLoading) && <p className="text-[#6c757d]">Loading…</p>}
 
-      {state.error && (
-        <div className="format-editor-page__error" role="alert">
-          <p>{state.error}</p>
+      {error && (
+        <div
+          role="alert"
+          className="py-3.5 px-4 border border-[#f5c2c7] bg-[#f8d7da] rounded text-[#842029] flex justify-between items-center gap-4"
+        >
+          <p className="m-0">{errorMessage || 'Failed to load.'}</p>
           <Button variant="secondary" onClick={() => navigate('/statement-formats')}>
             Back to formats
           </Button>
         </div>
       )}
 
-      {!state.loading && !state.error && (
+      {!loading && !schemaLoading && !error && (
         <FormatEditor
           mode={mode}
-          initialDraft={state.initialDraft}
-          numericId={state.numericId}
-          schema={state.schema}
+          initialDraft={initialDraft}
+          numericId={numericId}
+          schema={schemaQuery.data}
         />
       )}
     </div>

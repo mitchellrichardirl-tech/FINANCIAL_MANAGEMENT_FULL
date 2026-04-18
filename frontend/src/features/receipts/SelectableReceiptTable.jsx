@@ -1,38 +1,6 @@
-/**
- * @file SelectableReceiptTable.jsx
- * Sortable list of receipts in the current processing session.
- *
- * Each row shows a thumbnail, status icon, filename, and the
- * OCR-extracted vendor/date/amount. Clicking a row selects it for the
- * detail panel; the ✕ button removes a pending receipt from the list
- * (local only — does not call the API).
- */
-
 import { useState } from 'react';
 import ReceiptThumbnail from '@/components/Thumbnail';
-import './SelectableReceiptTable.css';
 
-/**
- * Receipt session table.
- *
- * Sorting is client-side over the `receipts` array, using values from
- * `extracted_data` for vendor/date/amount. Rows carry CSS hooks for
- * selection and status (`selected`, `status-<x>`, `processed`).
- *
- * @component
- * @param {Object} props
- * @param {Array<import('./ProcessReceipts').LocalReceipt>} [props.receipts=[]]
- *        Receipts in the current session.
- * @param {?number|string} props.selectedReceiptId
- *        Id of the receipt currently shown in the detail panel.
- * @param {(receiptId: number|string) => void} props.onSelectReceipt
- *        Called when a row is clicked.
- * @param {(receiptId: number|string) => void} props.onRemoveReceipt
- *        Called when the ✕ button is clicked for a pending receipt.
- * @param {boolean} [props.disabled=false]
- *        Disable row clicks and the ✕ button (e.g. while saving).
- * @returns {JSX.Element}
- */
 export default function SelectableReceiptTable({
   receipts = [],
   selectedReceiptId,
@@ -40,129 +8,99 @@ export default function SelectableReceiptTable({
   onRemoveReceipt,
   disabled = false,
 }) {
-  /** Active sort column + direction. */
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
 
-  /** Toggle sort direction or switch column (defaults to asc). */
-  const handleSort = (key) => {
+  const handleSort = (key) =>
     setSortConfig((prev) => ({
       key,
       direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc',
     }));
-  };
 
-  /** Receipts sorted by `sortConfig`. */
   const sortedReceipts = [...receipts].sort((a, b) => {
     const aData = a.extracted_data || {};
     const bData = b.extracted_data || {};
-
     let aVal, bVal;
-
     switch (sortConfig.key) {
-      case 'filename':
-        aVal = a.filename || '';
-        bVal = b.filename || '';
-        break;
-      case 'vendor':
-        aVal = aData.vendor || '';
-        bVal = bData.vendor || '';
-        break;
-      case 'date':
-        aVal = aData.date || '';
-        bVal = bData.date || '';
-        break;
-      case 'amount':
-        aVal = parseFloat(aData.amount) || 0;
-        bVal = parseFloat(bData.amount) || 0;
-        break;
-      case 'status':
-        aVal = a.status || '';
-        bVal = b.status || '';
-        break;
-      default:
-        return 0;
+      case 'filename': aVal = a.filename || ''; bVal = b.filename || ''; break;
+      case 'vendor':   aVal = aData.vendor || ''; bVal = bData.vendor || ''; break;
+      case 'date':     aVal = aData.date || ''; bVal = bData.date || ''; break;
+      case 'amount':   aVal = parseFloat(aData.amount) || 0; bVal = parseFloat(bData.amount) || 0; break;
+      case 'status':   aVal = a.status || ''; bVal = b.status || ''; break;
+      default: return 0;
     }
-
     if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
     if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
     return 0;
   });
 
-  // ── Display helpers ───────────────────────────────────────────────
-
-  /** Locale-formatted date, or `-`. */
-  const formatDate = (dateString) => {
-    if (!dateString) return '-';
-    return new Date(dateString).toLocaleDateString();
-  };
-
-  /** `$12.34`-style amount, or `-`. */
-  const formatAmount = (amount) => {
-    if (amount == null) return '-';
-    return `$${parseFloat(amount).toFixed(2)}`;
-  };
-
-  /**
-   * Truncate long filenames to ~20 chars while preserving the
-   * extension for recognizability.
-   */
-  const formatFilename = (filename) => {
-    if (!filename) return '-';
-    if (filename.length > 20) {
-      const ext = filename.split('.').pop();
-      return `${filename.substring(0, 15)}...${ext}`;
+  const formatDate = (s) => (s ? new Date(s).toLocaleDateString() : '-');
+  const formatAmount = (a) => (a == null ? '-' : `$${parseFloat(a).toFixed(2)}`);
+  const formatFilename = (n) => {
+    if (!n) return '-';
+    if (n.length > 20) {
+      const ext = n.split('.').pop();
+      return `${n.substring(0, 15)}...${ext}`;
     }
-    return filename;
+    return n;
   };
-
-  /** Status → glyph for the narrow status column. */
   const getStatusIcon = (status) => {
-    switch (status) {
-      case 'saved':
-        return '✓';
-      case 'linked':
-        return '🔗';
-      default:
-        return '○';
-    }
+    if (status === 'saved') return '✓';
+    if (status === 'linked') return '🔗';
+    return '○';
   };
 
-  /**
-   * Clickable column header with asc/desc indicator.
-   * @param {{field: string, children: React.ReactNode}} props
-   */
+  const thBase =
+    'sticky top-0 bg-[#f8f9fa] py-3 px-2 text-left font-semibold text-[0.8rem] text-[#555] border-b-2 border-[#dee2e6] whitespace-nowrap z-10';
+  const sortableThCls = `${thBase} cursor-pointer select-none transition-[background] duration-150 hover:bg-[#e9ecef]`;
+
   const SortableHeader = ({ field, children }) => (
-    <th onClick={() => handleSort(field)} className="sortable-header">
+    <th onClick={() => handleSort(field)} className={sortableThCls}>
       {children}
       {sortConfig.key === field && (
-        <span className="sort-indicator">{sortConfig.direction === 'asc' ? ' ↑' : ' ↓'}</span>
+        <span className="text-[0.7rem] ml-[3px] opacity-70">
+          {sortConfig.direction === 'asc' ? ' ↑' : ' ↓'}
+        </span>
       )}
     </th>
   );
 
   if (receipts.length === 0) {
     return (
-      <div className="empty-receipt-list">
-        <p>No receipts uploaded yet</p>
-        <p className="hint">Upload receipts using the dropzone above</p>
+      <div className="text-center py-12 px-6 text-[#888]">
+        <p className="my-2 text-base font-medium">No receipts uploaded yet</p>
+        <p className="my-2 text-[0.85rem] text-[#aaa]">
+          Upload receipts using the dropzone above
+        </p>
       </div>
     );
   }
 
+  const tdBase = 'p-2 border-b border-[#eee] align-middle';
+
+  const statusBorder = (s) => {
+    if (s === 'saved') return 'border-l-4 border-l-[#28a745]';
+    if (s === 'linked') return 'border-l-4 border-l-[#007bff]';
+    if (s === 'pending') return 'border-l-4 border-l-[#ffc107]';
+    return '';
+  };
+  const statusIconColor = (s) => {
+    if (s === 'saved') return 'text-[#28a745]';
+    if (s === 'linked') return 'text-[#007bff]';
+    return 'text-[#ffc107]';
+  };
+
   return (
-    <div className="selectable-receipt-table-container">
-      <table className="selectable-receipt-table">
+    <div className="flex-1 overflow-y-auto max-h-[calc(100vh-380px)]">
+      <table className="w-full border-collapse text-[0.9rem]">
         <thead>
           <tr>
-            <th className="thumbnail-col">Image</th>
-            <th className="status-col">
-              <span title="Status">●</span>
-            </th>
+            <th className={`${thBase} w-[70px] !p-1.5`}>Image</th>
+            <th className={`${thBase} w-9 text-center`}><span title="Status">●</span></th>
             <SortableHeader field="filename">File</SortableHeader>
             <SortableHeader field="vendor">Vendor</SortableHeader>
             <SortableHeader field="date">Date</SortableHeader>
             <SortableHeader field="amount">Amount</SortableHeader>
-            <th className="actions-col"></th>
+            <th className={`${thBase} w-9 text-center`} />
           </tr>
         </thead>
         <tbody>
@@ -171,52 +109,73 @@ export default function SelectableReceiptTable({
             const isProcessed = receipt.status === 'saved' || receipt.status === 'linked';
             const extracted = receipt.extracted_data || {};
 
+            let rowCls = 'cursor-pointer transition-all duration-150 ease-in-out';
+            if (isSelected) {
+              rowCls += isProcessed ? ' bg-[#e0e7f0] opacity-80' : ' bg-[#e7f1ff] hover:bg-[#d0e3ff]';
+            } else if (isProcessed) {
+              rowCls += ' opacity-60 bg-[#fafafa] hover:bg-[#f5f5f5]';
+            } else {
+              rowCls += ' hover:bg-[#f8f9fa]';
+            }
+            rowCls += ' ' + statusBorder(receipt.status);
+
             return (
               <tr
                 key={receipt.receipt_id}
-                className={`receipt-row ${isSelected ? 'selected' : ''} status-${
-                  receipt.status || 'pending'
-                } ${isProcessed ? 'processed' : ''}`}
+                className={rowCls}
                 onClick={() => !disabled && onSelectReceipt(receipt.receipt_id)}
               >
-                <td className="thumbnail-col">
-                  <ReceiptThumbnail
-                    src={`/api/receipts/${receipt.receipt_id}/image`}
-                    alt={`Receipt from ${extracted.vendor || 'Unknown'}`}
-                    maxWidth="60px"
-                    maxHeight="45px"
-                  />
+                <td className={`${tdBase} w-[70px] !p-1.5`}>
+                  <div className="rounded overflow-hidden bg-[#f5f5f5]">
+                    <ReceiptThumbnail
+                      src={`/api/receipts/${receipt.receipt_id}/image`}
+                      alt={`Receipt from ${extracted.vendor || 'Unknown'}`}
+                      maxWidth="60px"
+                      maxHeight="45px"
+                    />
+                  </div>
                 </td>
-                <td className="status-col">
+                <td className={`${tdBase} w-9 text-center`}>
                   <span
-                    className={`status-icon status-${receipt.status || 'pending'}`}
+                    className={`text-[0.85rem] inline-block ${statusIconColor(receipt.status)}`}
                     title={receipt.status || 'pending'}
                   >
                     {getStatusIcon(receipt.status)}
                   </span>
                 </td>
-                <td className="filename-col">
-                  <span className="filename" title={receipt.filename}>
+                <td className={`${tdBase} min-w-[100px] max-w-[140px]`}>
+                  <span
+                    className="block text-[0.8rem] text-[#666] whitespace-nowrap overflow-hidden text-ellipsis font-mono"
+                    title={receipt.filename}
+                  >
                     {formatFilename(receipt.filename)}
                   </span>
                 </td>
-                <td className="vendor-col">
-                  <span className="vendor-name" title={extracted.vendor || 'Unknown'}>
+                <td className={`${tdBase} min-w-[100px] max-w-[130px]`}>
+                  <span
+                    className={`block whitespace-nowrap overflow-hidden text-ellipsis font-medium ${isProcessed ? 'text-[#666]' : ''}`}
+                    title={extracted.vendor || 'Unknown'}
+                  >
                     {extracted.vendor || 'Unknown'}
                   </span>
                 </td>
-                <td className="date-col">{formatDate(extracted.date)}</td>
-                <td className="amount-col">{formatAmount(extracted.amount)}</td>
-                <td className="actions-col">
+                <td className={`${tdBase} whitespace-nowrap min-w-[85px]`}>
+                  {formatDate(extracted.date)}
+                </td>
+                <td className={`${tdBase} text-right whitespace-nowrap font-mono text-[0.85rem] min-w-[80px]`}>
+                  {formatAmount(extracted.amount)}
+                </td>
+                <td className={`${tdBase} w-9 text-center`}>
                   {receipt.status === 'pending' && (
                     <button
-                      className="btn-remove"
+                      type="button"
                       onClick={(e) => {
                         e.stopPropagation();
                         onRemoveReceipt(receipt.receipt_id);
                       }}
                       disabled={disabled}
                       title="Remove from list"
+                      className="py-1 px-2 bg-transparent border-0 text-[#bbb] cursor-pointer text-[0.9rem] leading-none rounded transition-all duration-150 hover:enabled:text-[#dc3545] hover:enabled:bg-[#fee] disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       ✕
                     </button>

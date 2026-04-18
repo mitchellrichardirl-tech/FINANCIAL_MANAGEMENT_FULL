@@ -1,56 +1,38 @@
-/**
- * @file editor/steps/StepColumns.jsx
- * Step 3 — map source columns to the fields the pipeline needs: date,
- * description, amount(s), and optional extras.
- *
- * This is the most complex step. It's split into three visible sections
- * plus a collapsible "Advanced" block:
- *   1. Date configuration (delegated to DateFormatField)
- *   2. Description column
- *   3. Amount configuration (mode radio + conditional fields)
- *   4. Advanced: optional columns, number formatting, exclude patterns
- */
-
 import Checkbox from '@/components/Checkbox';
 import ChipInput from '@/components/ChipInput';
 import FormField from '@/components/FormField';
 import TextInput from '@/components/TextInput';
-
 import { AMOUNT_MODE } from '../../constants';
 import AmountModeRadio from '../fields/AmountModeRadio';
 import ColumnSelect from '../fields/ColumnSelect';
 import DateFormatField from '../fields/DateFormatField';
 
-import './StepColumns.css';
+const sectionCls = 'mb-7 pb-6 border-b border-[#e9ecef] last-of-type:border-b-0 last-of-type:mb-3 last-of-type:pb-0';
+const sectionHeadingCls = 'text-base m-0 mb-4 text-[#212529]';
+const fieldsRowCls = 'grid grid-cols-2 gap-4 max-[640px]:grid-cols-1';
 
-/**
- * @component
- * @param {{ editor: ReturnType<import('../useFormatEditor').useFormatEditor> }} props
- */
 export default function StepColumns({ editor }) {
   const { draft, updateDraft, sampleColumns, sampleColumnTypes, validation } = editor;
   const errors = validation.errorsByField;
   const amt = draft.amount_config;
 
   return (
-    <div className="fe-step fe-step-cols">
-      <h2>Columns</h2>
-      <p className="fe-step__sub">
+    <div>
+      <h2 className="m-0 mb-1.5 text-xl">Columns</h2>
+      <p className="m-0 mb-5 text-[#6c757d] text-sm">
         Map the columns in the bank&apos;s export to the fields the system needs.
         {sampleColumns.length > 0
           ? ` Detected ${sampleColumns.length} columns from your sample file.`
           : ' No sample file loaded — type column names manually.'}
       </p>
 
-      {/* ── 1. Date ─────────────────────────────────────────────────── */}
-      <section className="fe-step-cols__section">
-        <h3>Date</h3>
+      <section className={sectionCls}>
+        <h3 className={sectionHeadingCls}>Date</h3>
         <DateFormatField editor={editor} />
       </section>
 
-      {/* ── 2. Description ──────────────────────────────────────────── */}
-      <section className="fe-step-cols__section">
-        <h3>Description</h3>
+      <section className={sectionCls}>
+        <h3 className={sectionHeadingCls}>Description</h3>
         <FormField
           label="Description column"
           required
@@ -67,18 +49,16 @@ export default function StepColumns({ editor }) {
         </FormField>
       </section>
 
-      {/* ── 3. Amount ───────────────────────────────────────────────── */}
-      <section className="fe-step-cols__section">
-        <h3>Amount</h3>
+      <section className={sectionCls}>
+        <h3 className={sectionHeadingCls}>Amount</h3>
 
         <AmountModeRadio
           value={draft.amountMode}
           onChange={(m) => updateDraft('amountMode', m)}
         />
 
-        {/* Conditional fields per mode */}
         {draft.amountMode === AMOUNT_MODE.SPLIT && (
-          <div className="fe-step-cols__fields">
+          <div className={fieldsRowCls}>
             <FormField
               label="Credit column"
               required
@@ -142,7 +122,7 @@ export default function StepColumns({ editor }) {
                 placeholder="Select amount column…"
               />
             </FormField>
-            <div className="fe-step-cols__fields">
+            <div className={fieldsRowCls}>
               <FormField
                 label="Credit indicator column"
                 required
@@ -166,7 +146,7 @@ export default function StepColumns({ editor }) {
                 <TextInput
                   value={amt.credit_indicator_value ?? ''}
                   onChange={(v) => updateDraft('amount_config.credit_indicator_value', v)}
-                  placeholder='e.g. CR'
+                  placeholder="e.g. CR"
                 />
               </FormField>
             </div>
@@ -174,13 +154,12 @@ export default function StepColumns({ editor }) {
         )}
       </section>
 
-      {/* ── 4. Advanced ─────────────────────────────────────────────── */}
-      <details className="fe-step-cols__advanced">
-        <summary>Advanced settings</summary>
-        <div className="fe-step-cols__advanced-body">
-
-          {/* Optional columns */}
-          <div className="fe-step-cols__fields">
+      <details className="mt-3 border border-[#e9ecef] rounded-md group">
+        <summary className="cursor-pointer font-semibold text-sm text-[#495057] py-3 px-4 select-none hover:bg-[#f8f9fa] group-open:border-b group-open:border-[#e9ecef]">
+          Advanced settings
+        </summary>
+        <div className="p-4 [&>.checkbox-container]:my-4">
+          <div className={fieldsRowCls}>
             <FormField label="Balance column" help="Optional running balance — not used in processing.">
               <ColumnSelect
                 value={draft.balance_column}
@@ -203,8 +182,7 @@ export default function StepColumns({ editor }) {
             </FormField>
           </div>
 
-          {/* Number formatting */}
-          <div className="fe-step-cols__fields fe-step-cols__fields--narrow">
+          <div className={`${fieldsRowCls} max-w-[360px]`}>
             <FormField label="Decimal separator" help='Usually "." — some European banks use ","'>
               <TextInput
                 value={amt.decimal_separator}
@@ -234,11 +212,13 @@ export default function StepColumns({ editor }) {
             />
           </FormField>
 
-          <Checkbox
-            checked={amt.debit_is_negative}
-            onChange={(v) => updateDraft('amount_config.debit_is_negative', v)}
-            label="Store debits as negative amounts (standard convention)"
-          />
+          <div className="my-4">
+            <Checkbox
+              checked={amt.debit_is_negative}
+              onChange={(v) => updateDraft('amount_config.debit_is_negative', v)}
+              label="Store debits as negative amounts (standard convention)"
+            />
+          </div>
 
           <FormField
             label="Exclude patterns"

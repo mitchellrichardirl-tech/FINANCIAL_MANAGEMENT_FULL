@@ -1,23 +1,16 @@
-/**
- * @file CreateCashTransactionModal.jsx
- * Modal for creating a Cash-account transaction from manually entered
- * information — no bank statement row, no receipt.
- *
- * Shown from {@link CategorizeTransactions}. Mirrors
- * {@link GenerateCashFromReceiptModal} but with editable
- * date / description / amount fields in place of the read-only
- * receipt summary.
- */
-
-import { useState, useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useForm, Controller } from 'react-hook-form';
 import DropdownWithCreate from '@/components/DropdownWithCreate';
-import CreateCategoryModal from '@/features/transactions/CreateCategoryModal';
+import CreateCategoryModal from './CreateCategoryModal';
+import {
+  overlayCls, dialogCls, headerCls, headerTitleCls, closeBtnCls,
+  bodyCls, sectionCls, sectionTitleCls, formHintCls, formFieldCls,
+  formLabelCls, footerCls, cancelBtnCls, saveBtnCls,
+} from './_modalShell';
 import { createLogger } from '@/lib/logger';
 
-/** @type {import('@/lib/logger').Logger} */
 const logger = createLogger('CreateCashTransactionModal');
 
-/** Today's date as a YYYY-MM-DD string (local time). */
 function todayIso() {
   const d = new Date();
   const y = d.getFullYear();
@@ -26,31 +19,9 @@ function todayIso() {
   return `${y}-${m}-${day}`;
 }
 
-/**
- * @component
- * @param {Object} props
- * @param {boolean} props.isOpen
- * @param {() => void} props.onClose
- * @param {(opts: {
- *   transactionDate: string,
- *   description: string,
- *   amount: number,
- *   partyId: number,
- *   isWithdrawal: boolean,
- *   isCredit: boolean,
- *   isKids: boolean,
- *   isOneOff: boolean,
- * }) => Promise<void>} props.onConfirm
- * @param {Array<Object>} props.categories
- * @param {Array<Object>} props.subCategories
- * @param {Array<Object>} props.types
- * @param {Array<Object>} props.parties
- * @param {(name:string, desc?:string)=>Promise<Object>} props.onCategoryCreated
- * @param {(name:string, categoryId:number, desc?:string)=>Promise<Object>} props.onSubCategoryCreated
- * @param {(name:string, subCategoryId:number, desc?:string)=>Promise<Object>} props.onTypeCreated
- * @param {(name:string, typeId:number, desc?:string)=>Promise<Object>} props.onPartyCreated
- * @returns {JSX.Element|null}
- */
+const inputCls =
+  'w-full py-2.5 px-3 border border-[#ddd] rounded text-sm box-border focus:border-[#2196f3] focus:outline-none focus:shadow-[0_0_0_3px_rgba(33,150,243,0.1)] disabled:bg-[#f5f5f5] disabled:cursor-not-allowed';
+
 export default function CreateCashTransactionModal({
   isOpen,
   onClose,
@@ -64,70 +35,69 @@ export default function CreateCashTransactionModal({
   onTypeCreated,
   onPartyCreated,
 }) {
-  // ── Editable fields ──────────────────────────────────────────────
-  const [transactionDate, setTransactionDate] = useState(todayIso());
-  const [description, setDescription] = useState('');
-  const [amount, setAmount] = useState('');
-
-  // ── Flags ────────────────────────────────────────────────────────
-  const [isWithdrawal, setIsWithdrawal] = useState(true);
-  const [isCredit, setIsCredit] = useState(false);
-  const [isKids, setIsKids] = useState(false);
-  const [isOneOff, setIsOneOff] = useState(false);
-
-  // ── Cascade ──────────────────────────────────────────────────────
-  const [selectedCategoryId, setSelectedCategoryId] = useState(null);
-  const [selectedSubCategoryId, setSelectedSubCategoryId] = useState(null);
-  const [selectedTypeId, setSelectedTypeId] = useState(null);
-  const [selectedPartyId, setSelectedPartyId] = useState(null);
-
-  const [saving, setSaving] = useState(false);
-
-  const [createModalState, setCreateModalState] = useState({
-    isOpen: false,
-    type: null,
-    parentName: '',
-    parentId: null,
+  const { register, handleSubmit, control, watch, setValue, reset, formState: { isSubmitting } } = useForm({
+    defaultValues: {
+      transactionDate: todayIso(),
+      description: '',
+      amount: '',
+      isWithdrawal: true,
+      isCredit: false,
+      isKids: false,
+      isOneOff: false,
+      categoryId: null,
+      subCategoryId: null,
+      typeId: null,
+      partyId: null,
+    },
   });
 
-  /** Reset every time the modal opens. */
-  useEffect(() => {
-    if (!isOpen) return;
-    setTransactionDate(todayIso());
-    setDescription('');
-    setAmount('');
-    setIsWithdrawal(true);
-    setIsCredit(false);
-    setIsKids(false);
-    setIsOneOff(false);
-    setSelectedCategoryId(null);
-    setSelectedSubCategoryId(null);
-    setSelectedTypeId(null);
-    setSelectedPartyId(null);
-    setSaving(false);
-  }, [isOpen]);
+  const [createModalState, setCreateModalState] = useState({
+    isOpen: false, type: null, parentName: '', parentId: null,
+  });
 
-  // ── Option lists (same as the receipt modal) ─────────────────────
+  useEffect(() => {
+    if (isOpen) {
+      reset({
+        transactionDate: todayIso(),
+        description: '',
+        amount: '',
+        isWithdrawal: true,
+        isCredit: false,
+        isKids: false,
+        isOneOff: false,
+        categoryId: null,
+        subCategoryId: null,
+        typeId: null,
+        partyId: null,
+      });
+    }
+  }, [isOpen, reset]);
+
+  const selectedCategoryId = watch('categoryId');
+  const selectedSubCategoryId = watch('subCategoryId');
+  const selectedTypeId = watch('typeId');
+  const selectedPartyId = watch('partyId');
+  const isWithdrawal = watch('isWithdrawal');
+  const description = watch('description');
+  const amount = watch('amount');
+  const transactionDate = watch('transactionDate');
 
   const sortedCategories = useMemo(
     () => [...categories].sort((a, b) => a.category.localeCompare(b.category)),
-    [categories],
+    [categories]
   );
-
   const filteredSubCategories = useMemo(() => {
     if (!selectedCategoryId) return [];
     return [...subCategories]
       .filter((sc) => sc.category_id === selectedCategoryId)
       .sort((a, b) => a.sub_category.localeCompare(b.sub_category));
   }, [subCategories, selectedCategoryId]);
-
   const filteredTypes = useMemo(() => {
     if (!selectedSubCategoryId) return [];
     return [...types]
       .filter((t) => t.sub_category_id === selectedSubCategoryId)
       .sort((a, b) => a.type.localeCompare(b.type));
   }, [types, selectedSubCategoryId]);
-
   const filteredParties = useMemo(() => {
     if (!selectedTypeId) return [];
     return [...parties]
@@ -135,32 +105,27 @@ export default function CreateCashTransactionModal({
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [parties, selectedTypeId]);
 
-  // ── Cascade handlers ─────────────────────────────────────────────
-
   const handleCategoryChange = (id) => {
-    setSelectedCategoryId(id ? parseInt(id) : null);
-    setSelectedSubCategoryId(null);
-    setSelectedTypeId(null);
-    setSelectedPartyId(null);
+    setValue('categoryId', id ? parseInt(id) : null);
+    setValue('subCategoryId', null);
+    setValue('typeId', null);
+    setValue('partyId', null);
   };
   const handleSubCategoryChange = (id) => {
-    setSelectedSubCategoryId(id ? parseInt(id) : null);
-    setSelectedTypeId(null);
-    setSelectedPartyId(null);
+    setValue('subCategoryId', id ? parseInt(id) : null);
+    setValue('typeId', null);
+    setValue('partyId', null);
   };
   const handleTypeChange = (id) => {
-    setSelectedTypeId(id ? parseInt(id) : null);
-    setSelectedPartyId(null);
+    setValue('typeId', id ? parseInt(id) : null);
+    setValue('partyId', null);
   };
   const handlePartyChange = (id) => {
-    setSelectedPartyId(id ? parseInt(id) : null);
+    setValue('partyId', id ? parseInt(id) : null);
   };
-
-  // ── Create-modal launchers ───────────────────────────────────────
 
   const openCreateModal = (type, parentName, parentId) =>
     setCreateModalState({ isOpen: true, type, parentName, parentId });
-
   const handleCreateCategory = () => openCreateModal('category', '', null);
   const handleCreateSubCategory = () => {
     const cat = categories.find((c) => c.id === selectedCategoryId);
@@ -208,271 +173,165 @@ export default function CreateCashTransactionModal({
   const closeCreateModal = () =>
     setCreateModalState({ isOpen: false, type: null, parentName: '', parentId: null });
 
-  // ── Validation / save ────────────────────────────────────────────
-
   const amountNum = parseFloat(amount);
   const amountValid = Number.isFinite(amountNum) && amountNum > 0;
-
   const canSave =
     !!selectedPartyId &&
     !!transactionDate &&
-    description.trim() !== '' &&
+    description?.trim() !== '' &&
     amountValid &&
-    !saving;
+    !isSubmitting;
 
-  const handleConfirm = async () => {
-    if (!canSave) return;
-    setSaving(true);
+  const onSubmit = async (data) => {
     try {
       await onConfirm({
-        transactionDate,
-        description: description.trim(),
-        amount: amountNum,
-        partyId: selectedPartyId,
-        isWithdrawal,
-        isCredit,
-        isKids,
-        isOneOff,
+        transactionDate: data.transactionDate,
+        description: data.description.trim(),
+        amount: parseFloat(data.amount),
+        partyId: data.partyId,
+        isWithdrawal: data.isWithdrawal,
+        isCredit: data.isCredit,
+        isKids: data.isKids,
+        isOneOff: data.isOneOff,
       });
-      // Parent closes on success.
     } catch {
-      setSaving(false);
+      /* parent already toasted */
     }
   };
 
-  const handleClose = () => {
-    if (saving) return;
-    onClose();
-  };
-
+  const handleClose = () => { if (!isSubmitting) onClose(); };
   const handleBackdropClick = (e) => {
-    if (e.target === e.currentTarget && !saving) handleClose();
+    if (e.target === e.currentTarget && !isSubmitting) handleClose();
   };
 
   if (!isOpen) return null;
 
   return (
     <>
-      <div className="modal-overlay" onClick={handleBackdropClick}>
-        <div
-          className="modal-content generate-cash-modal"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="modal-header">
-            <h2>New Cash Transaction</h2>
-            <button
-              className="modal-close-btn"
-              onClick={handleClose}
-              disabled={saving}
-              aria-label="Close modal"
-            >
+      <div onClick={handleBackdropClick} className={overlayCls}>
+        <div onClick={(e) => e.stopPropagation()} className={dialogCls}>
+          <div className={headerCls}>
+            <h2 className={headerTitleCls}>New Cash Transaction</h2>
+            <button type="button" onClick={handleClose} disabled={isSubmitting} aria-label="Close modal" className={closeBtnCls}>
               ×
             </button>
           </div>
 
-          <div className="bulk-edit-form">
-            {/* ── Details ── */}
-            <div className="form-section">
-              <h3>Details</h3>
-              <p className="form-hint">
-                A new transaction will be created on the <strong>Cash</strong>{' '}
-                account using these details.
-              </p>
+          <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col flex-1 overflow-hidden">
+            <div className={bodyCls}>
+              <div className={sectionCls}>
+                <h3 className={sectionTitleCls}>Details</h3>
+                <p className={formHintCls}>
+                  A new transaction will be created on the <strong>Cash</strong> account using these details.
+                </p>
 
-              <div className="form-field">
-                <label>Date</label>
-                <input
-                  type="date"
-                  value={transactionDate}
-                  onChange={(e) => setTransactionDate(e.target.value)}
-                  disabled={saving}
-                />
-              </div>
-
-              <div className="form-field">
-                <label>Description</label>
-                <input
-                  type="text"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="e.g. Coffee at Bewley's"
-                  disabled={saving}
-                />
-              </div>
-
-              <div className="form-field">
-                <label>Amount</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  placeholder="0.00"
-                  disabled={saving}
-                />
-              </div>
-            </div>
-
-            {/* ── Flags ── */}
-            <div className="form-section">
-              <h3>Transaction</h3>
-              <div className="form-field">
-                <label>Direction</label>
-                <div className="radio-row">
-                  <label className="radio-option">
-                    <input
-                      type="radio"
-                      name="new-cash-direction"
-                      checked={isWithdrawal}
-                      onChange={() => setIsWithdrawal(true)}
-                      disabled={saving}
-                    />
-                    Withdrawal (cash out)
-                  </label>
-                  <label className="radio-option">
-                    <input
-                      type="radio"
-                      name="new-cash-direction"
-                      checked={!isWithdrawal}
-                      onChange={() => setIsWithdrawal(false)}
-                      disabled={saving}
-                    />
-                    Lodgement (cash in)
-                  </label>
+                <div className={formFieldCls}>
+                  <label className={formLabelCls}>Date</label>
+                  <input type="date" {...register('transactionDate')} disabled={isSubmitting} className={inputCls} />
+                </div>
+                <div className={formFieldCls}>
+                  <label className={formLabelCls}>Description</label>
+                  <input
+                    type="text"
+                    {...register('description')}
+                    placeholder="e.g. Coffee at Bewley's"
+                    disabled={isSubmitting}
+                    className={inputCls}
+                  />
+                </div>
+                <div className={formFieldCls}>
+                  <label className={formLabelCls}>Amount</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    {...register('amount')}
+                    placeholder="0.00"
+                    disabled={isSubmitting}
+                    className={inputCls}
+                  />
                 </div>
               </div>
-              <div className="form-field">
-                <label className="checkbox-option">
-                  <input
-                    type="checkbox"
-                    checked={isCredit}
-                    onChange={(e) => setIsCredit(e.target.checked)}
-                    disabled={saving}
-                  />
-                  Mark as income
-                </label>
+
+              <div className={sectionCls}>
+                <h3 className={sectionTitleCls}>Transaction</h3>
+                <div className={formFieldCls}>
+                  <label className={formLabelCls}>Direction</label>
+                  <div className="flex gap-5 mt-1.5">
+                    <label className="inline-flex items-center gap-1.5 font-normal cursor-pointer">
+                      <input
+                        type="radio"
+                        checked={isWithdrawal}
+                        onChange={() => setValue('isWithdrawal', true)}
+                        disabled={isSubmitting}
+                      />
+                      Withdrawal (cash out)
+                    </label>
+                    <label className="inline-flex items-center gap-1.5 font-normal cursor-pointer">
+                      <input
+                        type="radio"
+                        checked={!isWithdrawal}
+                        onChange={() => setValue('isWithdrawal', false)}
+                        disabled={isSubmitting}
+                      />
+                      Lodgement (cash in)
+                    </label>
+                  </div>
+                </div>
+                {[
+                  ['isCredit', 'Mark as income'],
+                  ['isKids', 'Kids'],
+                  ['isOneOff', 'One-off'],
+                ].map(([field, label]) => (
+                  <div key={field} className={formFieldCls}>
+                    <label className="inline-flex items-center gap-1.5 font-normal cursor-pointer">
+                      <input type="checkbox" {...register(field)} disabled={isSubmitting} />
+                      {label}
+                    </label>
+                  </div>
+                ))}
               </div>
-              <div className="form-field">
-                <label className="checkbox-option">
-                  <input
-                    type="checkbox"
-                    checked={isKids}
-                    onChange={(e) => setIsKids(e.target.checked)}
-                    disabled={saving}
-                  />
-                  Kids
-                </label>
-              </div>
-              <div className="form-field">
-                <label className="checkbox-option">
-                  <input
-                    type="checkbox"
-                    checked={isOneOff}
-                    onChange={(e) => setIsOneOff(e.target.checked)}
-                    disabled={saving}
-                  />
-                  One-off
-                </label>
+
+              <div className={sectionCls}>
+                <h3 className={sectionTitleCls}>Party</h3>
+                <p className={formHintCls}>
+                  Select the party for this transaction. You can create a new one at any level.
+                </p>
+
+                {[
+                  ['Category', selectedCategoryId, handleCategoryChange, sortedCategories, 'category', 'Select category...', handleCreateCategory, false],
+                  ['Sub-Category', selectedSubCategoryId, handleSubCategoryChange, filteredSubCategories, 'sub_category', selectedCategoryId ? 'Select sub-category...' : 'Select a category first', selectedCategoryId ? handleCreateSubCategory : null, !selectedCategoryId],
+                  ['Type', selectedTypeId, handleTypeChange, filteredTypes, 'type', selectedSubCategoryId ? 'Select type...' : 'Select a sub-category first', selectedSubCategoryId ? handleCreateType : null, !selectedSubCategoryId],
+                  ['Party', selectedPartyId, handlePartyChange, filteredParties, 'name', selectedTypeId ? 'Select party...' : 'Select a type first', selectedTypeId ? handleCreateParty : null, !selectedTypeId],
+                ].map(([label, value, onChange, options, labelKey, emptyLabel, onCreate, disabled]) => (
+                  <div key={label} className={formFieldCls}>
+                    <label className={formLabelCls}>{label}</label>
+                    <DropdownWithCreate
+                      value={value}
+                      onChange={onChange}
+                      options={options}
+                      valueKey="id"
+                      labelKey={labelKey}
+                      includeEmpty
+                      emptyLabel={emptyLabel}
+                      onCreateNew={onCreate}
+                      createLabel={`➕ Create New ${label}...`}
+                      disabled={isSubmitting || disabled}
+                    />
+                  </div>
+                ))}
               </div>
             </div>
 
-            {/* ── Party cascade ── */}
-            <div className="form-section">
-              <h3>Party</h3>
-              <p className="form-hint">
-                Select the party for this transaction. You can create a new
-                one at any level.
-              </p>
-
-              <div className="form-field">
-                <label>Category</label>
-                <DropdownWithCreate
-                  value={selectedCategoryId}
-                  onChange={handleCategoryChange}
-                  options={sortedCategories}
-                  valueKey="id"
-                  labelKey="category"
-                  includeEmpty
-                  emptyLabel="Select category..."
-                  onCreateNew={handleCreateCategory}
-                  createLabel="➕ Create New Category..."
-                  disabled={saving}
-                />
-              </div>
-
-              <div className="form-field">
-                <label>Sub-Category</label>
-                <DropdownWithCreate
-                  value={selectedSubCategoryId}
-                  onChange={handleSubCategoryChange}
-                  options={filteredSubCategories}
-                  valueKey="id"
-                  labelKey="sub_category"
-                  includeEmpty
-                  emptyLabel={
-                    selectedCategoryId ? 'Select sub-category...' : 'Select a category first'
-                  }
-                  onCreateNew={selectedCategoryId ? handleCreateSubCategory : null}
-                  createLabel="➕ Create New Sub-Category..."
-                  disabled={saving || !selectedCategoryId}
-                />
-              </div>
-
-              <div className="form-field">
-                <label>Type</label>
-                <DropdownWithCreate
-                  value={selectedTypeId}
-                  onChange={handleTypeChange}
-                  options={filteredTypes}
-                  valueKey="id"
-                  labelKey="type"
-                  includeEmpty
-                  emptyLabel={
-                    selectedSubCategoryId ? 'Select type...' : 'Select a sub-category first'
-                  }
-                  onCreateNew={selectedSubCategoryId ? handleCreateType : null}
-                  createLabel="➕ Create New Type..."
-                  disabled={saving || !selectedSubCategoryId}
-                />
-              </div>
-
-              <div className="form-field">
-                <label>Party</label>
-                <DropdownWithCreate
-                  value={selectedPartyId}
-                  onChange={handlePartyChange}
-                  options={filteredParties}
-                  valueKey="id"
-                  labelKey="name"
-                  includeEmpty
-                  emptyLabel={selectedTypeId ? 'Select party...' : 'Select a type first'}
-                  onCreateNew={selectedTypeId ? handleCreateParty : null}
-                  createLabel="➕ Create New Party..."
-                  disabled={saving || !selectedTypeId}
-                />
-              </div>
+            <div className={footerCls}>
+              <button type="button" onClick={handleClose} disabled={isSubmitting} className={cancelBtnCls}>
+                Cancel
+              </button>
+              <button type="submit" disabled={!canSave} className={saveBtnCls}>
+                {isSubmitting ? 'Creating…' : 'Create Transaction'}
+              </button>
             </div>
-          </div>
-
-          <div className="modal-actions">
-            <button
-              className="cancel-button"
-              onClick={handleClose}
-              disabled={saving}
-              type="button"
-            >
-              Cancel
-            </button>
-            <button
-              className="save-button"
-              onClick={handleConfirm}
-              disabled={!canSave}
-              type="button"
-            >
-              {saving ? 'Creating…' : 'Create Transaction'}
-            </button>
-          </div>
+          </form>
         </div>
       </div>
 

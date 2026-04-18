@@ -1,49 +1,7 @@
-/**
- * @file components/ColumnMismatchPanel.jsx
- * Inline error panel showing expected vs. found columns.
- *
- * Rendered when a statement-format operation fails with `INVALID_FORMAT`
- * and `missing_columns` in the details. Used by both the upload flow
- * and the format editor.
- */
-
-import './ColumnMismatchPanel.css';
-
-/**
- * @typedef {Object} ColumnMismatch
- * @property {string}   message     - User-facing summary.
- * @property {string}   formatName  - Display name of the format that was tried.
- * @property {string[]} missing     - Required columns not found in the file.
- * @property {string[]} required    - All columns the format expects.
- * @property {string[]} found       - All columns actually present in the file.
- */
-
-/**
- * @typedef {Object} MismatchAction
- * @property {string}     label   - Button text.
- * @property {() => void} onClick - Handler.
- */
-
-/**
- * Inline column-mismatch error panel.
- *
- * @component
- * @param {Object} props
- * @param {ColumnMismatch}     props.error
- * @param {() => void}         props.onDismiss - Close the panel.
- * @param {MismatchAction[]}   [props.actions] - Recovery actions to offer.
- *        Defaults to none; callers supply context-appropriate buttons
- *        (e.g. "Try a different account" on the upload page vs.
- *        "Back to column mapping" in the format editor).
- */
 export default function ColumnMismatchPanel({ error, onDismiss, actions = [] }) {
   const { message, formatName, missing, required, found } = error;
-
   const requiredSet = new Set(required);
   const missingSet = new Set(missing);
-
-  // Heuristic: if exactly one column is missing and a near-match exists
-  // in the file, hint that it's probably a spelling difference.
   const hasLookalike =
     missing.length === 1 &&
     found.some(
@@ -53,61 +11,82 @@ export default function ColumnMismatchPanel({ error, onDismiss, actions = [] }) 
     );
 
   return (
-    <div className="column-mismatch-panel" role="alert">
-      <div className="cmp-header">
+    <div
+      role="alert"
+      className="my-4 py-4 px-5 bg-[#fef2f2] border border-[#fca5a5] border-l-4 border-l-[#dc2626] rounded-md"
+    >
+      <div className="flex justify-between items-start mb-3">
         <div>
-          <strong>Column mismatch</strong>
-          <p className="cmp-message">{message}</p>
+          <strong className="text-[#991b1b] text-[15px]">Column mismatch</strong>
+          <p className="mt-1 text-[#7f1d1d] text-sm">{message}</p>
         </div>
-        <button className="cmp-close" onClick={onDismiss} aria-label="Dismiss">
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label="Dismiss"
+          className="bg-none border-0 text-xl text-[#991b1b] cursor-pointer px-1 leading-none"
+        >
           ×
         </button>
       </div>
 
-      <div className="cmp-comparison">
-        <div className="cmp-column">
-          <h4>
+      <div className="grid grid-cols-2 gap-6 my-4 p-3 bg-white rounded">
+        <div>
+          <h4 className="m-0 mb-2 text-[13px] uppercase tracking-wide text-[#6b7280]">
             Expected by <em>{formatName || 'this format'}</em>
           </h4>
-          <ul>
-            {required.map((col) => (
-              <li key={col} className={missingSet.has(col) ? 'cmp-missing' : 'cmp-present'}>
-                {missingSet.has(col) ? '✗' : '✓'} {col}
-              </li>
-            ))}
+          <ul className="list-none m-0 p-0 font-mono text-[13px]">
+            {required.map((col) => {
+              const isMissing = missingSet.has(col);
+              return (
+                <li
+                  key={col}
+                  className={`py-[3px] px-2 rounded-sm mb-0.5 ${isMissing ? 'text-[#991b1b] bg-[#fef2f2] font-semibold' : 'text-[#166534] bg-[#f0fdf4]'}`}
+                >
+                  {isMissing ? '✗' : '✓'} {col}
+                </li>
+              );
+            })}
           </ul>
         </div>
 
-        <div className="cmp-column">
-          <h4>Found in file</h4>
-          <ul>
-            {found.length === 0 && <li className="cmp-empty">(no columns)</li>}
-            {found.map((col) => (
-              <li key={col} className={requiredSet.has(col) ? 'cmp-present' : 'cmp-extra'}>
-                {requiredSet.has(col) ? '✓' : '·'} {col}
-              </li>
-            ))}
+        <div>
+          <h4 className="m-0 mb-2 text-[13px] uppercase tracking-wide text-[#6b7280]">
+            Found in file
+          </h4>
+          <ul className="list-none m-0 p-0 font-mono text-[13px]">
+            {found.length === 0 && <li className="text-[#9ca3af] italic">(no columns)</li>}
+            {found.map((col) => {
+              const isPresent = requiredSet.has(col);
+              return (
+                <li
+                  key={col}
+                  className={`py-[3px] px-2 rounded-sm mb-0.5 ${isPresent ? 'text-[#166534] bg-[#f0fdf4]' : 'text-[#6b7280]'}`}
+                >
+                  {isPresent ? '✓' : '·'} {col}
+                </li>
+              );
+            })}
           </ul>
         </div>
       </div>
 
-      <div className="cmp-hint">
+      <div className="text-[13px] text-[#78350f] mb-3 [&>p]:my-1">
         {hasLookalike && (
-          <p>
-            💡 The file has a column that looks similar — check if the header spelling
-            matches exactly.
-          </p>
+          <p>💡 The file has a column that looks similar — check if the header spelling matches exactly.</p>
         )}
-        <p>
-          This usually means either the wrong format was selected, or the file was
-          exported differently than expected.
-        </p>
+        <p>This usually means either the wrong format was selected, or the file was exported differently than expected.</p>
       </div>
 
       {actions.length > 0 && (
-        <div className="cmp-actions">
+        <div className="flex gap-2">
           {actions.map((a) => (
-            <button key={a.label} onClick={a.onClick} className="cmp-btn-secondary">
+            <button
+              key={a.label}
+              type="button"
+              onClick={a.onClick}
+              className="py-1.5 px-3.5 text-[13px] bg-white border border-[#d1d5db] rounded cursor-pointer hover:bg-[#f9fafb] hover:border-[#9ca3af]"
+            >
               {a.label}
             </button>
           ))}
