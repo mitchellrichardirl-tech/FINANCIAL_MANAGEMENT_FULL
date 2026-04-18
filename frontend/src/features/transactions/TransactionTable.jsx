@@ -12,7 +12,6 @@
 import { useState, useMemo } from 'react';
 import TransactionRow from './TransactionRow';
 import CreateCategoryModal from './CreateCategoryModal';
-import './TransactionTable.css';
 import { createLogger } from '@/lib/logger';
 
 /** @type {import('@/lib/logger').Logger} */
@@ -365,22 +364,74 @@ export default function TransactionTable({
    * @param {string} [props.className]
    */
   const SortableHeader = ({ field, children, className = '' }) => (
-    <th onClick={() => handleSort(field)} className={`sortable-header ${className}`}>
+    <th
+      onClick={() => handleSort(field)}
+      className={`cursor-pointer select-none bg-[#f8f9fa] border-b-2 border-[#dee2e6] text-[#495057] font-semibold py-[12px] px-[8px] text-left whitespace-nowrap sticky top-0 z-[11] hover:bg-[#e9ecef] ${className}`}
+    >
       {children}
       {sortField === field && (
-        <span className="sort-indicator">{sortDir === 'asc' ? ' ↑' : ' ↓'}</span>
+        <span className="ml-[4px] text-[#6c757d]">{sortDir === 'asc' ? ' ↑' : ' ↓'}</span>
       )}
     </th>
   );
 
   return (
     <>
-      <div className="transaction-table-container">
-        <table className="transaction-table">
+      <style>{`
+        .txn-table-container input[type="checkbox"] {
+          margin: 0 auto;
+          display: block;
+        }
+        .txn-table-container tbody tr:nth-child(even) {
+          background-color: #f8f9fa;
+        }
+        .txn-table-container tbody tr:hover {
+          background-color: #e9ecef;
+        }
+        .txn-filter-date + .txn-filter-date {
+          margin-top: 2px;
+        }
+        .txn-remap-party-btn {
+          flex-shrink: 0;
+          background: none;
+          border: 1px solid transparent;
+          border-radius: 4px;
+          color: #6b7280;
+          font-size: 0.8rem;
+          line-height: 1;
+          padding: 1px 4px;
+          cursor: pointer;
+          opacity: 0;
+          transition: opacity 0.15s, color 0.15s, border-color 0.15s;
+        }
+        tr:hover .txn-remap-party-btn,
+        .txn-party-cell:hover .txn-remap-party-btn {
+          opacity: 1;
+        }
+        .txn-remap-party-btn:hover {
+          color: #2563eb;
+          border-color: #93c5fd;
+          background: #eff6ff;
+        }
+        .txn-truncate-cell {
+          max-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .txn-desc-cell:hover,
+        .txn-cleaned-desc-cell:hover {
+          overflow: visible;
+          white-space: normal;
+          word-wrap: break-word;
+        }
+      `}</style>
+      <div className="txn-table-container w-full max-h-[calc(100vh-200px)] overflow-x-auto overflow-y-auto bg-white rounded-[8px] shadow-[0_1px_3px_rgba(0,0,0,0.1)] relative">
+        <table className="w-full min-w-[1400px] border-collapse font-sans text-[14px]">
           <thead>
             {/* Header row */}
-            <tr className="header-row">
-              <th className="select-header">
+            <tr>
+              <th className="w-[40px] text-center! bg-[#f8f9fa] border-b-2 border-[#dee2e6] text-[#495057] font-semibold py-[12px] px-[8px] text-left whitespace-nowrap sticky top-0 z-[11]">
                 <input
                   type="checkbox"
                   checked={allSelected}
@@ -388,26 +439,26 @@ export default function TransactionTable({
                 />
               </th>
               <SortableHeader field="description">Description</SortableHeader>
-              <th>Cleaned Description</th>
+              <th className="bg-[#f8f9fa] border-b-2 border-[#dee2e6] text-[#495057] font-semibold py-[12px] px-[8px] text-left whitespace-nowrap sticky top-0 z-[11]">Cleaned Description</th>
               <SortableHeader field="transaction_date">Date</SortableHeader>
-              <SortableHeader field="amount" className="amount-header">Amount</SortableHeader>
-              <SortableHeader field="is_credit" className="lodgment-header">Lodgment</SortableHeader>
+              <SortableHeader field="amount" className="text-right!">Amount</SortableHeader>
+              <SortableHeader field="is_credit" className="w-[80px] text-center!">Lodgment</SortableHeader>
               <SortableHeader field="account_name">Account</SortableHeader>
               <SortableHeader field="party_name">Party</SortableHeader>
               <SortableHeader field="type_name">Type</SortableHeader>
               <SortableHeader field="sub_category_name">Sub-Category</SortableHeader>
               <SortableHeader field="category_name">Category</SortableHeader>
-              <SortableHeader field="is_kids" className="kids-header">Kid's</SortableHeader>
-              <SortableHeader field="is_one_off" className="one-off-header">One-Off</SortableHeader>
-              <th className="actions-header">Actions</th>
+              <SortableHeader field="is_kids" className="w-[80px] text-center!">Kid's</SortableHeader>
+              <SortableHeader field="is_one_off" className="w-[80px] text-center!">One-Off</SortableHeader>
+              <th className="w-[60px] text-center! bg-[#f8f9fa] border-b-2 border-[#dee2e6] text-[#495057] font-semibold py-[12px] px-[8px] whitespace-nowrap sticky top-0 z-[11]">Actions</th>
             </tr>
 
             {/* Filter row */}
-            <tr className="filter-row">
-              <td className="filter-cell">
+            <tr className="bg-[#f8f9fa]">
+              <td className="sticky top-[44px] z-10 bg-[#f8f9fa] py-[6px] px-[8px] border-b-2 border-[#dee2e6] align-middle">
                 {hasActiveFilters && (
                   <button
-                    className="clear-filters-btn"
+                    className="w-[24px] h-[24px] p-0 border-none rounded-full bg-danger-alt text-white text-[12px] font-bold cursor-pointer flex items-center justify-center mx-auto transition-colors duration-200 hover:bg-[#c82333]"
                     onClick={handleClearFilters}
                     title="Clear all filters"
                   >
@@ -415,30 +466,30 @@ export default function TransactionTable({
                   </button>
                 )}
               </td>
-              <td className="filter-cell">
+              <td className="sticky top-[44px] z-10 bg-[#f8f9fa] py-[6px] px-[8px] border-b-2 border-[#dee2e6] align-middle">
                 <input
                   type="text"
                   placeholder="Filter..."
                   value={filters.description || ''}
                   onChange={(e) => handleFilterFieldChange('description', e.target.value)}
-                  className="filter-input"
+                  className="w-full py-[6px] px-[8px] border border-border-input rounded-[4px] text-[13px] font-[inherit] box-border focus:border-[#80bdff] focus:outline-none focus:shadow-[0_0_0_2px_rgba(0,123,255,0.25)] placeholder:text-[#adb5bd]"
                 />
               </td>
-              <td className="filter-cell">
+              <td className="sticky top-[44px] z-10 bg-[#f8f9fa] py-[6px] px-[8px] border-b-2 border-[#dee2e6] align-middle">
                 <input
                   type="text"
                   placeholder="Filter..."
                   value={filters.cleaned_description || ''}
                   onChange={(e) => handleFilterFieldChange('cleaned_description', e.target.value)}
-                  className="filter-input"
+                  className="w-full py-[6px] px-[8px] border border-border-input rounded-[4px] text-[13px] font-[inherit] box-border focus:border-[#80bdff] focus:outline-none focus:shadow-[0_0_0_2px_rgba(0,123,255,0.25)] placeholder:text-[#adb5bd]"
                 />
               </td>
-              <td className="filter-cell">
+              <td className="sticky top-[44px] z-10 bg-[#f8f9fa] py-[6px] px-[8px] border-b-2 border-[#dee2e6] align-middle">
                 <input
                   type="date"
                   value={filters.start_date || ''}
                   onChange={(e) => handleFilterFieldChange('start_date', e.target.value)}
-                  className="filter-input filter-date"
+                  className="txn-filter-date w-full min-w-0 py-[6px] px-[8px] border border-border-input rounded-[4px] text-[13px] font-[inherit] box-border focus:border-[#80bdff] focus:outline-none focus:shadow-[0_0_0_2px_rgba(0,123,255,0.25)]"
                   title="From date"
                   placeholder="From"
                 />
@@ -446,31 +497,31 @@ export default function TransactionTable({
                   type="date"
                   value={filters.end_date || ''}
                   onChange={(e) => handleFilterFieldChange('end_date', e.target.value)}
-                  className="filter-input filter-date"
+                  className="txn-filter-date w-full min-w-0 py-[6px] px-[8px] border border-border-input rounded-[4px] text-[13px] font-[inherit] box-border focus:border-[#80bdff] focus:outline-none focus:shadow-[0_0_0_2px_rgba(0,123,255,0.25)]"
                   title="To date"
                   placeholder="To"
                 />
               </td>
-              <td className="filter-cell">{/* Amount filter — not implemented */}</td>
-              <td className="filter-cell filter-cell-center">
+              <td className="sticky top-[44px] z-10 bg-[#f8f9fa] py-[6px] px-[8px] border-b-2 border-[#dee2e6] align-middle">{/* Amount filter — not implemented */}</td>
+              <td className="sticky top-[44px] z-10 bg-[#f8f9fa] py-[6px] px-[8px] border-b-2 border-[#dee2e6] align-middle text-center!">
                 <select
                   value={filters.is_credit === true ? 'true' : filters.is_credit === false ? 'false' : ''}
                   onChange={(e) => {
                     const val = e.target.value;
                     handleFilterFieldChange('is_credit', val === '' ? undefined : val === 'true');
                   }}
-                  className="filter-select"
+                  className="w-full py-[6px] px-[8px] border border-border-input rounded-[4px] text-[13px] font-[inherit] bg-white box-border cursor-pointer focus:border-[#80bdff] focus:outline-none focus:shadow-[0_0_0_2px_rgba(0,123,255,0.25)]"
                 >
                   <option value="">All</option>
                   <option value="true">Yes</option>
                   <option value="false">No</option>
                 </select>
               </td>
-              <td className="filter-cell">
+              <td className="sticky top-[44px] z-10 bg-[#f8f9fa] py-[6px] px-[8px] border-b-2 border-[#dee2e6] align-middle">
                 <select
                   value={filters.account_id || ''}
                   onChange={(e) => handleFilterFieldChange('account_id', e.target.value)}
-                  className="filter-select"
+                  className="w-full py-[6px] px-[8px] border border-border-input rounded-[4px] text-[13px] font-[inherit] bg-white box-border cursor-pointer focus:border-[#80bdff] focus:outline-none focus:shadow-[0_0_0_2px_rgba(0,123,255,0.25)]"
                 >
                   <option value="">All</option>
                   {accounts.map((account) => (
@@ -480,11 +531,11 @@ export default function TransactionTable({
                   ))}
                 </select>
               </td>
-              <td className="filter-cell">
+              <td className="sticky top-[44px] z-10 bg-[#f8f9fa] py-[6px] px-[8px] border-b-2 border-[#dee2e6] align-middle">
                 <select
                   value={filters.party_id || ''}
                   onChange={(e) => handleFilterFieldChange('party_id', e.target.value)}
-                  className="filter-select"
+                  className="w-full py-[6px] px-[8px] border border-border-input rounded-[4px] text-[13px] font-[inherit] bg-white box-border cursor-pointer focus:border-[#80bdff] focus:outline-none focus:shadow-[0_0_0_2px_rgba(0,123,255,0.25)]"
                 >
                   <option value="">All</option>
                   {filteredParties.map((party) => (
@@ -494,11 +545,11 @@ export default function TransactionTable({
                   ))}
                 </select>
               </td>
-              <td className="filter-cell">
+              <td className="sticky top-[44px] z-10 bg-[#f8f9fa] py-[6px] px-[8px] border-b-2 border-[#dee2e6] align-middle">
                 <select
                   value={filters.type_id || ''}
                   onChange={(e) => handleFilterFieldChange('type_id', e.target.value)}
-                  className="filter-select"
+                  className="w-full py-[6px] px-[8px] border border-border-input rounded-[4px] text-[13px] font-[inherit] bg-white box-border cursor-pointer focus:border-[#80bdff] focus:outline-none focus:shadow-[0_0_0_2px_rgba(0,123,255,0.25)]"
                 >
                   <option value="">All</option>
                   {filteredTypes.map((type) => (
@@ -508,11 +559,11 @@ export default function TransactionTable({
                   ))}
                 </select>
               </td>
-              <td className="filter-cell">
+              <td className="sticky top-[44px] z-10 bg-[#f8f9fa] py-[6px] px-[8px] border-b-2 border-[#dee2e6] align-middle">
                 <select
                   value={filters.sub_category_id || ''}
                   onChange={(e) => handleFilterFieldChange('sub_category_id', e.target.value)}
-                  className="filter-select"
+                  className="w-full py-[6px] px-[8px] border border-border-input rounded-[4px] text-[13px] font-[inherit] bg-white box-border cursor-pointer focus:border-[#80bdff] focus:outline-none focus:shadow-[0_0_0_2px_rgba(0,123,255,0.25)]"
                 >
                   <option value="">All</option>
                   {filteredSubCategories.map((subCat) => (
@@ -522,11 +573,11 @@ export default function TransactionTable({
                   ))}
                 </select>
               </td>
-              <td className="filter-cell">
+              <td className="sticky top-[44px] z-10 bg-[#f8f9fa] py-[6px] px-[8px] border-b-2 border-[#dee2e6] align-middle">
                 <select
                   value={filters.category_id || ''}
                   onChange={(e) => handleFilterFieldChange('category_id', e.target.value)}
-                  className="filter-select"
+                  className="w-full py-[6px] px-[8px] border border-border-input rounded-[4px] text-[13px] font-[inherit] bg-white box-border cursor-pointer focus:border-[#80bdff] focus:outline-none focus:shadow-[0_0_0_2px_rgba(0,123,255,0.25)]"
                 >
                   <option value="">All</option>
                   {sortedCategories.map((cat) => (
@@ -536,35 +587,35 @@ export default function TransactionTable({
                   ))}
                 </select>
               </td>
-              <td className="filter-cell filter-cell-center">
+              <td className="sticky top-[44px] z-10 bg-[#f8f9fa] py-[6px] px-[8px] border-b-2 border-[#dee2e6] align-middle text-center!">
                 <select
                   value={filters.is_kids === true ? 'true' : filters.is_kids === false ? 'false' : ''}
                   onChange={(e) => {
                     const val = e.target.value;
                     handleFilterFieldChange('is_kids', val === '' ? undefined : val === 'true');
                   }}
-                  className="filter-select"
+                  className="w-full py-[6px] px-[8px] border border-border-input rounded-[4px] text-[13px] font-[inherit] bg-white box-border cursor-pointer focus:border-[#80bdff] focus:outline-none focus:shadow-[0_0_0_2px_rgba(0,123,255,0.25)]"
                 >
                   <option value="">All</option>
                   <option value="true">Yes</option>
                   <option value="false">No</option>
                 </select>
               </td>
-              <td className="filter-cell filter-cell-center">
+              <td className="sticky top-[44px] z-10 bg-[#f8f9fa] py-[6px] px-[8px] border-b-2 border-[#dee2e6] align-middle text-center!">
                 <select
                   value={filters.is_one_off === true ? 'true' : filters.is_one_off === false ? 'false' : ''}
                   onChange={(e) => {
                     const val = e.target.value;
                     handleFilterFieldChange('is_one_off', val === '' ? undefined : val === 'true');
                   }}
-                  className="filter-select"
+                  className="w-full py-[6px] px-[8px] border border-border-input rounded-[4px] text-[13px] font-[inherit] bg-white box-border cursor-pointer focus:border-[#80bdff] focus:outline-none focus:shadow-[0_0_0_2px_rgba(0,123,255,0.25)]"
                 >
                   <option value="">All</option>
                   <option value="true">Yes</option>
                   <option value="false">No</option>
                 </select>
               </td>
-              <td className="filter-cell">{/* Actions column — no filter */}</td>
+              <td className="sticky top-[44px] z-10 bg-[#f8f9fa] py-[6px] px-[8px] border-b-2 border-[#dee2e6] align-middle">{/* Actions column — no filter */}</td>
             </tr>
           </thead>
           <tbody>
@@ -589,7 +640,7 @@ export default function TransactionTable({
         </table>
 
         {transactionArray.length === 0 && (
-          <div className="no-transactions">No transactions found</div>
+          <div className="text-center py-[60px] px-[20px] text-[#6c757d] text-[16px]">No transactions found</div>
         )}
       </div>
 

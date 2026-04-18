@@ -9,7 +9,6 @@
 
 import { useState, useEffect } from 'react';
 import { getTransactions } from '@/features/transactions/api';
-import './ImportResult.css';
 import { createLogger } from '@/lib/logger';
 
 /** @type {import('@/lib/logger').Logger} */
@@ -96,83 +95,86 @@ export default function ImportResult({ result, onUploadAnother, showHeader = tru
   // ── Render ────────────────────────────────────────────────────────
 
   return (
-    <div className="import-result">
+    <div className="flex flex-col h-full overflow-hidden">
       {showHeader && (
-        <div className="import-result-header">
-          <div className="import-success-banner">
-            <h2>✓ Import Successful!</h2>
-            <div className="import-details">
-              <span className="import-detail-item">
-                <span className="detail-label">File:</span>
-                <span className="detail-value">{result.file_name}</span>
+        <div className="shrink-0 flex justify-between items-start mb-[16px] gap-[20px]">
+          <div className="flex-1 p-[16px_20px] bg-[#d4edda] border border-[#c3e6cb] rounded-[4px]">
+            <h2 className="m-[0_0_8px_0] text-[18px] font-semibold text-[#155724]">✓ Import Successful!</h2>
+            <div className="flex items-center gap-[12px] text-[13px] flex-wrap">
+              <span className="flex items-center gap-[6px]">
+                <span className="text-[#155724] font-medium">File:</span>
+                <span className="text-[#155724]">{result.file_name}</span>
               </span>
-              <span className="import-detail-divider">|</span>
-              <span className="import-detail-item">
-                <span className="detail-label">Rows:</span>
-                <span className="detail-value">{result.rows_imported}</span>
+              <span className="text-[#a3cfbb]">|</span>
+              <span className="flex items-center gap-[6px]">
+                <span className="text-[#155724] font-medium">Rows:</span>
+                <span className="text-[#155724]">{result.rows_imported}</span>
               </span>
-              <span className="import-detail-divider">|</span>
-              <span className="import-detail-item">
-                <span className="detail-label">Upload ID:</span>
-                <span className="detail-value">{result.upload_id}</span>
+              <span className="text-[#a3cfbb]">|</span>
+              <span className="flex items-center gap-[6px]">
+                <span className="text-[#155724] font-medium">Upload ID:</span>
+                <span className="text-[#155724]">{result.upload_id}</span>
               </span>
             </div>
           </div>
 
-          <button className="upload-another-btn" onClick={onUploadAnother}>
+          <button
+            className="shrink-0 p-[10px_20px] bg-[#2196f3] text-white border-none rounded-[4px] text-[14px] font-medium cursor-pointer transition-colors duration-200 hover:bg-[#1976d2]"
+            onClick={onUploadAnother}
+          >
             Upload Another File
           </button>
         </div>
       )}
 
-      {loading && <div className="import-loading">Loading transactions...</div>}
+      {loading && <div className="text-center p-[40px] text-[#1976d2] text-[16px]">Loading transactions...</div>}
 
-      {error && <div className="import-error">{error}</div>}
+      {error && <div className="p-[12px_16px] bg-[#f8d7da] border border-[#f5c6cb] rounded-[4px] text-[#721c24] mb-[16px]">{error}</div>}
 
       {transactions && !loading && (
-        <div className="import-transactions-section">
-          <div className="transactions-header">
-            <h3>Imported Transactions</h3>
-            <span className="transactions-count">{transactions.length} transactions</span>
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+          <div className="shrink-0 flex justify-between items-center mb-[12px]">
+            <h3 className="m-0 text-[16px] font-semibold text-text-dark">Imported Transactions</h3>
+            <span className="text-[13px] text-text-muted">{transactions.length} transactions</span>
           </div>
 
-          <div className="import-table-wrapper">
-            <table className="import-table">
+          <div className="flex-1 min-h-0 overflow-auto border border-[#dee2e6] rounded-[4px] bg-white">
+            <table className="w-full border-collapse text-[13px] font-[-apple-system,BlinkMacSystemFont,'Segoe_UI',Roboto,sans-serif]">
               <thead>
                 <tr>
-                  <th>Date</th>
-                  <th>Description</th>
-                  <th className="amount-header">Amount</th>
-                  <th>Party</th>
-                  <th>Category</th>
-                  <th>Type</th>
+                  <th className="sticky top-0 bg-[#f8f9fa] border-b-2 border-[#dee2e6] p-[10px_12px] text-left font-semibold text-[#495057] whitespace-nowrap z-[1]">Date</th>
+                  <th className="sticky top-0 bg-[#f8f9fa] border-b-2 border-[#dee2e6] p-[10px_12px] text-left font-semibold text-[#495057] whitespace-nowrap z-[1]">Description</th>
+                  <th className="sticky top-0 bg-[#f8f9fa] border-b-2 border-[#dee2e6] p-[10px_12px] text-right font-semibold text-[#495057] whitespace-nowrap z-[1]">Amount</th>
+                  <th className="sticky top-0 bg-[#f8f9fa] border-b-2 border-[#dee2e6] p-[10px_12px] text-left font-semibold text-[#495057] whitespace-nowrap z-[1]">Party</th>
+                  <th className="sticky top-0 bg-[#f8f9fa] border-b-2 border-[#dee2e6] p-[10px_12px] text-left font-semibold text-[#495057] whitespace-nowrap z-[1]">Category</th>
+                  <th className="sticky top-0 bg-[#f8f9fa] border-b-2 border-[#dee2e6] p-[10px_12px] text-left font-semibold text-[#495057] whitespace-nowrap z-[1]">Type</th>
                 </tr>
               </thead>
               <tbody>
                 {transactions.map((txn) => (
-                  <tr key={txn.id}>
-                    <td className="date-cell">{formatDate(txn.transaction_date)}</td>
-                    <td className="description-cell" title={txn.description}>
+                  <tr key={txn.id} className="even:bg-[#f8f9fa] hover:bg-[#e9ecef]">
+                    <td className="p-[8px_12px] border-b border-[#e9ecef] align-middle w-[90px] whitespace-nowrap">{formatDate(txn.transaction_date)}</td>
+                    <td className="p-[8px_12px] border-b border-[#e9ecef] align-middle max-w-[250px] overflow-hidden text-ellipsis whitespace-nowrap" title={txn.description}>
                       {txn.description}
                     </td>
-                    <td className={`amount-cell ${txn.amount > 0 ? 'positive' : 'negative'}`}>
+                    <td className={`p-[8px_12px] border-b border-[#e9ecef] align-middle w-[100px] text-right whitespace-nowrap font-semibold ${txn.amount > 0 ? 'text-success' : 'text-danger-alt'}`}>
                       €{Math.abs(parseFloat(txn.amount)).toFixed(2)}
-                      <span className="amount-indicator">{txn.amount > 0 ? '↑' : '↓'}</span>
+                      <span className="ml-[4px] text-[11px]">{txn.amount > 0 ? '↑' : '↓'}</span>
                     </td>
-                    <td className="party-cell">{txn.party_name || '-'}</td>
-                    <td className="category-cell">
+                    <td className="p-[8px_12px] border-b border-[#e9ecef] align-middle max-w-[120px] overflow-hidden text-ellipsis whitespace-nowrap">{txn.party_name || '-'}</td>
+                    <td className="p-[8px_12px] border-b border-[#e9ecef] align-middle max-w-[180px] overflow-hidden text-ellipsis whitespace-nowrap">
                       {txn.category_name ? (
                         <>
                           {txn.category_name}
                           {txn.sub_category_name && (
-                            <span className="sub-category"> → {txn.sub_category_name}</span>
+                            <span className="text-[11px] text-text-muted"> → {txn.sub_category_name}</span>
                           )}
                         </>
                       ) : (
                         '-'
                       )}
                     </td>
-                    <td className="type-cell">{txn.type_name || '-'}</td>
+                    <td className="p-[8px_12px] border-b border-[#e9ecef] align-middle max-w-[120px] overflow-hidden text-ellipsis whitespace-nowrap">{txn.type_name || '-'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -180,20 +182,20 @@ export default function ImportResult({ result, onUploadAnother, showHeader = tru
           </div>
 
           {/* Summary stats */}
-          <div className="import-summary">
-            <h4>Summary</h4>
-            <div className="summary-grid">
-              <div className="summary-stat">
-                <span className="stat-label">Total Income</span>
-                <span className="stat-value positive">€{totalIncome.toFixed(2)}</span>
+          <div className="shrink-0 mt-[16px] p-[16px_20px] bg-[#f8f9fa] rounded-[4px] border border-[#e9ecef]">
+            <h4 className="m-[0_0_12px_0] text-[14px] font-semibold text-text-dark">Summary</h4>
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-[20px]">
+              <div className="flex flex-col gap-[4px]">
+                <span className="text-[12px] text-text-muted font-medium">Total Income</span>
+                <span className="text-[18px] font-bold text-success">€{totalIncome.toFixed(2)}</span>
               </div>
-              <div className="summary-stat">
-                <span className="stat-label">Total Expenses</span>
-                <span className="stat-value negative">€{totalExpenses.toFixed(2)}</span>
+              <div className="flex flex-col gap-[4px]">
+                <span className="text-[12px] text-text-muted font-medium">Total Expenses</span>
+                <span className="text-[18px] font-bold text-danger-alt">€{totalExpenses.toFixed(2)}</span>
               </div>
-              <div className="summary-stat">
-                <span className="stat-label">Categorized</span>
-                <span className="stat-value">
+              <div className="flex flex-col gap-[4px]">
+                <span className="text-[12px] text-text-muted font-medium">Categorized</span>
+                <span className="text-[18px] font-bold text-text-dark">
                   {categorizedCount} / {transactions.length}
                 </span>
               </div>

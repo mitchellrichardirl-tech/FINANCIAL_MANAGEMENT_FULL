@@ -169,27 +169,19 @@ function AccountSelector({
 
   if (showCreateForm) {
     return (
-      <div
-        style={{
-          marginTop: '20px',
-          padding: '20px',
-          border: '1px solid #ddd',
-          borderRadius: '4px',
-          backgroundColor: '#f9f9f9',
-        }}
-      >
-        <h3 style={{ marginTop: 0 }}>Create New Account</h3>
+      <div className="mt-[20px] p-[20px] border border-border rounded-[4px] bg-surface-alt">
+        <h3 className="mt-0">Create New Account</h3>
 
         <form onSubmit={handleCreateAccount}>
           {fieldErrors._general && (
-            <div style={{ color: '#dc2626', marginBottom: '15px' }} role="alert">
+            <div className="text-[#dc2626] mb-[15px]" role="alert">
               {fieldErrors._general}
             </div>
           )}
 
           {/* Account Name */}
-          <div style={{ marginBottom: '15px' }}>
-            <label htmlFor="accountName" style={{ display: 'block', marginBottom: '5px' }}>
+          <div className="mb-[15px]">
+            <label htmlFor="accountName" className="block mb-[5px]">
               Account Name:
             </label>
             <input
@@ -204,19 +196,16 @@ function AccountSelector({
               disabled={creating}
               aria-invalid={!!fieldErrors.accountName}
               aria-describedby={fieldErrors.accountName ? 'accountName-error' : undefined}
-              style={{
-                padding: '8px',
-                width: '100%',
-                maxWidth: '400px',
-                border: `1px solid ${fieldErrors.accountName ? '#dc2626' : '#ccc'}`,
-                borderRadius: '4px',
-                backgroundColor: fieldErrors.accountName ? '#fef2f2' : 'white',
-              }}
+              className={`p-[8px] w-full max-w-[400px] border rounded-[4px] ${
+                fieldErrors.accountName
+                  ? 'border-[#dc2626] bg-[#fef2f2]'
+                  : 'border-[#ccc] bg-white'
+              }`}
             />
             {fieldErrors.accountName && (
               <span
                 id="accountName-error"
-                style={{ display: 'block', marginTop: '4px', color: '#dc2626', fontSize: '14px' }}
+                className="block mt-[4px] text-[#dc2626] text-[14px]"
                 role="alert"
               >
                 {fieldErrors.accountName}
@@ -225,8 +214,8 @@ function AccountSelector({
           </div>
 
           {/* Account Type */}
-          <div style={{ marginBottom: '15px' }}>
-            <label htmlFor="accountType" style={{ display: 'block', marginBottom: '5px' }}>
+          <div className="mb-[15px]">
+            <label htmlFor="accountType" className="block mb-[5px]">
               Account Type:
             </label>
             <select
@@ -238,13 +227,9 @@ function AccountSelector({
               }}
               disabled={creating}
               aria-invalid={!!fieldErrors.accountType}
-              style={{
-                padding: '8px',
-                width: '100%',
-                maxWidth: '400px',
-                border: `1px solid ${fieldErrors.accountType ? '#dc2626' : '#ccc'}`,
-                borderRadius: '4px',
-              }}
+              className={`p-[8px] w-full max-w-[400px] border rounded-[4px] ${
+                fieldErrors.accountType ? 'border-[#dc2626]' : 'border-[#ccc]'
+              }`}
             >
               <option value="bank">Bank Account</option>
               <option value="credit">Credit Card</option>
@@ -254,7 +239,7 @@ function AccountSelector({
             </select>
             {fieldErrors.accountType && (
               <span
-                style={{ display: 'block', marginTop: '4px', color: '#dc2626', fontSize: '14px' }}
+                className="block mt-[4px] text-[#dc2626] text-[14px]"
                 role="alert"
               >
                 {fieldErrors.accountType}
@@ -263,8 +248,8 @@ function AccountSelector({
           </div>
 
           {/* Statement Format */}
-          <div style={{ marginBottom: '15px' }}>
-            <label htmlFor="statementFormat" style={{ display: 'block', marginBottom: '5px' }}>
+          <div className="mb-[15px]">
+            <label htmlFor="statementFormat" className="block mb-[5px]">
               Statement Format:
             </label>
             <select
@@ -276,13 +261,9 @@ function AccountSelector({
               }}
               disabled={creating}
               aria-invalid={!!fieldErrors.statementFormat}
-              style={{
-                padding: '8px',
-                width: '100%',
-                maxWidth: '400px',
-                border: `1px solid ${fieldErrors.statementFormat ? '#dc2626' : '#ccc'}`,
-                borderRadius: '4px',
-              }}
+              className={`p-[8px] w-full max-w-[400px] border rounded-[4px] ${
+                fieldErrors.statementFormat ? 'border-[#dc2626]' : 'border-[#ccc]'
+              }`}
             >
               <option value="">-- None (configure later) --</option>
               {statementFormats.map((format) => (
@@ -293,30 +274,24 @@ function AccountSelector({
             </select>
             {fieldErrors.statementFormat && (
               <span
-                style={{ display: 'block', marginTop: '4px', color: '#dc2626', fontSize: '14px' }}
+                className="block mt-[4px] text-[#dc2626] text-[14px]"
                 role="alert"
               >
                 {fieldErrors.statementFormat}
               </span>
             )}
-            <small style={{ display: 'block', marginTop: '4px', color: '#666' }}>
+            <small className="block mt-[4px] text-text-muted">
               Required for importing bank statements. Can be set later.
             </small>
           </div>
 
-          <div style={{ display: 'flex', gap: '10px' }}>
+          <div className="flex gap-[10px]">
             <button
               type="submit"
               disabled={creating}
-              style={{
-                padding: '8px 20px',
-                backgroundColor: '#28a745',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: creating ? 'not-allowed' : 'pointer',
-                opacity: creating ? 0.6 : 1,
-              }}
+              className={`p-[8px_20px] bg-success text-white border-none rounded-[4px] ${
+                creating ? 'cursor-not-allowed opacity-60' : 'cursor-pointer opacity-100'
+              }`}
             >
               {creating ? 'Creating...' : 'Create Account'}
             </button>
@@ -324,14 +299,7 @@ function AccountSelector({
               type="button"
               onClick={handleCancel}
               disabled={creating}
-              style={{
-                padding: '8px 20px',
-                backgroundColor: '#6c757d',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer',
-              }}
+              className="p-[8px_20px] bg-[#6c757d] text-white border-none rounded-[4px] cursor-pointer"
             >
               Cancel
             </button>
@@ -349,16 +317,9 @@ function AccountSelector({
       value={selectedAccountId}
       onChange={handleChange}
       disabled={disabled}
-      style={{
-        padding: '10px',
-        fontSize: '14px',
-        border: '1px solid #ccc',
-        borderRadius: '4px',
-        width: '100%',
-        height: '42px',
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        backgroundColor: disabled ? '#f5f5f5' : 'white',
-      }}
+      className={`p-[10px] text-[14px] border border-[#ccc] rounded-[4px] w-full h-[42px] ${
+        disabled ? 'cursor-not-allowed bg-[#f5f5f5]' : 'cursor-pointer bg-white'
+      }`}
     >
       <option value="">-- Select an account to import into --</option>
       <option value="CREATE_NEW">➕ Create new account...</option>

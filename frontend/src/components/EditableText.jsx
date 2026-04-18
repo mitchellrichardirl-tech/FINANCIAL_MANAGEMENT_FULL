@@ -7,7 +7,6 @@
  */
 
 import { useState } from 'react';
-import './EditableText.css';
 
 /**
  * Inline-editable text field.
@@ -74,7 +73,7 @@ export default function EditableText({
   };
 
   if (disabled) {
-    return <span className="editable-text-readonly">{value}</span>;
+    return <span className="block p-[0.4em_0.6em] text-text-light text-[0.9em]">{value}</span>;
   }
 
   return (
@@ -86,7 +85,7 @@ export default function EditableText({
       onBlur={handleBlur}
       onKeyDown={handleKeyDown}
       placeholder={placeholder}
-      className="editable-text-input"
+      className="p-[0.4em_0.6em] border border-transparent rounded bg-transparent text-inherit text-[0.9em] w-full box-border transition-all duration-200 hover:bg-ghost/10 hover:border-ghost focus:outline-none focus:bg-surface-dark focus:border-ghost light:focus:bg-white"
     />
   );
 }

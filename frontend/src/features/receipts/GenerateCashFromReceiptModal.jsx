@@ -268,19 +268,23 @@ export default function GenerateCashFromReceiptModal({
 
   const canSave = !!selectedPartyId && !saving;
   const amountNum = parseFloat(receiptData.amount);
-  const amountDisplay = Number.isFinite(amountNum) ? amountNum.toFixed(2) : '—';
+  const amountDisplay = Number.isFinite(amountNum) ? amountNum.toFixed(2) : '\u2014';
 
   return (
     <>
-      <div className="modal-overlay" onClick={handleBackdropClick}>
+      <div
+        className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50 p-4"
+        onClick={handleBackdropClick}
+      >
         <div
-          className="modal-content generate-cash-modal"
+          className="flex max-h-[90vh] w-[90%] max-w-[560px] flex-col overflow-hidden rounded-lg bg-white shadow-[0_4px_24px_rgba(0,0,0,0.18)]"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="modal-header">
-            <h2>Generate Cash Transaction</h2>
+          {/* Header */}
+          <div className="flex shrink-0 items-center justify-between border-b border-[#e5e7eb] px-6 pb-4 pt-5">
+            <h2 className="m-0 text-[1.2rem] font-semibold text-[#111827]">Generate Cash Transaction</h2>
             <button
-              className="modal-close-btn"
+              className="cursor-pointer rounded border-none bg-none p-0 px-1 text-2xl leading-none text-[#6b7280] transition-[color,background] duration-150 hover:enabled:bg-[#f3f4f6] hover:enabled:text-[#111827] disabled:cursor-not-allowed disabled:opacity-40"
               onClick={handleClose}
               disabled={saving}
               aria-label="Close modal"
@@ -289,35 +293,36 @@ export default function GenerateCashFromReceiptModal({
             </button>
           </div>
 
-          <div className="bulk-edit-form">
+          {/* Scrollable form body */}
+          <div className="flex flex-1 flex-col gap-5 overflow-y-auto px-6 py-4">
             {/* ── Summary ── */}
-            <div className="form-section">
-              <h3>Receipt</h3>
-              <p className="form-hint">
+            <div className="flex flex-col gap-3">
+              <h3 className="m-0 text-[0.95rem] font-semibold uppercase tracking-wide text-[#374151]">Receipt</h3>
+              <p className="m-0 text-[0.8rem] italic leading-[1.4] text-[#6b7280]">
                 A new transaction will be created on the <strong>Cash</strong>{' '}
                 account using these details.
               </p>
-              <div className="current-mapping">
-                <span className="mapping-label">Vendor:</span>
-                <span className="mapping-path">{receiptData.vendor || '—'}</span>
+              <div className="flex flex-wrap items-center gap-[0.4rem] rounded-md border border-[#e5e7eb] bg-[#f9fafb] px-3 py-2 text-[0.82rem]">
+                <span className="whitespace-nowrap font-medium text-[#6b7280]">Vendor:</span>
+                <span className="text-[#111827]">{receiptData.vendor || '\u2014'}</span>
               </div>
-              <div className="current-mapping">
-                <span className="mapping-label">Date:</span>
-                <span className="mapping-path">{receiptData.date || '—'}</span>
+              <div className="flex flex-wrap items-center gap-[0.4rem] rounded-md border border-[#e5e7eb] bg-[#f9fafb] px-3 py-2 text-[0.82rem]">
+                <span className="whitespace-nowrap font-medium text-[#6b7280]">Date:</span>
+                <span className="text-[#111827]">{receiptData.date || '\u2014'}</span>
               </div>
-              <div className="current-mapping">
-                <span className="mapping-label">Amount:</span>
-                <span className="mapping-path">{amountDisplay}</span>
+              <div className="flex flex-wrap items-center gap-[0.4rem] rounded-md border border-[#e5e7eb] bg-[#f9fafb] px-3 py-2 text-[0.82rem]">
+                <span className="whitespace-nowrap font-medium text-[#6b7280]">Amount:</span>
+                <span className="text-[#111827]">{amountDisplay}</span>
               </div>
             </div>
 
             {/* ── Direction + income flag ── */}
-            <div className="form-section">
-              <h3>Transaction</h3>
-              <div className="form-field">
-                <label>Direction</label>
-                <div className="radio-row">
-                  <label className="radio-option">
+            <div className="flex flex-col gap-3">
+              <h3 className="m-0 text-[0.95rem] font-semibold uppercase tracking-wide text-[#374151]">Transaction</h3>
+              <div className="flex flex-col gap-[0.3rem]">
+                <label className="text-[0.85rem] font-medium text-[#374151]">Direction</label>
+                <div className="mt-1.5 flex gap-5">
+                  <label className="inline-flex cursor-pointer items-center gap-1.5 font-normal">
                     <input
                       type="radio"
                       name="cash-direction"
@@ -327,7 +332,7 @@ export default function GenerateCashFromReceiptModal({
                     />
                     Withdrawal (cash out)
                   </label>
-                  <label className="radio-option">
+                  <label className="inline-flex cursor-pointer items-center gap-1.5 font-normal">
                     <input
                       type="radio"
                       name="cash-direction"
@@ -339,8 +344,8 @@ export default function GenerateCashFromReceiptModal({
                   </label>
                 </div>
               </div>
-              <div className="form-field">
-                <label className="checkbox-option">
+              <div className="flex flex-col gap-[0.3rem]">
+                <label className="inline-flex cursor-pointer items-center gap-1.5 font-normal">
                   <input
                     type="checkbox"
                     checked={isCredit}
@@ -350,8 +355,8 @@ export default function GenerateCashFromReceiptModal({
                   Mark as income
                 </label>
               </div>
-              <div className="form-field">
-                <label className="checkbox-option">
+              <div className="flex flex-col gap-[0.3rem]">
+                <label className="inline-flex cursor-pointer items-center gap-1.5 font-normal">
                   <input
                     type="checkbox"
                     checked={isKids}
@@ -361,8 +366,8 @@ export default function GenerateCashFromReceiptModal({
                   Kids
                 </label>
               </div>
-              <div className="form-field">
-                <label className="checkbox-option">
+              <div className="flex flex-col gap-[0.3rem]">
+                <label className="inline-flex cursor-pointer items-center gap-1.5 font-normal">
                   <input
                     type="checkbox"
                     checked={isOneOff}
@@ -375,16 +380,16 @@ export default function GenerateCashFromReceiptModal({
             </div>
 
             {/* ── Party cascade ── */}
-            <div className="form-section">
-              <h3>Party</h3>
-              <p className="form-hint">
+            <div className="flex flex-col gap-3">
+              <h3 className="m-0 text-[0.95rem] font-semibold uppercase tracking-wide text-[#374151]">Party</h3>
+              <p className="m-0 text-[0.8rem] italic leading-[1.4] text-[#6b7280]">
                 {suggestedPartyId
                   ? 'A party has been suggested from the vendor name. Change it if needed.'
                   : 'Select the party for this transaction. You can create a new one at any level.'}
               </p>
 
-              <div className="form-field">
-                <label>Category</label>
+              <div className="flex flex-col gap-[0.3rem]">
+                <label className="text-[0.85rem] font-medium text-[#374151]">Category</label>
                 <DropdownWithCreate
                   value={selectedCategoryId}
                   onChange={handleCategoryChange}
@@ -399,8 +404,8 @@ export default function GenerateCashFromReceiptModal({
                 />
               </div>
 
-              <div className="form-field">
-                <label>Sub-Category</label>
+              <div className="flex flex-col gap-[0.3rem]">
+                <label className="text-[0.85rem] font-medium text-[#374151]">Sub-Category</label>
                 <DropdownWithCreate
                   value={selectedSubCategoryId}
                   onChange={handleSubCategoryChange}
@@ -417,8 +422,8 @@ export default function GenerateCashFromReceiptModal({
                 />
               </div>
 
-              <div className="form-field">
-                <label>Type</label>
+              <div className="flex flex-col gap-[0.3rem]">
+                <label className="text-[0.85rem] font-medium text-[#374151]">Type</label>
                 <DropdownWithCreate
                   value={selectedTypeId}
                   onChange={handleTypeChange}
@@ -435,8 +440,8 @@ export default function GenerateCashFromReceiptModal({
                 />
               </div>
 
-              <div className="form-field">
-                <label>Party</label>
+              <div className="flex flex-col gap-[0.3rem]">
+                <label className="text-[0.85rem] font-medium text-[#374151]">Party</label>
                 <DropdownWithCreate
                   value={selectedPartyId}
                   onChange={handlePartyChange}
@@ -453,9 +458,10 @@ export default function GenerateCashFromReceiptModal({
             </div>
           </div>
 
-          <div className="modal-actions">
+          {/* Footer */}
+          <div className="flex shrink-0 justify-end gap-3 border-t border-[#e5e7eb] px-6 py-4">
             <button
-              className="cancel-button"
+              className="cursor-pointer rounded-md border border-[#d1d5db] bg-white px-[1.1rem] py-2 text-[0.9rem] text-[#374151] transition-[background,border-color] duration-150 hover:enabled:border-[#9ca3af] hover:enabled:bg-[#f9fafb] disabled:cursor-not-allowed disabled:opacity-50"
               onClick={handleClose}
               disabled={saving}
               type="button"
@@ -463,12 +469,12 @@ export default function GenerateCashFromReceiptModal({
               Cancel
             </button>
             <button
-              className="save-button"
+              className="cursor-pointer rounded-md border-none bg-[#2563eb] px-5 py-2 text-[0.9rem] font-medium text-white transition-colors duration-150 hover:enabled:bg-[#1d4ed8] disabled:cursor-not-allowed disabled:bg-[#93c5fd]"
               onClick={handleConfirm}
               disabled={!canSave}
               type="button"
             >
-              {saving ? 'Generating…' : 'Generate Transaction'}
+              {saving ? 'Generating\u2026' : 'Generate Transaction'}
             </button>
           </div>
         </div>

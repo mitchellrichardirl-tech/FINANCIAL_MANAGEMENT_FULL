@@ -39,7 +39,7 @@ function PreviewTable({ previewData, startRow, onStartRowChange }) {
 
   if (!columns || !data) {
     return (
-      <div style={{ padding: '20px', color: 'red' }}>
+      <div className="p-[20px] text-red-600">
         <p>Invalid preview data structure</p>
         <pre>{JSON.stringify(previewData, null, 2)}</pre>
       </div>
@@ -53,130 +53,46 @@ function PreviewTable({ previewData, startRow, onStartRowChange }) {
   const ROW_OFFSET = 1;
 
   return (
-    <div
-      style={{
-        padding: '15px',
-        height: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-      }}
-    >
-      <h2 style={{ margin: '0 0 15px 0', flexShrink: 0 }}>File Preview</h2>
+    <div className="p-[15px] h-full flex flex-col overflow-hidden">
+      <h2 className="m-[0_0_15px_0] shrink-0">File Preview</h2>
 
       {/* Legend */}
-      <div
-        style={{
-          padding: '10px 15px',
-          backgroundColor: '#e7f3ff',
-          borderLeft: '4px solid #4a90e2',
-          marginBottom: '15px',
-          fontSize: '13px',
-          color: '#333',
-          flexShrink: 0,
-        }}
-      >
-        <div style={{ marginBottom: '8px' }}>
+      <div className="p-[10px_15px] bg-[#e7f3ff] border-l-[4px] border-l-[#4a90e2] mb-[15px] text-[13px] text-text-dark shrink-0">
+        <div className="mb-[8px]">
           <strong>Note:</strong> Preview shows rows 2 onwards (row 1 was used as column headers).
         </div>
-        <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center' }}>
-            <div
-              style={{
-                width: '16px',
-                height: '16px',
-                backgroundColor: '#f8d7da',
-                border: '1px solid #dee2e6',
-                marginRight: '6px',
-              }}
-            ></div>
+        <div className="flex gap-[20px] flex-wrap">
+          <div className="flex items-center">
+            <div className="w-[16px] h-[16px] bg-[#f8d7da] border border-[#dee2e6] mr-[6px]"></div>
             <span>Rows to skip</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center' }}>
-            <div
-              style={{
-                width: '16px',
-                height: '16px',
-                backgroundColor: '#fff3cd',
-                border: '1px solid #dee2e6',
-                marginRight: '6px',
-              }}
-            ></div>
+          <div className="flex items-center">
+            <div className="w-[16px] h-[16px] bg-[#fff3cd] border border-[#dee2e6] mr-[6px]"></div>
             <span>Header row</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center' }}>
-            <div
-              style={{
-                width: '16px',
-                height: '16px',
-                backgroundColor: 'white',
-                border: '1px solid #dee2e6',
-                marginRight: '6px',
-              }}
-            ></div>
+          <div className="flex items-center">
+            <div className="w-[16px] h-[16px] bg-white border border-[#dee2e6] mr-[6px]"></div>
             <span>Data rows</span>
           </div>
         </div>
       </div>
 
       {/* Table */}
-      <div
-        style={{
-          flex: 1,
-          minHeight: 0,
-          overflowY: 'auto',
-          overflowX: 'auto',
-          border: '1px solid #dee2e6',
-          borderRadius: '4px',
-        }}
-      >
-        <table
-          style={{
-            width: '100%',
-            borderCollapse: 'collapse',
-            backgroundColor: 'white',
-          }}
-        >
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-auto border border-[#dee2e6] rounded-[4px]">
+        <table className="w-full border-collapse bg-white">
           <thead>
-            <tr style={{ backgroundColor: '#f8f9fa' }}>
-              <th
-                style={{
-                  padding: '12px',
-                  textAlign: 'left',
-                  borderBottom: '2px solid #dee2e6',
-                  fontWeight: 'bold',
-                  position: 'sticky',
-                  top: 0,
-                  backgroundColor: '#f8f9fa',
-                  zIndex: 10,
-                }}
-              >
+            <tr className="bg-[#f8f9fa]">
+              <th className="p-[12px] text-left border-b-2 border-[#dee2e6] font-bold sticky top-0 bg-[#f8f9fa] z-10">
                 Row
               </th>
               {columns.map((col, idx) => (
                 <th
                   key={idx}
-                  style={{
-                    padding: '12px',
-                    textAlign: 'left',
-                    borderBottom: '2px solid #dee2e6',
-                    fontWeight: 'bold',
-                    position: 'sticky',
-                    top: 0,
-                    backgroundColor: '#f8f9fa',
-                    zIndex: 10,
-                  }}
+                  className="p-[12px] text-left border-b-2 border-[#dee2e6] font-bold sticky top-0 bg-[#f8f9fa] z-10"
                 >
                   <div>{col}</div>
                   {column_types && column_types[col] && (
-                    <div
-                      style={{
-                        fontSize: '11px',
-                        color: '#6c757d',
-                        fontWeight: 'normal',
-                        marginTop: '4px',
-                      }}
-                    >
+                    <div className="text-[11px] text-[#6c757d] font-normal mt-[4px]">
                       {column_types[col]}
                     </div>
                   )}
@@ -200,23 +116,13 @@ function PreviewTable({ previewData, startRow, onStartRowChange }) {
                     opacity: actualRowNum < startRow ? 0.6 : 1,
                   }}
                 >
-                  <td
-                    style={{
-                      padding: '10px 12px',
-                      borderBottom: '1px solid #dee2e6',
-                      fontWeight: 'bold',
-                      color: '#6c757d',
-                    }}
-                  >
+                  <td className="p-[10px_12px] border-b border-[#dee2e6] font-bold text-[#6c757d]">
                     {actualRowNum}
                   </td>
                   {columns.map((col, colIdx) => (
                     <td
                       key={colIdx}
-                      style={{
-                        padding: '10px 12px',
-                        borderBottom: '1px solid #dee2e6',
-                      }}
+                      className="p-[10px_12px] border-b border-[#dee2e6]"
                     >
                       {row[col] !== null && row[col] !== undefined ? String(row[col]) : ''}
                     </td>

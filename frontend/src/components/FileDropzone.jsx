@@ -79,39 +79,24 @@ function FileDropzone({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      style={{
-        border: isDragging ? '2px solid #007bff' : '2px dashed #ccc',
-        borderRadius: '8px',
-        padding: '40px',
-        textAlign: 'center',
-        backgroundColor: isDragging ? '#f0f8ff' : '#fafafa',
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? 0.6 : 1,
-      }}
+      className={`rounded-lg p-10 text-center ${isDragging ? 'border-2 border-solid border-primary bg-[#f0f8ff]' : 'border-2 border-dashed border-[#ccc] bg-[#fafafa]'} ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
     >
       <div>
-        <p style={{ fontSize: '18px', marginBottom: '10px' }}>
+        <p className="text-[18px] mb-2.5">
           {isDragging ? 'Drop file here...' : 'Drag and drop a file here'}
         </p>
-        <p style={{ color: '#666', marginBottom: '20px' }}>or</p>
-        <label style={{
-          padding: '10px 20px',
-          backgroundColor: '#007bff',
-          color: 'white',
-          borderRadius: '4px',
-          cursor: disabled ? 'not-allowed' : 'pointer',
-          display: 'inline-block',
-        }}>
+        <p className="text-text-muted mb-5">or</p>
+        <label className={`py-2.5 px-5 bg-primary text-white rounded inline-block ${disabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
           Choose File
           <input
             type="file"
             onChange={handleFileInput}
             disabled={disabled}
             accept={acceptedFileTypes}
-            style={{ display: 'none' }}
+            className="hidden"
           />
         </label>
-        <p style={{ fontSize: '12px', color: '#999', marginTop: '10px' }}>
+        <p className="text-xs text-[#999] mt-2.5">
           Supported formats: {supportedFormatsText}
         </p>
       </div>

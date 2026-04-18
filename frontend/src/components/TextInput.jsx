@@ -5,19 +5,6 @@
  * validation.
  */
 
-import './TextInput.css';
-
-/**
- * @component
- * @param {Object} props
- * @param {string|null|undefined} props.value
- * @param {(value: string) => void} props.onChange - Receives the raw string.
- * @param {string} [props.placeholder]
- * @param {boolean} [props.disabled=false]
- * @param {string} [props.id]      - For pairing with `FormField`'s `htmlFor`.
- * @param {string} [props.type='text']
- * @param {number} [props.maxLength]
- */
 export default function TextInput({
   value,
   onChange,
@@ -31,7 +18,7 @@ export default function TextInput({
     <input
       id={id}
       type={type}
-      className="text-input"
+      className="w-full box-border py-2 px-2.5 text-sm border border-border-input rounded bg-white text-[#212529] focus:outline-none focus:border-[#4a90e2] focus:shadow-[0_0_0_2px_rgba(74,144,226,0.2)] disabled:bg-[#f1f3f5] disabled:text-[#868e96] disabled:cursor-not-allowed"
       value={value ?? ''}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}

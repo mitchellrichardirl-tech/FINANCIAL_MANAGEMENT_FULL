@@ -6,7 +6,6 @@
  */
 
 import { AMOUNT_MODE, AMOUNT_MODE_LABELS } from '../../constants';
-import './AmountModeRadio.css';
 
 const DESCRIPTIONS = {
   [AMOUNT_MODE.SPLIT]:
@@ -25,15 +24,17 @@ const DESCRIPTIONS = {
  */
 export default function AmountModeRadio({ value, onChange }) {
   return (
-    <fieldset className="amount-mode-radio">
-      <legend className="amount-mode-radio__legend">
+    <fieldset className="border-none p-0 m-0 mb-5">
+      <legend className="font-semibold text-[13px] text-text-dark p-0 mb-2.5">
         How does this bank report amounts?
       </legend>
       {Object.values(AMOUNT_MODE).map((mode) => (
         <label
           key={mode}
-          className={`amount-mode-radio__option ${
-            value === mode ? 'amount-mode-radio__option--selected' : ''
+          className={`flex items-start gap-2.5 px-3.5 py-3 border rounded mb-2 cursor-pointer transition-[border-color,background-color] duration-[120ms] ${
+            value === mode
+              ? 'border-primary bg-[#f0f8ff]'
+              : 'border-[#dee2e6] hover:border-[#adb5bd]'
           }`}
         >
           <input
@@ -42,12 +43,13 @@ export default function AmountModeRadio({ value, onChange }) {
             value={mode}
             checked={value === mode}
             onChange={() => onChange(mode)}
+            className="mt-[3px] shrink-0"
           />
           <div>
-            <div className="amount-mode-radio__label">
+            <div className="font-medium text-sm">
               {AMOUNT_MODE_LABELS[mode]}
             </div>
-            <div className="amount-mode-radio__desc">{DESCRIPTIONS[mode]}</div>
+            <div className="text-xs text-[#6c757d] mt-0.5">{DESCRIPTIONS[mode]}</div>
           </div>
         </label>
       ))}

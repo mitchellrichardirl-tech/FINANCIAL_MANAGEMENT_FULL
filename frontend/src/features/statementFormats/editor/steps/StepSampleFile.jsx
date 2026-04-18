@@ -13,8 +13,6 @@ import FormField from '@/components/FormField';
 import NumberInput from '@/components/NumberInput';
 import PreviewTable from '@/features/statements/PreviewTable';
 
-import './StepSampleFile.css';
-
 /**
  * @component
  * @param {{ editor: ReturnType<import('../useFormatEditor').useFormatEditor> }} props
@@ -36,9 +34,9 @@ export default function StepSampleFile({ editor }) {
   };
 
   return (
-    <div className="fe-step fe-step-sample">
-      <h2>Sample file</h2>
-      <p className="fe-step__sub">
+    <div className="fe-step">
+      <h2 className="m-0 mb-1.5 text-xl">Sample file</h2>
+      <p className="m-0 mb-5 text-[#6c757d] text-sm">
         Upload a real export from this bank so we can read its column headers and
         test the format against actual rows. The file is only used for preview —
         nothing is imported.
@@ -47,7 +45,7 @@ export default function StepSampleFile({ editor }) {
       {!hasFile && (
         <>
           {mode !== 'create' && (
-            <div className="fe-step-sample__optional">
+            <div className="px-3.5 py-2.5 mb-4 bg-[#e7f3ff] border-l-4 border-[#4a90e2] rounded text-[13px] text-[#1c4d7a]">
               <strong>Optional.</strong> You can skip this and type column names
               manually in Step 3, but you won&apos;t be able to preview the result.
             </div>
@@ -57,10 +55,10 @@ export default function StepSampleFile({ editor }) {
       )}
 
       {hasFile && (
-        <div className="fe-step-sample__filebar">
-          <div className="fe-step-sample__fileinfo">
-            <div className="fe-step-sample__filename">{file.name}</div>
-            <div className="fe-step-sample__filemeta">
+        <div className="flex justify-between items-center gap-4 px-4 py-3 mb-4 bg-[#f8f9fa] border border-[#dee2e6] rounded-[6px] max-sm:flex-col max-sm:items-stretch">
+          <div>
+            <div className="font-semibold break-all">{file.name}</div>
+            <div className="text-xs text-[#6c757d] mt-0.5">
               {formatBytes(file.size)}
               {hasData && (
                 <>
@@ -79,12 +77,12 @@ export default function StepSampleFile({ editor }) {
       )}
 
       {loading && (
-        <p className="fe-step-sample__status">Reading file…</p>
+        <p className="text-[#6c757d] py-6 text-center">Reading file…</p>
       )}
 
       {error && (
-        <div className="fe-step-sample__error" role="alert">
-          <p>{error}</p>
+        <div className="px-4 py-3.5 border border-[#f5c2c7] bg-[#f8d7da] rounded text-[#842029] flex justify-between items-center gap-4 mb-4" role="alert">
+          <p className="m-0">{error}</p>
           <Button variant="secondary" onClick={clearSampleFile}>
             Try a different file
           </Button>
@@ -93,7 +91,7 @@ export default function StepSampleFile({ editor }) {
 
       {hasData && (
         <>
-          <div className="fe-step-sample__controls">
+          <div className="grid grid-cols-3 gap-4 max-w-[720px] max-sm:grid-cols-1">
             <FormField
               label="Column headers are on row"
               help="Row containing the column names. Rows above are ignored for this preview."
@@ -135,7 +133,7 @@ export default function StepSampleFile({ editor }) {
           </div>
 
           {sample.headerRow > 1 && (
-            <div className="fe-step-sample__detected">
+            <div className="my-1 mb-3 px-3 py-2 text-[13px] bg-[#e7f3ff] border-l-[3px] border-[#4a90e2] rounded-[3px] text-[#1c4d7a] break-words">
               <strong>Columns detected from row {sample.headerRow}:</strong>{' '}
               {editor.sampleColumns.length > 0
                 ? editor.sampleColumns.join(', ')
@@ -143,7 +141,7 @@ export default function StepSampleFile({ editor }) {
             </div>
           )}
 
-          <div className="fe-step-sample__table">
+          <div className="h-[50vh] min-h-[320px] border border-[#dee2e6] rounded-[6px] overflow-hidden mt-1">
             <PreviewTable
               previewData={previewData}
               startRow={startRow}

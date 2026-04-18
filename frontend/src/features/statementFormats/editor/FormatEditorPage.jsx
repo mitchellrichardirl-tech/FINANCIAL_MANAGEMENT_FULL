@@ -15,14 +15,13 @@ import { useEffect, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 
 import Button from '@/components/Button';
-import { useToast } from '@/components/ToastContext';
+import { useToast } from '@/stores/toastStore';
 import { parseApiError, getUserMessage } from '@/lib/apiErrors';
 import { createLogger } from '@/lib/logger';
 
 import { fetchFormat, fetchFormatSchema } from '../api';
 import { emptyDraft, fromApiShape } from '../configModel';
 import FormatEditor from './FormatEditor';
-import './FormatEditorPage.css';
 
 const logger = createLogger('statementFormats:FormatEditorPage');
 
@@ -56,7 +55,7 @@ export default function FormatEditorPage({ mode }) {
         if (mode === 'edit' && identifier && !identifier.startsWith('user:')) {
           addToast({
             type: 'info',
-            message: 'Built-in formats can’t be edited — clone one instead.',
+            message: 'Built-in formats can\u2019t be edited \u2014 clone one instead.',
           });
           navigate('/statement-formats', { replace: true });
           return;
@@ -115,21 +114,21 @@ export default function FormatEditorPage({ mode }) {
         : 'New statement format';
 
   return (
-    <div className="format-editor-page">
-      <header className="format-editor-page__header">
+    <div className="w-full max-w-[960px] h-full mx-auto px-5 pt-6 box-border flex flex-col overflow-hidden">
+      <header className="shrink-0 mb-5">
         <div>
-          <h1>{title}</h1>
-          <p className="format-editor-page__sub">
+          <h1 className="m-0 mb-1">{title}</h1>
+          <p className="m-0 text-[#6c757d] text-sm">
             Describe how this bank&apos;s export maps to transactions, then test it
             against a sample file.
           </p>
         </div>
       </header>
 
-      {state.loading && <p className="format-editor-page__status">Loading…</p>}
+      {state.loading && <p className="text-[#6c757d]">Loading…</p>}
 
       {state.error && (
-        <div className="format-editor-page__error" role="alert">
+        <div className="px-4 py-3.5 border border-[#f5c2c7] bg-[#f8d7da] rounded text-[#842029] flex justify-between items-center gap-4" role="alert">
           <p>{state.error}</p>
           <Button variant="secondary" onClick={() => navigate('/statement-formats')}>
             Back to formats

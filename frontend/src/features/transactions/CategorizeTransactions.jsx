@@ -17,7 +17,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { useToast } from '@/components/ToastContext';
+import { useToast } from '@/stores/toastStore';
 import {
   getTransactions,
   updateTransaction,
@@ -42,7 +42,6 @@ import BulkEditModal from './BulkEditModal';
 import RemapPartyModal from './RemapPartyModal';
 import GenerateCashModal from './GenerateCashModal';
 import CreateCashTransactionModal from './CreateCashTransactionModal';
-import './CategorizeTransactions.css';
 import { createLogger } from '@/lib/logger';
 
 /** @type {import('@/lib/logger').Logger} */
@@ -504,13 +503,13 @@ export default function CategorizeTransactions() {
   const initialPartyId = typeof remapPartyId === 'number' ? remapPartyId : null;
 
   return (
-    <div className="categorize-transactions">
-      <div className="page-header">
-        <h1>Categorize Transactions</h1>
-        <div className="header-actions">
+    <div className="w-full max-w-[1600px] h-full mx-auto p-[20px] box-border flex flex-col overflow-hidden">
+      <div className="shrink-0 flex justify-between items-center mb-[16px] p-0">
+        <h1 className="m-0 text-[28px] font-semibold text-text-dark">Categorize Transactions</h1>
+        <div className="flex items-center gap-[10px]">
           <button
             onClick={() => setIsCreateCashOpen(true)}
-            className="new-cash-button"
+            className="px-[20px] py-[10px] bg-[#43a047] text-white border-none rounded-[4px] text-[14px] font-medium cursor-pointer transition-colors duration-200 hover:bg-[#2e7d32]"
           >
             + New Cash Transaction
           </button>
@@ -518,13 +517,13 @@ export default function CategorizeTransactions() {
             <>
               <button
                 onClick={() => setIsBulkEditOpen(true)}
-                className="bulk-edit-button"
+                className="px-[20px] py-[10px] bg-[#2196f3] text-white border-none rounded-[4px] text-[14px] font-medium cursor-pointer transition-colors duration-200 hover:bg-[#1976d2]"
               >
                 Bulk Edit ({selectedTransactions.length})
               </button>
               <button
                 onClick={() => setIsGenerateCashOpen(true)}
-                className="generate-cash-button"
+                className="px-[20px] py-[10px] bg-[#43a047] text-white border-none rounded-[4px] text-[14px] font-medium cursor-pointer transition-colors duration-200 hover:bg-[#2e7d32]"
               >
                 Generate Cash ({selectedTransactions.length})
               </button>
@@ -533,9 +532,9 @@ export default function CategorizeTransactions() {
         </div>
       </div>
 
-      <div className="filters-section">
-        <div className="filter-group">
-          <label htmlFor="upload-filter">Filter by Upload:</label>
+      <div className="mb-[20px] p-[15px] bg-[#f8f9fa] rounded-[4px] border border-[#dee2e6]">
+        <div className="flex items-center gap-[10px]">
+          <label htmlFor="upload-filter" className="font-medium text-[#495057] whitespace-nowrap">Filter by Upload:</label>
           <select
             id="upload-filter"
             value={filters.upload_id || ''}
@@ -543,6 +542,7 @@ export default function CategorizeTransactions() {
               const value = e.target.value;
               handleFilterChange({ ...filters, upload_id: value ? parseInt(value) : null });
             }}
+            className="py-[8px] px-[12px] border border-border-input rounded-[4px] text-[14px] min-w-[250px] bg-white focus:outline-none focus:border-[#4a90e2] focus:shadow-[0_0_0_2px_rgba(74,144,226,0.2)]"
           >
             <option value="">All Uploads</option>
             {uploads.map((upload) => (

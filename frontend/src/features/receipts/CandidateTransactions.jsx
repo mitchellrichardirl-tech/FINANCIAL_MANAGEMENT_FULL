@@ -7,8 +7,6 @@
  * fetched) and handles persistence via `onSelectTransaction`.
  */
 
-import './CandidateTransactions.css';
-
 /**
  * Candidate transaction list for the receipt-linking panel.
  *
@@ -33,12 +31,12 @@ import './CandidateTransactions.css';
 function CandidateTransactions({ transactions, onSelectTransaction, linkedTransactionId, disabled }) {
   if (!transactions || transactions.length === 0) {
     return (
-      <div className="candidate-transactions-container">
-        <div className="table-header">
-          <h2>Candidate Transactions</h2>
-          <span className="transaction-count">0 transactions</span>
+      <div className="flex h-full min-h-0 flex-col overflow-hidden">
+        <div className="mb-3 flex shrink-0 items-center justify-between">
+          <h2 className="m-0 text-[1.1rem] font-semibold text-text-dark">Candidate Transactions</h2>
+          <span className="text-sm text-text-muted">0 transactions</span>
         </div>
-        <div className="no-transactions">No candidate transactions available.</div>
+        <div className="p-5 text-center italic text-text-muted">No candidate transactions available.</div>
       </div>
     );
   }
@@ -56,22 +54,22 @@ function CandidateTransactions({ transactions, onSelectTransaction, linkedTransa
   };
 
   return (
-    <div className="candidate-transactions-container">
-      <div className="table-header">
-        <h2>Candidate Transactions</h2>
-        <span className="transaction-count">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="mb-3 flex shrink-0 items-center justify-between">
+        <h2 className="m-0 text-[1.1rem] font-semibold text-text-dark">Candidate Transactions</h2>
+        <span className="text-sm text-text-muted">
           {transactions.length} transaction{transactions.length !== 1 ? 's' : ''}
         </span>
       </div>
-      <div className="table-wrapper">
-        <table className="candidate-transactions-table">
-          <thead>
+      <div className="min-h-0 flex-1 overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:rounded [&::-webkit-scrollbar-track]:bg-[#f1f1f1] [&::-webkit-scrollbar-thumb]:rounded [&::-webkit-scrollbar-thumb]:bg-[#c1c1c1] [&::-webkit-scrollbar-thumb:hover]:bg-[#a1a1a1]">
+        <table className="w-full border-collapse bg-white">
+          <thead className="sticky top-0 z-[1] bg-[#f8f9fa]">
             <tr>
-              <th>Date</th>
-              <th>Description</th>
-              <th>Party</th>
-              <th className="amount-header">Amount</th>
-              <th className="actions-header">Select</th>
+              <th className="border-b-2 border-[#dee2e6] p-3 text-left text-sm font-semibold text-[#495057]">Date</th>
+              <th className="border-b-2 border-[#dee2e6] p-3 text-left text-sm font-semibold text-[#495057]">Description</th>
+              <th className="border-b-2 border-[#dee2e6] p-3 text-left text-sm font-semibold text-[#495057]">Party</th>
+              <th className="border-b-2 border-[#dee2e6] p-3 text-right text-sm font-semibold text-[#495057]">Amount</th>
+              <th className="border-b-2 border-[#dee2e6] p-3 text-center text-sm font-semibold text-[#495057]">Select</th>
             </tr>
           </thead>
           <tbody>
@@ -79,25 +77,34 @@ function CandidateTransactions({ transactions, onSelectTransaction, linkedTransa
               const isLinked = linkedTransactionId === tx.id;
 
               return (
-                <tr key={tx.id} className={`transaction-row ${isLinked ? 'linked' : ''}`}>
-                  <td className="date-cell">
-                    <span className="view-value">{formatDate(tx.transaction_date)}</span>
+                <tr
+                  key={tx.id}
+                  className={`animate-[fadeIn_0.3s_ease-in] border-b border-[#dee2e6] transition-colors ${
+                    isLinked
+                      ? 'animate-[highlightPulse_1s_ease-in-out] bg-[#d4edda] hover:bg-[#c3e6cb]'
+                      : 'hover:bg-[#f8f9fa]'
+                  }`}
+                >
+                  <td className="min-w-[100px] whitespace-nowrap overflow-hidden text-ellipsis p-[10px_12px] text-left text-sm font-medium text-[#212529]">
+                    <span className="block py-1">{formatDate(tx.transaction_date)}</span>
                   </td>
-                  <td className="description-cell">
-                    <span className="view-value">{tx.description}</span>
+                  <td className="max-w-[300px] overflow-hidden text-ellipsis p-[10px_12px] text-left text-sm leading-[1.4] text-[#212529]">
+                    <span className="block py-1">{tx.description}</span>
                   </td>
-                  <td className="party-cell">
-                    <span className="view-value">{tx.party_name || 'Unknown'}</span>
+                  <td className="min-w-[120px] overflow-hidden text-ellipsis whitespace-nowrap p-[10px_12px] text-left text-sm font-medium text-[#212529]">
+                    <span className="block py-1">{tx.party_name || 'Unknown'}</span>
                   </td>
-                  <td className="amount-cell">
-                    <span className="view-value">{formatAmount(tx.amount)}</span>
+                  <td className="min-w-[80px] overflow-hidden text-ellipsis whitespace-nowrap p-[10px_12px] text-right text-sm text-[#212529]">
+                    <span className="block py-1">{formatAmount(tx.amount)}</span>
                   </td>
-                  <td className="actions-cell">
+                  <td className="overflow-hidden text-ellipsis whitespace-nowrap p-[10px_12px] text-center text-sm text-[#212529]">
                     {isLinked ? (
-                      <span className="linked-indicator">✓ Linked</span>
+                      <span className="inline-flex items-center gap-1 rounded bg-success px-3 py-1.5 text-sm font-medium text-white">
+                        ✓ Linked
+                      </span>
                     ) : (
                       <button
-                        className="btn-select"
+                        className="cursor-pointer rounded border-none bg-[#2196f3] px-3 py-1.5 text-sm text-white transition-[background-color,opacity] hover:bg-[#1976d2] active:translate-y-px disabled:cursor-not-allowed disabled:bg-[#6c757d] disabled:opacity-50 disabled:hover:bg-[#6c757d]"
                         onClick={() => onSelectTransaction && onSelectTransaction(tx)}
                         title="Select this transaction"
                         disabled={disabled || linkedTransactionId !== null}

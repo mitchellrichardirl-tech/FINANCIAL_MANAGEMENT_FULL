@@ -70,7 +70,7 @@ export class ErrorBoundary extends Component {
   render() {
     if (this.state.hasError) {
       return (
-        <div style={{ padding: '2rem', textAlign: 'center' }}>
+        <div className="p-8 text-center">
           <h2>Something went wrong</h2>
           <p>Try refreshing the page. If the problem persists, contact support.</p>
           <button onClick={() => this.setState({ hasError: false })}>

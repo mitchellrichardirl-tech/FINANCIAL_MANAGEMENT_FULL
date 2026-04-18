@@ -15,7 +15,6 @@
  */
 
 import { createPortal } from 'react-dom';
-import './RemapPartyPrompt.css';
 
 /**
  * Conflict dialog for party/type mismatch during inline edit.
@@ -23,68 +22,68 @@ import './RemapPartyPrompt.css';
  * @component
  * @param {Object} props
  * @param {string} props.partyName
- *        Display name of the party that's affected.
  * @param {() => void} props.onRemapAll
- *        User chose to remap the whole party globally.
  * @param {() => void} props.onThisOnly
- *        User chose to reassign only this transaction (a new party with
- *        the same name will be created under the new type if needed).
  * @param {() => void} props.onCancel
- *        User cancelled — revert the draft and keep editing.
  * @returns {JSX.Element}
- *
- * @example
- * {conflict && (
- *   <RemapPartyPrompt
- *     partyName={conflict.oldPartyName}
- *     onRemapAll={handleRemapAll}
- *     onThisOnly={handleThisOnly}
- *     onCancel={handleCancelConflict}
- *   />
- * )}
  */
 export default function RemapPartyPrompt({ partyName, onRemapAll, onThisOnly, onCancel }) {
   return createPortal(
-    <div className="remap-prompt-overlay" onClick={onCancel}>
+    <div
+      className="fixed inset-0 bg-black/45 flex items-center justify-center z-[1100] p-[1rem]"
+      onClick={onCancel}
+    >
       <div
-        className="remap-prompt"
+        className="bg-white rounded-[10px] shadow-[0_8px_32px_rgba(0,0,0,0.22)] p-[1.5rem] w-full max-w-[420px] flex flex-col gap-[1rem]"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="remap-prompt-title"
       >
-        <h3 id="remap-prompt-title">Party category has changed</h3>
+        <h3 id="remap-prompt-title" className="m-0 text-[1rem] font-semibold text-[#111827]">Party category has changed</h3>
 
-        <p>
+        <p className="m-0 text-[0.875rem] text-[#374151] leading-[1.5]">
           <strong>{partyName}</strong> is currently mapped to a different category. How would you
           like to handle this?
         </p>
 
-        <div className="remap-prompt-options">
+        <div className="flex flex-col gap-[0.5rem]">
           {/* Option 1: global remap */}
-          <button className="remap-option remap-option--all" onClick={onRemapAll} type="button">
-            <span className="remap-option__icon">🔁</span>
-            <span className="remap-option__body">
-              <span className="remap-option__label">Remap entire party</span>
-              <span className="remap-option__hint">
+          <button
+            className="flex items-start gap-[0.75rem] py-[0.75rem] px-[1rem] border-2 border-[#e5e7eb] rounded-[8px] bg-white cursor-pointer text-left transition-[border-color,background] duration-150 w-full hover:bg-[#eff6ff] hover:border-[#2563eb]"
+            onClick={onRemapAll}
+            type="button"
+          >
+            <span className="text-[1.25rem] shrink-0 leading-[1.4]">🔁</span>
+            <span className="flex flex-col gap-[0.2rem]">
+              <span className="text-[0.9rem] font-semibold text-[#111827]">Remap entire party</span>
+              <span className="text-[0.78rem] text-[#6b7280] leading-[1.4]">
                 Move <em>all</em> transactions for "{partyName}" to the new category
               </span>
             </span>
           </button>
 
           {/* Option 2: single-transaction reassign */}
-          <button className="remap-option remap-option--one" onClick={onThisOnly} type="button">
-            <span className="remap-option__icon">1️⃣</span>
-            <span className="remap-option__body">
-              <span className="remap-option__label">This transaction only</span>
-              <span className="remap-option__hint">
+          <button
+            className="flex items-start gap-[0.75rem] py-[0.75rem] px-[1rem] border-2 border-[#e5e7eb] rounded-[8px] bg-white cursor-pointer text-left transition-[border-color,background] duration-150 w-full hover:bg-[#ecfdf5] hover:border-[#059669]"
+            onClick={onThisOnly}
+            type="button"
+          >
+            <span className="text-[1.25rem] shrink-0 leading-[1.4]">1️⃣</span>
+            <span className="flex flex-col gap-[0.2rem]">
+              <span className="text-[0.9rem] font-semibold text-[#111827]">This transaction only</span>
+              <span className="text-[0.78rem] text-[#6b7280] leading-[1.4]">
                 Create a separate "{partyName}" entry in the new category for this transaction
               </span>
             </span>
           </button>
         </div>
 
-        <button className="remap-prompt-cancel" onClick={onCancel} type="button">
+        <button
+          className="bg-none border-none text-[#6b7280] text-[0.82rem] cursor-pointer text-center py-[0.25rem] rounded-[4px] underline transition-colors duration-150 hover:text-[#374151]"
+          onClick={onCancel}
+          type="button"
+        >
           Cancel — keep editing
         </button>
       </div>

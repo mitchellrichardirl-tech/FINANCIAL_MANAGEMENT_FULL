@@ -21,7 +21,7 @@
  */
 
 import { useState } from 'react';
-import { useToast } from '@/components/ToastContext';
+import { useToast } from '@/stores/toastStore';
 import { ErrorCode } from '@/lib/apiErrors';
 import { previewFile, importFile, fetchStatementFormats, getAccounts } from './api';
 import FileDropzone from '@/components/FileDropzone';
@@ -30,7 +30,6 @@ import ProcessingWarningsPanel from './ProcessingWarningsPanel';
 import PreviewTable from './PreviewTable';
 import ImportResult from './ImportResult';
 import AccountSelector from './AccountSelector';
-import './UploadStatement.css';
 
 import { createLogger } from '@/lib/logger';
 
@@ -227,13 +226,13 @@ export default function UploadStatement() {
   // ── Render ────────────────────────────────────────────────────────
 
   return (
-    <div className="upload-statement">
+    <div className="p-[20px] max-w-[1400px] mx-auto">
       <h1>Upload Bank Statement</h1>
 
-      {isLoading && <div className="upload-loading">Loading...</div>}
+      {isLoading && <div className="text-center p-[40px] text-text-muted text-[18px]">Loading...</div>}
 
       {importResult ? (
-        <div className="import-result-section">
+        <div className="mt-[20px]">
           <ProcessingWarningsPanel
             warnings={importResult.warnings}
             heading="⚠️ Import completed with warnings"
@@ -244,28 +243,31 @@ export default function UploadStatement() {
       ) : (
         <>
           {!previewData && !isLoading && (
-            <div className="dropzone-section">
+            <div className="mt-[20px]">
               <FileDropzone onFileSelect={handleFileSelect} disabled={isLoading} />
             </div>
           )}
 
           {selectedFile && previewData && (
-            <div className="preview-section">
+            <div className="mt-[20px] flex flex-col h-[calc(100vh-200px)]">
               {/* File info summary */}
-              <div className="file-info-table">
-                <table>
+              <div className="bg-[#f8f9fa] rounded-[8px] p-[15px] mb-[15px] shrink-0">
+                <table className="w-full border-collapse">
                   <tbody>
                     <tr>
-                      <td className="info-label">File Name:</td>
-                      <td className="info-value">{selectedFile.name}</td>
-                      <td className="info-label">Type:</td>
-                      <td className="info-value">{getFileExtension(selectedFile.name)}</td>
-                      <td className="info-label">Size:</td>
-                      <td className="info-value">{formatFileSize(selectedFile.size)}</td>
-                      <td className="info-label">Total Rows:</td>
-                      <td className="info-value">{previewData.total_rows}</td>
-                      <td className="info-actions">
-                        <button className="btn-remove" onClick={reset}>
+                      <td className="p-[8px_12px] align-middle font-semibold text-[#555] whitespace-nowrap pr-[8px]">File Name:</td>
+                      <td className="p-[8px_12px] align-middle text-text-dark pr-[20px]">{selectedFile.name}</td>
+                      <td className="p-[8px_12px] align-middle font-semibold text-[#555] whitespace-nowrap pr-[8px]">Type:</td>
+                      <td className="p-[8px_12px] align-middle text-text-dark pr-[20px]">{getFileExtension(selectedFile.name)}</td>
+                      <td className="p-[8px_12px] align-middle font-semibold text-[#555] whitespace-nowrap pr-[8px]">Size:</td>
+                      <td className="p-[8px_12px] align-middle text-text-dark pr-[20px]">{formatFileSize(selectedFile.size)}</td>
+                      <td className="p-[8px_12px] align-middle font-semibold text-[#555] whitespace-nowrap pr-[8px]">Total Rows:</td>
+                      <td className="p-[8px_12px] align-middle text-text-dark pr-[20px]">{previewData.total_rows}</td>
+                      <td className="p-[8px_12px] align-middle text-right w-[150px]">
+                        <button
+                          className="p-[8px_16px] bg-danger-alt text-white border-none rounded-[4px] cursor-pointer text-[14px] font-medium transition-colors duration-200 h-[36px] hover:bg-[#c82333]"
+                          onClick={reset}
+                        >
                           Remove File
                         </button>
                       </td>
@@ -287,9 +289,9 @@ export default function UploadStatement() {
               )}
 
               {/* Import controls */}
-              <div className="import-controls">
-                <div className="control-group">
-                  <label htmlFor="start-row">Start Row:</label>
+              <div className="flex items-center gap-[20px] p-[15px] bg-surface border border-[#dee2e6] rounded-[8px] mb-[15px] shrink-0 max-[992px]:flex-wrap">
+                <div className="flex items-center gap-[10px] max-[768px]:basis-full">
+                  <label htmlFor="start-row" className="font-semibold text-text-dark whitespace-nowrap">Start Row:</label>
                   <input
                     id="start-row"
                     type="number"
@@ -297,11 +299,11 @@ export default function UploadStatement() {
                     max={previewData.total_rows}
                     value={startRow}
                     onChange={(e) => setStartRow(parseInt(e.target.value) || 1)}
-                    className="control-input"
+                    className="w-[80px] p-[10px_12px] border border-border-input rounded-[4px] text-[14px] h-[42px] box-border focus:outline-none focus:border-[#4a90e2] focus:shadow-[0_0_0_3px_rgba(74,144,226,0.1)] max-[768px]:w-full"
                   />
                 </div>
 
-                <div className="control-group account-group">
+                <div className="flex items-center gap-[10px] flex-1 min-w-[300px] max-[992px]:basis-full max-[768px]:basis-full">
                   <AccountSelector
                     accounts={accounts}
                     selectedAccountId={selectedAccountId}
@@ -311,15 +313,19 @@ export default function UploadStatement() {
                     statementFormats={statementFormats}
                   />
                   {showFormatWarning && (
-                    <div className="format-warning">
+                    <div className="mt-[6px] p-[8px_12px] bg-[#fff3cd] border border-[#ffc107] rounded-[4px] text-[#856404] text-[13px]">
                       ⚠️ This account has no statement format configured. Import will not be
                       available until a format is set.
                     </div>
                   )}
                 </div>
 
-                <div className="control-group btn-group">
-                  <button className="btn-import" onClick={handleImport} disabled={!canImport}>
+                <div className="flex items-center gap-[10px] ml-auto max-[992px]:ml-0 max-[992px]:basis-full">
+                  <button
+                    className="p-[10px_24px] bg-success text-white border-none rounded-[4px] text-[14px] font-semibold cursor-pointer transition-colors duration-200 whitespace-nowrap h-[42px] box-border hover:enabled:bg-success-hover disabled:bg-[#6c757d] disabled:cursor-not-allowed disabled:opacity-60 max-[992px]:w-full"
+                    onClick={handleImport}
+                    disabled={!canImport}
+                  >
                     {isLoading ? 'Importing...' : 'Import Transactions'}
                   </button>
                 </div>
@@ -327,7 +333,7 @@ export default function UploadStatement() {
 
               {/* Preview table */}
               <div
-                className="preview-table-wrapper"
+                className="flex-1 border border-[#dee2e6] rounded-[8px] bg-white"
                 style={{
                   height: 'calc(100vh - 60px)',
                   display: 'flex',
@@ -349,4 +355,3 @@ export default function UploadStatement() {
     </div>
   );
 }
-

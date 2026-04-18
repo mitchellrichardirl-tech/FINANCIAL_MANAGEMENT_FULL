@@ -21,8 +21,6 @@ import AmountModeRadio from '../fields/AmountModeRadio';
 import ColumnSelect from '../fields/ColumnSelect';
 import DateFormatField from '../fields/DateFormatField';
 
-import './StepColumns.css';
-
 /**
  * @component
  * @param {{ editor: ReturnType<import('../useFormatEditor').useFormatEditor> }} props
@@ -33,24 +31,24 @@ export default function StepColumns({ editor }) {
   const amt = draft.amount_config;
 
   return (
-    <div className="fe-step fe-step-cols">
-      <h2>Columns</h2>
-      <p className="fe-step__sub">
+    <div className="fe-step">
+      <h2 className="m-0 mb-1.5 text-xl">Columns</h2>
+      <p className="m-0 mb-5 text-[#6c757d] text-sm">
         Map the columns in the bank&apos;s export to the fields the system needs.
         {sampleColumns.length > 0
           ? ` Detected ${sampleColumns.length} columns from your sample file.`
           : ' No sample file loaded — type column names manually.'}
       </p>
 
-      {/* ── 1. Date ─────────────────────────────────────────────────── */}
-      <section className="fe-step-cols__section">
-        <h3>Date</h3>
+      {/* -- 1. Date --------------------------------------------------- */}
+      <section className="mb-7 pb-6 border-b border-[#e9ecef]">
+        <h3 className="text-base m-0 mb-4 text-[#212529]">Date</h3>
         <DateFormatField editor={editor} />
       </section>
 
-      {/* ── 2. Description ──────────────────────────────────────────── */}
-      <section className="fe-step-cols__section">
-        <h3>Description</h3>
+      {/* -- 2. Description -------------------------------------------- */}
+      <section className="mb-7 pb-6 border-b border-[#e9ecef]">
+        <h3 className="text-base m-0 mb-4 text-[#212529]">Description</h3>
         <FormField
           label="Description column"
           required
@@ -67,9 +65,9 @@ export default function StepColumns({ editor }) {
         </FormField>
       </section>
 
-      {/* ── 3. Amount ───────────────────────────────────────────────── */}
-      <section className="fe-step-cols__section">
-        <h3>Amount</h3>
+      {/* -- 3. Amount ------------------------------------------------- */}
+      <section className="mb-3 pb-0">
+        <h3 className="text-base m-0 mb-4 text-[#212529]">Amount</h3>
 
         <AmountModeRadio
           value={draft.amountMode}
@@ -78,7 +76,7 @@ export default function StepColumns({ editor }) {
 
         {/* Conditional fields per mode */}
         {draft.amountMode === AMOUNT_MODE.SPLIT && (
-          <div className="fe-step-cols__fields">
+          <div className="grid grid-cols-2 gap-4 max-sm:grid-cols-1">
             <FormField
               label="Credit column"
               required
@@ -142,7 +140,7 @@ export default function StepColumns({ editor }) {
                 placeholder="Select amount column…"
               />
             </FormField>
-            <div className="fe-step-cols__fields">
+            <div className="grid grid-cols-2 gap-4 max-sm:grid-cols-1">
               <FormField
                 label="Credit indicator column"
                 required
@@ -174,13 +172,15 @@ export default function StepColumns({ editor }) {
         )}
       </section>
 
-      {/* ── 4. Advanced ─────────────────────────────────────────────── */}
-      <details className="fe-step-cols__advanced">
-        <summary>Advanced settings</summary>
-        <div className="fe-step-cols__advanced-body">
+      {/* -- 4. Advanced ----------------------------------------------- */}
+      <details className="mt-3 border border-[#e9ecef] rounded-[6px] group">
+        <summary className="cursor-pointer font-semibold text-sm text-[#495057] px-4 py-3 select-none hover:bg-[#f8f9fa] group-open:border-b group-open:border-[#e9ecef]">
+          Advanced settings
+        </summary>
+        <div className="p-4">
 
           {/* Optional columns */}
-          <div className="fe-step-cols__fields">
+          <div className="grid grid-cols-2 gap-4 max-sm:grid-cols-1">
             <FormField label="Balance column" help="Optional running balance — not used in processing.">
               <ColumnSelect
                 value={draft.balance_column}
@@ -204,7 +204,7 @@ export default function StepColumns({ editor }) {
           </div>
 
           {/* Number formatting */}
-          <div className="fe-step-cols__fields fe-step-cols__fields--narrow">
+          <div className="grid grid-cols-2 gap-4 max-w-[360px] max-sm:grid-cols-1">
             <FormField label="Decimal separator" help='Usually "." — some European banks use ","'>
               <TextInput
                 value={amt.decimal_separator}
@@ -234,11 +234,13 @@ export default function StepColumns({ editor }) {
             />
           </FormField>
 
-          <Checkbox
-            checked={amt.debit_is_negative}
-            onChange={(v) => updateDraft('amount_config.debit_is_negative', v)}
-            label="Store debits as negative amounts (standard convention)"
-          />
+          <div className="my-4">
+            <Checkbox
+              checked={amt.debit_is_negative}
+              onChange={(v) => updateDraft('amount_config.debit_is_negative', v)}
+              label="Store debits as negative amounts (standard convention)"
+            />
+          </div>
 
           <FormField
             label="Exclude patterns"
