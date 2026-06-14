@@ -395,3 +395,68 @@ export async function remapParty(partyId, newTypeId) {
 export async function getUploads() {
   return await apiCall('/uploads');
 }
+/**
+ * Link an existing (already-uploaded) receipt to a transaction.
+ *
+ * Wraps `POST /transactions/<id>/link-receipt`. The backend sets the
+ * transaction's `receipt_id` and returns the updated transaction with
+ * its full category hierarchy and receipt fields.
+ *
+ * @async
+ * @param {number|string} transactionId - Transaction to attach the receipt to.
+ * @param {number|string} receiptId - Receipt to link.
+ * @returns {Promise<Object>} The updated transaction record.
+ * @throws {AppError|ApiError}
+ */
+export async function linkReceipt(transactionId, receiptId) {
+  const response = await apiCall(`/transactions/${transactionId}/link-receipt`, {
+    method: 'POST',
+    body: { receipt_id: receiptId },
+  });
+  return unwrap(response, 'transaction');
+}
+
+/**
+ * Detach the receipt currently linked to a transaction.
+ *
+ * Wraps `POST /transactions/<id>/unlink-receipt`. Sets the
+ * transaction's `receipt_id` to NULL and returns the updated
+ * transaction. The receipt record itself is left intact.
+ *
+ * @async
+ * @param {number|string} transactionId - Transaction to detach the receipt from.
+ * @returns {Promise<Object>} The updated transaction record.
+ * @throws {AppError|ApiError}
+ */
+export async function unlinkReceipt(transactionId) {
+  const response = await apiCall(`/transactions/${transactionId}/unlink-receipt`, {
+    method: 'POST',
+  });
+  return unwrap(response, 'transaction');
+}
+
+/**
+ * Upload and OCR-process a single receipt image/PDF.
+ *
+ * Wraps `POST /receipts/upload`. The backend stores the file, runs OCR
+ * + field extraction, and persists a receipt record. Use the returned
+ * record's `id` with {@link linkReceipt} to attach it to a transaction.
+ *
+ * Mirrors `processReceiptImage` in the receipts feature, but is exposed
+ * here so the transactions feature has a self-contained dependency.
+ *
+ * @async
+ * @param {File} file - Receipt image or PDF selected by the user.
+ * @returns {Promise<Object>} The created receipt record (includes `id`).
+ * @throws {AppError|ApiError}
+ */
+export async function uploadReceipt(file) {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const response = await apiCall('/receipts/upload', {
+    method: 'POST',
+    body: formData,
+  });
+  return unwrap(response, 'receipt');
+}
