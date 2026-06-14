@@ -25,6 +25,7 @@ import Checkbox from '@/components/Checkbox';
 import RemapPartyPrompt from './RemapPartyPrompt';
 import ReceiptIcon from './ReceiptIcon';
 import ReceiptViewModal from './ReceiptViewModal';
+import ReceiptUploadModal from './ReceiptUploadModal';
 import './TransactionRow.css';
 import { createLogger } from '@/lib/logger';
 import { useToast } from '@/components/ToastContext';
@@ -256,8 +257,9 @@ export default function TransactionRow({
   const handleReceiptIconClick = () => {
     if (transaction.receipt_id) {
       setReceiptModalMode('view');
+    } else {
+      setReceiptModalMode('upload');
     }
-    // 'upload' branch added in Commit 4
   };
 
   // ── Conflict prompt handlers ──────────────────────────────────────
@@ -466,6 +468,15 @@ export default function TransactionRow({
           receiptDate={transaction.receipt_date}
           transactionId={transaction.id}
           onReceiptUnlinked={(updated) => onReceiptChange?.(updated)}
+        />
+      )}
+
+      {receiptModalMode === 'upload' && (
+        <ReceiptUploadModal
+          isOpen
+          onClose={() => setReceiptModalMode(null)}
+          transactionId={transaction.id}
+          onReceiptLinked={(updated) => onReceiptChange?.(updated)}
         />
       )}
       
