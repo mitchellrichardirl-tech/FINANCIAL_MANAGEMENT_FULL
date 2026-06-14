@@ -43,7 +43,7 @@ receipt_extractor = ReceiptExtractor()
 def process_receipt_images(file_path: str) -> Optional[Receipt]:
     """Load and process receipt image(s), returning the best result."""
     logger.debug(f"Loading receipt images from: {file_path}")
-    receipts = receipt_loader.process_files(file_path, yield_pages=True)
+    receipts = receipt_loader.process_files(file_path)
 
     if not receipts:
         logger.warning(f"No receipt images loaded from: {file_path}")
@@ -669,7 +669,7 @@ def process_receipt():
 
         logger.info(f"Processing image (no save): {validation.secured_filename}")
 
-        receipts = receipt_loader.process_files(str(temp_path), yield_pages=True)
+        receipts = receipt_loader.process_files(str(temp_path))
 
         if not receipts:
             logger.warning(f"Failed to process image: {validation.secured_filename}")
