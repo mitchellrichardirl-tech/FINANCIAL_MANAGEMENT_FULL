@@ -399,6 +399,7 @@ export default function TransactionTable({
               <SortableHeader field="category_name">Category</SortableHeader>
               <SortableHeader field="is_kids" className="kids-header">Kid's</SortableHeader>
               <SortableHeader field="is_one_off" className="one-off-header">One-Off</SortableHeader>
+              <th className="receipt-header">Receipt</th>
               <th className="actions-header">Actions</th>
             </tr>
 
@@ -564,6 +565,7 @@ export default function TransactionTable({
                   <option value="false">No</option>
                 </select>
               </td>
+              <td className="filter-cell">{/* Receipt — no filter */}</td>
               <td className="filter-cell">{/* Actions column — no filter */}</td>
             </tr>
           </thead>

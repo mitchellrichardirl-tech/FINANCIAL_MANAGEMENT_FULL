@@ -23,6 +23,7 @@ import { useState, useMemo } from 'react';
 import DropdownWithCreate from '@/components/DropdownWithCreate';
 import Checkbox from '@/components/Checkbox';
 import RemapPartyPrompt from './RemapPartyPrompt';
+import ReceiptIcon from './ReceiptIcon';
 import './TransactionRow.css';
 import { createLogger } from '@/lib/logger';
 import { useToast } from '@/components/ToastContext';
@@ -610,6 +611,11 @@ export default function TransactionRow({
           )}
         </td>
 
+        {/* Receipt */}
+        <td className="receipt-cell">
+          <ReceiptIcon hasReceipt={!!transaction.receipt_id} />
+        </td>
+        
         {/* Actions */}
         <td className="actions-cell">
           {error && (
