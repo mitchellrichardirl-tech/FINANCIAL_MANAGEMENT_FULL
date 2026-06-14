@@ -24,6 +24,7 @@ import DropdownWithCreate from '@/components/DropdownWithCreate';
 import Checkbox from '@/components/Checkbox';
 import RemapPartyPrompt from './RemapPartyPrompt';
 import ReceiptIcon from './ReceiptIcon';
+import ReceiptViewModal from './ReceiptViewModal';
 import './TransactionRow.css';
 import { createLogger } from '@/lib/logger';
 import { useToast } from '@/components/ToastContext';
@@ -75,6 +76,7 @@ export default function TransactionRow({
   onSelectionChange,
   onRemapParty,
   onFindOrCreateParty,
+  onReceiptChange,
 }) {
   const { addToast } = useToast();
   const [isEditing, setIsEditing] = useState(false);
@@ -106,6 +108,8 @@ export default function TransactionRow({
    * @type {?{partyName: string, typeId: number}}
    */
   const [reuseParty, setReuseParty] = useState(null);
+  /** Receipt modal mode: 'view' | 'upload' | null. */
+  const [receiptModalMode, setReceiptModalMode] = useState(null);
 
   // ── Edit lifecycle ────────────────────────────────────────────────
 
@@ -243,6 +247,17 @@ export default function TransactionRow({
       party_id: id,
     }));
     setReuseParty(null);
+  };
+
+  /**
+   * Open the appropriate receipt modal based on whether a receipt is
+   * already attached. The 'upload' branch is wired in a later commit.
+   */
+  const handleReceiptIconClick = () => {
+    if (transaction.receipt_id) {
+      setReceiptModalMode('view');
+    }
+    // 'upload' branch added in Commit 4
   };
 
   // ── Conflict prompt handlers ──────────────────────────────────────
@@ -440,6 +455,20 @@ export default function TransactionRow({
         />
       )}
 
+      {receiptModalMode === 'view' && (
+        <ReceiptViewModal
+          isOpen
+          onClose={() => setReceiptModalMode(null)}
+          receiptId={transaction.receipt_id}
+          receiptFilename={transaction.receipt_filename}
+          receiptVendor={transaction.receipt_vendor}
+          receiptAmount={transaction.receipt_amount}
+          receiptDate={transaction.receipt_date}
+          transactionId={transaction.id}
+          onReceiptUnlinked={(updated) => onReceiptChange?.(updated)}
+        />
+      )}
+      
       <tr
         className={`transaction-row ${isEditing ? 'editing' : ''} ${
           isSelected ? 'selected' : ''
@@ -613,7 +642,10 @@ export default function TransactionRow({
 
         {/* Receipt */}
         <td className="receipt-cell">
-          <ReceiptIcon hasReceipt={!!transaction.receipt_id} />
+          <ReceiptIcon
+            hasReceipt={!!transaction.receipt_id}
+            onClick={handleReceiptIconClick}
+          />
         </td>
         
         {/* Actions */}
