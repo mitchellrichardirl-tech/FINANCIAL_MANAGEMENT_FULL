@@ -425,7 +425,8 @@ class TransactionRepository:
         sub_category_id: Optional[int] = None,
         type_id: Optional[int] = None,
         sort_by: Optional[str] = None,
-        sort_dir: Optional[str] = None
+        sort_dir: Optional[str] = None,
+        has_receipt: Optional[bool] = None
     ) -> List[Dict[str, Any]]:
         """Fetch transactions with full category hierarchy and optional filters.
 
@@ -461,7 +462,7 @@ class TransactionRepository:
                 Defaults to "transaction_date". Unrecognised values
                 fall back to the default.
             sort_dir: "asc" or "desc". Defaults to "desc".
-
+            has_receipt: Filter by presence of receipt.
         Returns:
             List of transaction dicts, each including `account_name`,
             `account_type`, `party_name`, `type_name`,
@@ -487,6 +488,7 @@ class TransactionRepository:
             'type_name': 'tp.type',
             'sub_category_name': 'sc.sub_category',
             'category_name': 'c.category',
+            'has_receipt': 't.receipt_id IS NOT NULL'
         }
 
         try:
@@ -547,6 +549,12 @@ class TransactionRepository:
                 if type_id:
                     conditions.append('tp.id = ?')
                     params.append(type_id)
+
+                if has_receipt is not None:
+                    if has_receipt:
+                        conditions.append('t.receipt_id IS NOT NULL')
+                    else:
+                        conditions.append('t.receipt_id IS NULL')
 
                 if conditions:
                     logger.debug(f"Querying transactions with {len(conditions)} filters")

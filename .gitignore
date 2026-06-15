@@ -68,6 +68,7 @@ data/
 *.jpeg
 notebooks
 tree.txt
+.worktrees/
 
 # Temporary files
 tmp/

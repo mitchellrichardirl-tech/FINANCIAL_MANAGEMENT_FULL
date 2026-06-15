@@ -293,3 +293,13 @@ tr:hover .remap-party-btn,
   border-color: #93c5fd;
   background: #eff6ff;
 }
+
+.receipt-header {
+  width: 60px;
+  text-align: center;
+}
+
+.receipt-cell {
+  text-align: center;
+  vertical-align: middle;
+}
