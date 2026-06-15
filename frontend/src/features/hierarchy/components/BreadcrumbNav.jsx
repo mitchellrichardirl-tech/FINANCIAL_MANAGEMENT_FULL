@@ -5,8 +5,6 @@
  * rendered as plain text.
  */
 
-import './BreadcrumbNav.css';
-
 /**
  * @component
  * @param {Object} props
@@ -18,20 +16,26 @@ import './BreadcrumbNav.css';
  */
 export default function BreadcrumbNav({ breadcrumb, currentName, onNavigate }) {
   return (
-    <nav className="breadcrumb-nav" aria-label="Hierarchy path">
+    <nav
+      className="flex flex-wrap items-center gap-1 text-[0.85rem] text-[#888]"
+      aria-label="Hierarchy path"
+    >
       {breadcrumb.map((crumb) => (
-        <span key={`${crumb.level}:${crumb.id}`} className="breadcrumb-nav__segment">
+        <span
+          key={`${crumb.level}:${crumb.id}`}
+          className="inline-flex items-center gap-1"
+        >
           <button
             type="button"
-            className="breadcrumb-nav__link"
+            className="px-[0.2rem] py-[0.1rem] text-[#2b7de9] cursor-pointer rounded-[3px] hover:underline hover:bg-[#eef3f8]"
             onClick={() => onNavigate(crumb)}
           >
             {crumb.name}
           </button>
-          <span className="breadcrumb-nav__sep" aria-hidden="true">›</span>
+          <span className="text-[#aaa]" aria-hidden="true">›</span>
         </span>
       ))}
-      <span className="breadcrumb-nav__current">{currentName}</span>
+      <span className="text-[#333] font-medium">{currentName}</span>
     </nav>
   );
 }

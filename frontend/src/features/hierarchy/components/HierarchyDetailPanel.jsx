@@ -8,7 +8,6 @@ import BreadcrumbNav from './BreadcrumbNav';
 import NodeStats from './NodeStats';
 import ChildrenTable from './ChildrenTable';
 import { LEVEL_LABELS, CHILD_LEVEL_LABELS } from '../constants';
-import './HierarchyDetailPanel.css';
 
 /**
  * @component
@@ -32,13 +31,13 @@ export default function HierarchyDetailPanel({
   onCreateChild,
 }) {
   if (loading) {
-    return <div className="detail-panel__status">Loading…</div>;
+    return <div className="py-8 text-[#888]">Loading…</div>;
   }
 
   if (!detail) {
     return (
-      <div className="detail-panel__empty">
-        <h2>Select a node</h2>
+      <div className="py-8 text-[#888]">
+        <h2 className="text-[#333]">Select a node</h2>
         <p>Choose a category, sub-category, or type from the tree to view its details.</p>
       </div>
     );
@@ -48,29 +47,31 @@ export default function HierarchyDetailPanel({
   const isLocked = node.is_unknown;
 
   return (
-    <div className="detail-panel">
+    <div>
       <BreadcrumbNav
         breadcrumb={node.breadcrumb}
         currentName={node.name}
         onNavigate={onBreadcrumbNav}
       />
 
-      <header className="detail-panel__header">
-        <div className="detail-panel__title">
-          <span className="detail-panel__level-badge">
+      <header className="flex items-start justify-between gap-4 mt-3 mb-2">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="inline-block px-[0.6rem] py-[0.15rem] rounded-full bg-[#e8eef6] text-[#456] text-xs font-semibold uppercase tracking-[0.03em] shrink-0">
             {LEVEL_LABELS[node.level]}
           </span>
-          <h2>{node.name}</h2>
+          <h2 className="text-2xl overflow-hidden text-ellipsis">
+            {node.name}
+          </h2>
           {isLocked && (
             <span
-              className="detail-panel__lock"
+              className="text-base opacity-70"
               title="System-managed — cannot be edited or deleted"
             >
               🔒
             </span>
           )}
         </div>
-        <div className="detail-panel__actions">
+        <div className="flex gap-2 shrink-0">
           <button
             className="btn-secondary"
             onClick={onEdit}
@@ -91,7 +92,7 @@ export default function HierarchyDetailPanel({
       </header>
 
       {node.description && (
-        <p className="detail-panel__description">{node.description}</p>
+        <p className="mb-5 text-[#666] max-w-[60ch]">{node.description}</p>
       )}
 
       <NodeStats
@@ -111,7 +112,7 @@ export default function HierarchyDetailPanel({
       )}
 
       {!child_level && (
-        <div className="detail-panel__leaf-note">
+        <div className="mt-6 p-4 bg-[#f5f7fa] rounded-md text-[#666] text-[0.9rem]">
           Parties are the leaf level of the hierarchy and have no children.
         </div>
       )}

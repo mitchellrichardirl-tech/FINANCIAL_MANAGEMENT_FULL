@@ -7,7 +7,6 @@
 import { useState, useMemo } from 'react';
 import { LEVEL_LABELS, CHILD_LEVEL_LABELS } from '../constants';
 import { formatCurrency, formatCount } from '../format';
-import './ChildrenTable.css';
 
 /* ── Column definitions ───────────────────────────────────────────── */
 
@@ -62,7 +61,7 @@ function SortIndicator({ active, direction }) {
   if (!active) {
     return (
       <span
-        className="children-table__sort-icon children-table__sort-icon--idle"
+        className="text-[0.7em] leading-none shrink-0 opacity-25 transition-opacity group-hover:opacity-50"
         aria-hidden="true"
       >
         ⇅
@@ -71,7 +70,7 @@ function SortIndicator({ active, direction }) {
   }
   return (
     <span
-      className="children-table__sort-icon children-table__sort-icon--active"
+      className="text-[0.7em] leading-none shrink-0 opacity-85 text-[#2563eb]"
       aria-hidden="true"
     >
       {direction === 'asc' ? '▲' : '▼'}
@@ -102,7 +101,7 @@ export default function ChildrenTable({
   /* ── Sort state ──────────────────────────────────────────────────── */
 
   /** @type {[string|null, Function]} */
-  const [sortKey, setSortKey] = useState(null); // null → API order
+  const [sortKey, setSortKey] = useState(null);
   /** @type {['asc'|'desc', Function]} */
   const [sortDir, setSortDir] = useState('asc');
 
@@ -126,14 +125,20 @@ export default function ChildrenTable({
     return [...children].sort((a, b) => compare(a, b, sortKey, sortDir));
   }, [children, sortKey, sortDir]);
 
+  /* ── Shared cell classes ─────────────────────────────────────────── */
+
+  const thBase =
+    'px-3 py-[0.6rem] border-b border-[#eee] font-semibold text-[#666] text-[0.8rem] uppercase tracking-[0.03em]';
+  const tdBase = 'px-3 py-[0.6rem] border-b border-[#eee]';
+
   /* ── Render ──────────────────────────────────────────────────────── */
 
   return (
-    <div className="children-table">
-      <div className="children-table__header">
-        <h3>
+    <div>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-[1.1rem]">
           {heading}{' '}
-          <span className="children-table__count">({children.length})</span>
+          <span className="text-[#888] font-normal">({children.length})</span>
         </h3>
         <button className="btn-secondary" onClick={onCreateChild}>
           + New {singular}
@@ -141,11 +146,11 @@ export default function ChildrenTable({
       </div>
 
       {children.length === 0 ? (
-        <div className="children-table__empty">
+        <div className="p-6 text-center text-[#888] bg-[#fafafa] border border-dashed border-[#ddd] rounded-md">
           No {heading.toLowerCase()} yet.
         </div>
       ) : (
-        <table className="children-table__table">
+        <table className="w-full border-collapse text-[0.9rem]">
           <thead>
             <tr>
               {COLUMNS.map((col) => {
@@ -159,12 +164,20 @@ export default function ChildrenTable({
                 return (
                   <th
                     key={col.key}
-                    className={col.numeric ? 'children-table__num' : undefined}
+                    className={[
+                      thBase,
+                      col.numeric ? 'text-right tabular-nums' : 'text-left',
+                    ].join(' ')}
                     aria-sort={ariaSrt}
                   >
                     <button
                       type="button"
-                      className="children-table__sort-btn"
+                      className={[
+                        'group cursor-pointer inline-flex items-center gap-[0.35rem] w-full whitespace-nowrap',
+                        'outline-none focus-visible:outline-[#2563eb] rounded-[2px]',
+                        'hover:text-[#2563eb]',
+                        col.numeric ? 'justify-end' : '',
+                      ].join(' ')}
                       onClick={() => handleSort(col.key)}
                       aria-label={`Sort by ${col.label}`}
                     >
@@ -181,26 +194,25 @@ export default function ChildrenTable({
               <tr
                 key={child.id}
                 onDoubleClick={() => onDrillDown(child.id)}
-                className="children-table__row"
+                className="cursor-pointer hover:bg-[#f5f8fc]"
                 title="Double-click to open"
               >
-                <td className="children-table__name">{child.name}</td>
-                <td className="children-table__desc">
+                <td className={`${tdBase} font-medium`}>
+                  {child.name}
+                </td>
+                <td className={`${tdBase} text-[#888] max-w-sm truncate`}>
                   {child.description || '—'}
                 </td>
-                <td className="children-table__num">
+                <td className={`${tdBase} text-right tabular-nums`}>
                   {formatCount(child.transaction_count)}
                 </td>
                 <td
-                  className={
-                    'children-table__num' +
-                    (child.total_value < 0
-                      ? ' children-table__num--negative'
-                      : '') +
-                    (child.total_value > 0
-                      ? ' children-table__num--positive'
-                      : '')
-                  }
+                  className={[
+                    tdBase,
+                    'text-right tabular-nums',
+                    child.total_value < 0 ? 'text-[#c0392b]' : '',
+                    child.total_value > 0 ? 'text-[#27ae60]' : '',
+                  ].join(' ')}
                 >
                   {formatCurrency(child.total_value)}
                 </td>
@@ -210,7 +222,7 @@ export default function ChildrenTable({
         </table>
       )}
 
-      <div className="children-table__hint">
+      <div className="mt-3 text-[0.8rem] text-[#999]">
         Double-click a row to drill down.
       </div>
     </div>
