@@ -101,6 +101,7 @@ export default function TransactionTable({
   sortField,
   sortDir,
   onSortChange,
+  onReceiptChange,
 }) {
   // ── Modal state ───────────────────────────────────────────────────
   /**
@@ -399,6 +400,7 @@ export default function TransactionTable({
               <SortableHeader field="category_name">Category</SortableHeader>
               <SortableHeader field="is_kids" className="kids-header">Kid's</SortableHeader>
               <SortableHeader field="is_one_off" className="one-off-header">One-Off</SortableHeader>
+              <SortableHeader field="has_receipt" className="receipt-header">Receipt</SortableHeader>
               <th className="actions-header">Actions</th>
             </tr>
 
@@ -564,6 +566,26 @@ export default function TransactionTable({
                   <option value="false">No</option>
                 </select>
               </td>
+              <td className="filter-cell filter-cell-center">
+                <select
+                  value={
+                    filters.has_receipt === true
+                      ? 'true'
+                      : filters.has_receipt === false
+                      ? 'false'
+                      : ''
+                  }
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    handleFilterFieldChange('has_receipt', val === '' ? undefined : val === 'true');
+                  }}
+                  className="filter-select"
+                >
+                  <option value="">All</option>
+                  <option value="true">Yes</option>
+                  <option value="false">No</option>
+                </select>
+              </td>
               <td className="filter-cell">{/* Actions column — no filter */}</td>
             </tr>
           </thead>
@@ -583,6 +605,7 @@ export default function TransactionTable({
                 onSelectionChange={(checked) => handleRowSelection(transaction.id, checked)}
                 onRemapParty={onRemapParty}
                 onFindOrCreateParty={onFindOrCreateParty}
+                onReceiptChange={onReceiptChange}
               />
             ))}
           </tbody>

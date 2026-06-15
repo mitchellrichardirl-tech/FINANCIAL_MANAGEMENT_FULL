@@ -39,6 +39,7 @@ TRANSACTION_SORT_FIELDS = {
     'type_name',
     'sub_category_name',
     'category_name',
+    'has_receipt',
 }
 
 
@@ -83,7 +84,7 @@ def validate_transaction_filters(args: dict) -> dict:
     )
 
     add_string_filters(validator.validated, args, ['description', 'cleaned_description'])
-    validate_boolean_fields(validator, args, ['is_kids', 'is_one_off', 'is_credit'])
+    validate_boolean_fields(validator, args, ['is_kids', 'is_one_off', 'is_credit', 'has_receipt'])
 
     if not validator.is_valid():
         logger.warning(f"Validation failed: {validator.first_error_message()}")
@@ -112,7 +113,7 @@ def validate_transaction_update(data: dict) -> dict:
         validator.field('receipt_id').optional().transform(parse_int).in_range(min_val=0))
 
     add_string_filters(validator.validated, data, ['description', 'cleaned_description'])
-    validate_boolean_fields(validator, data, ['is_credit', 'is_kids', 'is_one_off'])
+    validate_boolean_fields(validator, data, ['is_credit', 'is_kids', 'is_one_off', 'has_receipt'])
 
     if not validator.is_valid():
         logger.warning(f"Validation failed: {validator.first_error_message()}")
