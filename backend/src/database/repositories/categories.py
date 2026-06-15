@@ -23,6 +23,20 @@ from src.utils.logging import ContextLogger
 
 logger = ContextLogger(__name__)
 
+_UNSET = object()
+
+class RemapConflictError(Exception):
+    """Raised when a remap would violate a unique-name constraint
+    at the target parent and auto-merge is not supported at this level.
+
+    Attributes:
+        conflicting_id: PK of the existing entity that blocks the move.
+    """
+
+    def __init__(self, message: str, conflicting_id: int):
+        super().__init__(message)
+        self.conflicting_id = conflicting_id
+
 
 class CategoryRepository:
     """Data-access layer for the category hierarchy tables.
@@ -93,63 +107,57 @@ class CategoryRepository:
     def update_category(
         self,
         category_id: int,
-        category: Optional[str] = None,
-        description: Optional[str] = None
+        *,
+        category: Any = _UNSET,
+        description: Any = _UNSET,
     ) -> Optional[Dict[str, Any]]:
-        """Update one or more fields on an existing category.
+        """Update a category's name and/or description.
 
-        Only non-None arguments are applied. Passing no updatable fields
-        is a no-op that returns the current row.
-
-        Args:
-            category_id: Primary key of the category to update.
-            category: New category name, if changing.
-            description: New description, if changing.
+        Pass only the fields you want to change.  Fields left as
+        ``_UNSET`` are not touched.  Pass ``description=None`` to
+        clear the description.
 
         Returns:
-            The updated category as a dict, or None if `category_id`
+            The updated category dict, or ``None`` if *category_id*
             does not exist.
 
         Raises:
-            DatabaseError: If the new name collides with an existing
-                category, or on any other database failure.
+            DatabaseError: On unique-constraint violation or other
+                database failure.
         """
         try:
+            updates, params = [], []
+
+            if category is not _UNSET:
+                updates.append("category = ?")
+                params.append(category)
+            if description is not _UNSET:
+                updates.append("description = ?")
+                params.append(description)
+
+            if not updates:
+                return self.get_category_by_id(category_id)
+
+            params.append(category_id)
             with self.db.transaction() as conn:
                 cursor = conn.cursor()
-
-                updates = []
-                params = []
-                updated_fields = []
-
-                if category is not None:
-                    updates.append("category = ?")
-                    params.append(category)
-                    updated_fields.append('category')
-
-                if description is not None:
-                    updates.append("description = ?")
-                    params.append(description)
-                    updated_fields.append('description')
-
-                if not updates:
-                    logger.debug(f"No fields to update for category {category_id}")
-                    return self.get_category_by_id(category_id)
-
-                params.append(category_id)
-                query = f"UPDATE categories SET {', '.join(updates)} WHERE id = ?"
-                cursor.execute(query, params)
-
+                cursor.execute(
+                    f"UPDATE categories SET {', '.join(updates)} "
+                    f"WHERE id = ?",
+                    params,
+                )
                 if cursor.rowcount == 0:
-                    logger.debug(f"Category {category_id} not found for update")
                     return None
 
-            logger.info(f"Updated category {category_id}: {updated_fields}")
+            logger.info(f"Updated category {category_id}")
             return self.get_category_by_id(category_id)
 
         except sqlite3.IntegrityError as e:
-            logger.warning(f"Duplicate category name on update: {category}")
-            raise DatabaseError(f"Category name already exists: {category}") from e
+            if "unique" in str(e).lower():
+                raise DatabaseError(
+                    f"A category named '{category}' already exists"
+                ) from e
+            raise DatabaseError(f"Failed to update category: {e}") from e
         except Exception as e:
             logger.error(f"Failed to update category {category_id}: {e}")
             raise DatabaseError(f"Failed to update category: {e}") from e
@@ -311,81 +319,167 @@ class CategoryRepository:
     def update_sub_category(
         self,
         sub_category_id: int,
-        sub_category: Optional[str] = None,
-        category_id: Optional[int] = None,
-        description: Optional[str] = None
+        *,
+        sub_category: Any = _UNSET,
+        description: Any = _UNSET,
     ) -> Optional[Dict[str, Any]]:
-        """Update one or more fields on an existing subcategory.
+        """Update a sub-category's name and/or description.
 
-        Can re-parent a subcategory under a different category by passing
-        a new `category_id`.
-
-        Args:
-            sub_category_id: Primary key of the subcategory to update.
-            sub_category: New subcategory name, if changing.
-            category_id: New parent category ID, if re-parenting.
-            description: New description, if changing.
+        Does **not** support changing ``category_id`` — use
+        ``remap_sub_category()`` for that.
 
         Returns:
-            The updated subcategory as a dict, or None if
-            `sub_category_id` does not exist.
+            The updated sub-category dict, or ``None`` if not found.
+        """
+        try:
+            updates, params = [], []
+
+            if sub_category is not _UNSET:
+                updates.append("sub_category = ?")
+                params.append(sub_category)
+            if description is not _UNSET:
+                updates.append("description = ?")
+                params.append(description)
+
+            if not updates:
+                return self.get_sub_category_by_id(sub_category_id)
+
+            params.append(sub_category_id)
+            with self.db.transaction() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"UPDATE sub_categories SET {', '.join(updates)} "
+                    f"WHERE id = ?",
+                    params,
+                )
+                if cursor.rowcount == 0:
+                    return None
+
+            logger.info(f"Updated sub-category {sub_category_id}")
+            return self.get_sub_category_by_id(sub_category_id)
+
+        except sqlite3.IntegrityError as e:
+            if "unique" in str(e).lower():
+                raise DatabaseError(
+                    f"A sub-category named '{sub_category}' already "
+                    f"exists under this category"
+                ) from e
+            raise DatabaseError(
+                f"Failed to update sub-category: {e}"
+            ) from e
+        except Exception as e:
+            logger.error(
+                f"Failed to update sub-category {sub_category_id}: {e}"
+            )
+            raise DatabaseError(
+                f"Failed to update sub-category: {e}"
+            ) from e
+
+    def remap_sub_category(
+        self, sub_category_id: int, new_category_id: int
+    ) -> dict:
+        """Move a sub-category to a different category.
+
+        Unlike ``remap_party``, this does **not** auto-merge on name
+        collision — it raises ``RemapConflictError`` so the caller
+        (and ultimately the user) can decide what to do.
+
+        Args:
+            sub_category_id: PK of the sub-category to move.
+            new_category_id: Target category.
+
+        Returns:
+            ``{'action': 'none', ...}`` or
+            ``{'action': 'remapped', ...}``.
 
         Raises:
-            DatabaseError: If the (sub_category, category_id) pair
-                already exists, the target category doesn't exist,
-                or on any other database failure.
+            ValueError: If either id does not exist.
+            RemapConflictError: If the target category already has a
+                sub-category with the same name.
+            DatabaseError: On any other database failure.
         """
         try:
             with self.db.transaction() as conn:
                 cursor = conn.cursor()
 
-                updates = []
-                params = []
-                updated_fields = []
+                # ── Look up the sub-category ──
+                cursor.execute(
+                    "SELECT id, sub_category, category_id "
+                    "FROM sub_categories WHERE id = ?",
+                    (sub_category_id,),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    raise ValueError(
+                        f"Sub-category {sub_category_id} not found"
+                    )
 
-                if sub_category is not None:
-                    updates.append("sub_category = ?")
-                    params.append(sub_category)
-                    updated_fields.append('sub_category')
+                name = row['sub_category']
+                old_category_id = row['category_id']
 
-                if category_id is not None:
-                    updates.append("category_id = ?")
-                    params.append(category_id)
-                    updated_fields.append('category_id')
+                # ── No-op ──
+                if old_category_id == new_category_id:
+                    return {
+                        'action': 'none',
+                        'sub_category_id': sub_category_id,
+                        'message': (
+                            'Sub-category already belongs to '
+                            'this category'
+                        ),
+                    }
 
-                if description is not None:
-                    updates.append("description = ?")
-                    params.append(description)
-                    updated_fields.append('description')
+                # ── Validate target ──
+                cursor.execute(
+                    "SELECT id FROM categories WHERE id = ?",
+                    (new_category_id,),
+                )
+                if not cursor.fetchone():
+                    raise ValueError(
+                        f"Category {new_category_id} not found"
+                    )
 
-                if not updates:
-                    logger.debug(f"No fields to update for sub-category {sub_category_id}")
-                    return self.get_sub_category_by_id(sub_category_id)
+                # ── Conflict check ──
+                cursor.execute(
+                    "SELECT id FROM sub_categories "
+                    "WHERE sub_category = ? AND category_id = ? "
+                    "AND id != ?",
+                    (name, new_category_id, sub_category_id),
+                )
+                existing = cursor.fetchone()
+                if existing:
+                    raise RemapConflictError(
+                        f"A sub-category named '{name}' already "
+                        f"exists under category {new_category_id}",
+                        conflicting_id=existing['id'],
+                    )
 
-                params.append(sub_category_id)
-                query = f"UPDATE sub_categories SET {', '.join(updates)} WHERE id = ?"
-                cursor.execute(query, params)
+                # ── Move ──
+                cursor.execute(
+                    "UPDATE sub_categories SET category_id = ? "
+                    "WHERE id = ?",
+                    (new_category_id, sub_category_id),
+                )
 
-                if cursor.rowcount == 0:
-                    logger.debug(f"Sub-category {sub_category_id} not found for update")
-                    return None
+            logger.info(
+                f"Remapped sub-category {sub_category_id} from "
+                f"category {old_category_id} → {new_category_id}"
+            )
+            return {
+                'action': 'remapped',
+                'sub_category_id': sub_category_id,
+                'old_category_id': old_category_id,
+                'new_category_id': new_category_id,
+            }
 
-            logger.info(f"Updated sub-category {sub_category_id}: {updated_fields}")
-            return self.get_sub_category_by_id(sub_category_id)
-
-        except sqlite3.IntegrityError as e:
-            error_msg = str(e).lower()
-            if "unique" in error_msg:
-                logger.warning(f"Duplicate sub-category name on update: {sub_category}")
-                raise DatabaseError(f"Sub-category name already exists in this category") from e
-            if "foreign key" in error_msg:
-                logger.warning(f"Category {category_id} does not exist")
-                raise DatabaseError(f"Category {category_id} does not exist") from e
-            logger.error(f"Integrity error updating sub-category {sub_category_id}: {e}")
-            raise DatabaseError(f"Failed to update sub-category: {e}") from e
+        except (ValueError, RemapConflictError):
+            raise
         except Exception as e:
-            logger.error(f"Failed to update sub-category {sub_category_id}: {e}")
-            raise DatabaseError(f"Failed to update sub-category: {e}") from e
+            logger.error(
+                f"Failed to remap sub-category {sub_category_id}: {e}"
+            )
+            raise DatabaseError(
+                f"Failed to remap sub-category: {e}"
+            ) from e
 
     def get_sub_category_by_id(self, sub_category_id: int) -> Optional[Dict[str, Any]]:
         """Fetch a single subcategory by primary key.
@@ -587,81 +681,159 @@ class CategoryRepository:
     def update_type(
         self,
         type_id: int,
-        type_name: Optional[str] = None,
-        sub_category_id: Optional[int] = None,
-        description: Optional[str] = None
+        *,
+        type_name: Any = _UNSET,
+        description: Any = _UNSET,
     ) -> Optional[Dict[str, Any]]:
-        """Update one or more fields on an existing type.
+        """Update a type's name and/or description.
 
-        Can re-parent a type under a different subcategory by passing a
-        new `sub_category_id`.
+        Does **not** support changing ``sub_category_id`` — use
+        ``remap_type()`` for that.
 
-        Args:
-            type_id: Primary key of the type to update.
-            type_name: New type name, if changing.
-            sub_category_id: New parent subcategory ID, if re-parenting.
-            description: New description, if changing.
+        Note: the parameter is called *type_name* because ``type``
+        is a Python builtin; the DB column is ``type``.
 
         Returns:
-            The updated type as a dict, or None if `type_id` does not
-            exist.
+            The updated type dict, or ``None`` if not found.
+        """
+        try:
+            updates, params = [], []
+
+            if type_name is not _UNSET:
+                updates.append("type = ?")
+                params.append(type_name)
+            if description is not _UNSET:
+                updates.append("description = ?")
+                params.append(description)
+
+            if not updates:
+                return self.get_type_by_id(type_id)
+
+            params.append(type_id)
+            with self.db.transaction() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"UPDATE types SET {', '.join(updates)} "
+                    f"WHERE id = ?",
+                    params,
+                )
+                if cursor.rowcount == 0:
+                    return None
+
+            logger.info(f"Updated type {type_id}")
+            return self.get_type_by_id(type_id)
+
+        except sqlite3.IntegrityError as e:
+            if "unique" in str(e).lower():
+                raise DatabaseError(
+                    f"A type named '{type_name}' already exists "
+                    f"under this sub-category"
+                ) from e
+            raise DatabaseError(f"Failed to update type: {e}") from e
+        except Exception as e:
+            logger.error(f"Failed to update type {type_id}: {e}")
+            raise DatabaseError(f"Failed to update type: {e}") from e
+
+    def remap_type(
+        self, type_id: int, new_sub_category_id: int
+    ) -> dict:
+        """Move a type to a different sub-category.
+
+        Unlike ``remap_party``, this does **not** auto-merge on name
+        collision — it raises ``RemapConflictError`` so the caller
+        can decide what to do.
+
+        Args:
+            type_id: PK of the type to move.
+            new_sub_category_id: Target sub-category.
+
+        Returns:
+            ``{'action': 'none', ...}`` or
+            ``{'action': 'remapped', ...}``.
 
         Raises:
-            DatabaseError: If the (type, sub_category_id) pair already
-                exists, the target subcategory doesn't exist, or on any
-                other database failure.
+            ValueError: If either id does not exist.
+            RemapConflictError: If the target sub-category already
+                has a type with the same name.
+            DatabaseError: On any other database failure.
         """
         try:
             with self.db.transaction() as conn:
                 cursor = conn.cursor()
 
-                updates = []
-                params = []
-                updated_fields = []
+                # ── Look up the type ──
+                cursor.execute(
+                    "SELECT id, type, sub_category_id "
+                    "FROM types WHERE id = ?",
+                    (type_id,),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    raise ValueError(f"Type {type_id} not found")
 
-                if type_name is not None:
-                    updates.append("type = ?")
-                    params.append(type_name)
-                    updated_fields.append('type')
+                name = row['type']
+                old_sub_category_id = row['sub_category_id']
 
-                if sub_category_id is not None:
-                    updates.append("sub_category_id = ?")
-                    params.append(sub_category_id)
-                    updated_fields.append('sub_category_id')
+                # ── No-op ──
+                if old_sub_category_id == new_sub_category_id:
+                    return {
+                        'action': 'none',
+                        'type_id': type_id,
+                        'message': (
+                            'Type already belongs to this sub-category'
+                        ),
+                    }
 
-                if description is not None:
-                    updates.append("description = ?")
-                    params.append(description)
-                    updated_fields.append('description')
+                # ── Validate target ──
+                cursor.execute(
+                    "SELECT id FROM sub_categories WHERE id = ?",
+                    (new_sub_category_id,),
+                )
+                if not cursor.fetchone():
+                    raise ValueError(
+                        f"Sub-category {new_sub_category_id} not found"
+                    )
 
-                if not updates:
-                    logger.debug(f"No fields to update for type {type_id}")
-                    return self.get_type_by_id(type_id)
+                # ── Conflict check ──
+                cursor.execute(
+                    "SELECT id FROM types "
+                    "WHERE type = ? AND sub_category_id = ? "
+                    "AND id != ?",
+                    (name, new_sub_category_id, type_id),
+                )
+                existing = cursor.fetchone()
+                if existing:
+                    raise RemapConflictError(
+                        f"A type named '{name}' already exists "
+                        f"under sub-category {new_sub_category_id}",
+                        conflicting_id=existing['id'],
+                    )
 
-                params.append(type_id)
-                query = f"UPDATE types SET {', '.join(updates)} WHERE id = ?"
-                cursor.execute(query, params)
+                # ── Move ──
+                cursor.execute(
+                    "UPDATE types SET sub_category_id = ? "
+                    "WHERE id = ?",
+                    (new_sub_category_id, type_id),
+                )
 
-                if cursor.rowcount == 0:
-                    logger.debug(f"Type {type_id} not found for update")
-                    return None
+            logger.info(
+                f"Remapped type {type_id} from sub-category "
+                f"{old_sub_category_id} → {new_sub_category_id}"
+            )
+            return {
+                'action': 'remapped',
+                'type_id': type_id,
+                'old_sub_category_id': old_sub_category_id,
+                'new_sub_category_id': new_sub_category_id,
+            }
 
-            logger.info(f"Updated type {type_id}: {updated_fields}")
-            return self.get_type_by_id(type_id)
-
-        except sqlite3.IntegrityError as e:
-            error_msg = str(e).lower()
-            if "unique" in error_msg:
-                logger.warning(f"Duplicate type name on update: {type_name}")
-                raise DatabaseError(f"Type name already exists in this sub-category") from e
-            if "foreign key" in error_msg:
-                logger.warning(f"Sub-category {sub_category_id} does not exist")
-                raise DatabaseError(f"Sub-category {sub_category_id} does not exist") from e
-            logger.error(f"Integrity error updating type {type_id}: {e}")
-            raise DatabaseError(f"Failed to update type: {e}") from e
+        except (ValueError, RemapConflictError):
+            raise
         except Exception as e:
-            logger.error(f"Failed to update type {type_id}: {e}")
-            raise DatabaseError(f"Failed to update type: {e}") from e
+            logger.error(f"Failed to remap type {type_id}: {e}")
+            raise DatabaseError(
+                f"Failed to remap type: {e}"
+            ) from e
 
     def get_type_by_id(self, type_id: int) -> Optional[Dict[str, Any]]:
         """Fetch a single type by primary key.
@@ -1627,3 +1799,513 @@ class CategoryRepository:
             The cached "Unknown" type `id`.
         """
         return self._ensure_unknown_hierarchy()
+    
+    # ========== Hierarchy Manager: Tree ==========
+
+    def get_hierarchy_tree(self) -> List[Dict[str, Any]]:
+        """Fetch the full category → sub_category → type tree.
+
+        Returns a nested list of dicts suitable for rendering a tree
+        sidebar. Parties are deliberately excluded — at thousands of
+        rows they bloat the payload and are instead loaded on demand
+        via `get_parties_with_stats()` when a type node is selected.
+
+        Each node has the shape::
+
+            {
+                'id': int,
+                'name': str,
+                'level': 'category' | 'sub_category' | 'type',
+                'children': [ ...same shape... ],
+            }
+
+        Returns:
+            List of category nodes, each containing nested sub_category
+            and type nodes. Ordered alphabetically at every level. Empty
+            list if no categories exist.
+
+        Raises:
+            DatabaseError: On query failure.
+        """
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT
+                        c.id   AS category_id,
+                        c.category,
+                        sc.id  AS sub_category_id,
+                        sc.sub_category,
+                        ty.id  AS type_id,
+                        ty.type
+                    FROM categories c
+                    LEFT JOIN sub_categories sc ON sc.category_id = c.id
+                    LEFT JOIN types ty          ON ty.sub_category_id = sc.id
+                    ORDER BY c.category, sc.sub_category, ty.type
+                ''')
+                rows = cursor.fetchall()
+
+            # Assemble nested structure. Dicts keyed by id preserve
+            # insertion order, and the query pre-sorts the rows.
+            categories: Dict[int, Dict[str, Any]] = {}
+            sub_categories: Dict[int, Dict[str, Any]] = {}
+
+            for row in rows:
+                cat_id = row['category_id']
+                if cat_id not in categories:
+                    categories[cat_id] = {
+                        'id': cat_id,
+                        'name': row['category'],
+                        'level': 'category',
+                        'children': [],
+                    }
+
+                sc_id = row['sub_category_id']
+                if sc_id is None:
+                    continue  # category with no sub_categories
+                if sc_id not in sub_categories:
+                    node = {
+                        'id': sc_id,
+                        'name': row['sub_category'],
+                        'level': 'sub_category',
+                        'children': [],
+                    }
+                    sub_categories[sc_id] = node
+                    categories[cat_id]['children'].append(node)
+
+                ty_id = row['type_id']
+                if ty_id is None:
+                    continue  # sub_category with no types
+                sub_categories[sc_id]['children'].append({
+                    'id': ty_id,
+                    'name': row['type'],
+                    'level': 'type',
+                    'children': [],
+                })
+
+            tree = list(categories.values())
+            logger.debug(
+                f"Built hierarchy tree: {len(tree)} categories, "
+                f"{len(sub_categories)} sub-categories, "
+                f"{sum(len(sc['children']) for sc in sub_categories.values())} types"
+            )
+            return tree
+
+        except Exception as e:
+            logger.error(f"Failed to build hierarchy tree: {e}")
+            raise DatabaseError(f"Failed to build hierarchy tree: {e}") from e
+
+    # ========== Hierarchy Manager: Node + Stats ==========
+
+    def get_all_categories_with_stats(self) -> List[Dict[str, Any]]:
+        """Fetch every category with rolled-up transaction stats.
+
+        Aggregates `transactions` through the full hierarchy
+        (party → type → sub_category → category) so each row carries
+        the count and net value across all descendants.
+
+        Serves as the "children" list for the synthetic root view in
+        the hierarchy manager UI (i.e. when nothing is selected).
+
+        Returns:
+            List of category dicts, each including all `categories`
+            columns plus `transaction_count` and `total_value`.
+            Ordered by category name.
+
+        Raises:
+            DatabaseError: On query failure.
+        """
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT
+                        c.id,
+                        c.category,
+                        c.description,
+                        c.created_at,
+                        COUNT(t.id)                AS transaction_count,
+                        COALESCE(SUM(t.amount), 0) AS total_value
+                    FROM categories c
+                    LEFT JOIN sub_categories sc ON sc.category_id = c.id
+                    LEFT JOIN types ty          ON ty.sub_category_id = sc.id
+                    LEFT JOIN parties p         ON p.type_id = ty.id
+                    LEFT JOIN transactions t    ON t.party_id = p.id
+                    GROUP BY c.id
+                    ORDER BY c.category
+                ''')
+                rows = cursor.fetchall()
+
+            logger.debug(f"Retrieved {len(rows)} categories with stats")
+            return [dict(row) for row in rows]
+
+        except Exception as e:
+            logger.error(f"Failed to get categories with stats: {e}")
+            raise DatabaseError(f"Failed to get categories with stats: {e}") from e
+
+    def get_category_with_stats(self, category_id: int) -> Optional[Dict[str, Any]]:
+        """Fetch a single category with rolled-up transaction stats.
+
+        Args:
+            category_id: The category's `id` column value.
+
+        Returns:
+            Category dict including all `categories` columns plus:
+                - `transaction_count`: Count of all descendant transactions.
+                - `total_value`: Net sum of all descendant transaction
+                  amounts (credits positive, debits negative).
+                - `child_count`: Number of direct sub_categories.
+            None if the category does not exist.
+
+        Raises:
+            DatabaseError: On query failure.
+        """
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT
+                        c.id,
+                        c.category,
+                        c.description,
+                        c.created_at,
+                        COUNT(t.id)                AS transaction_count,
+                        COALESCE(SUM(t.amount), 0) AS total_value,
+                        (SELECT COUNT(*) FROM sub_categories
+                         WHERE category_id = c.id) AS child_count
+                    FROM categories c
+                    LEFT JOIN sub_categories sc ON sc.category_id = c.id
+                    LEFT JOIN types ty          ON ty.sub_category_id = sc.id
+                    LEFT JOIN parties p         ON p.type_id = ty.id
+                    LEFT JOIN transactions t    ON t.party_id = p.id
+                    WHERE c.id = ?
+                    GROUP BY c.id
+                ''', (category_id,))
+                row = cursor.fetchone()
+
+            if not row:
+                logger.debug(f"Category {category_id} not found")
+                return None
+            return dict(row)
+
+        except Exception as e:
+            logger.error(f"Failed to get category {category_id} with stats: {e}")
+            raise DatabaseError(f"Failed to get category with stats: {e}") from e
+
+    def get_sub_category_with_stats(
+        self, sub_category_id: int
+    ) -> Optional[Dict[str, Any]]:
+        """Fetch a single subcategory with stats and parent context.
+
+        Args:
+            sub_category_id: The subcategory's `id` column value.
+
+        Returns:
+            Subcategory dict including all `sub_categories` columns plus:
+                - `category_name`: Parent category name (for breadcrumb).
+                - `transaction_count`: Count of all descendant transactions.
+                - `total_value`: Net sum of all descendant transaction amounts.
+                - `child_count`: Number of direct types.
+            None if the subcategory does not exist.
+
+        Raises:
+            DatabaseError: On query failure.
+        """
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT
+                        sc.id,
+                        sc.sub_category,
+                        sc.description,
+                        sc.category_id,
+                        sc.created_at,
+                        c.category                 AS category_name,
+                        COUNT(t.id)                AS transaction_count,
+                        COALESCE(SUM(t.amount), 0) AS total_value,
+                        (SELECT COUNT(*) FROM types
+                         WHERE sub_category_id = sc.id) AS child_count
+                    FROM sub_categories sc
+                    JOIN categories c        ON c.id = sc.category_id
+                    LEFT JOIN types ty       ON ty.sub_category_id = sc.id
+                    LEFT JOIN parties p      ON p.type_id = ty.id
+                    LEFT JOIN transactions t ON t.party_id = p.id
+                    WHERE sc.id = ?
+                    GROUP BY sc.id
+                ''', (sub_category_id,))
+                row = cursor.fetchone()
+
+            if not row:
+                logger.debug(f"Sub-category {sub_category_id} not found")
+                return None
+            return dict(row)
+
+        except Exception as e:
+            logger.error(
+                f"Failed to get sub-category {sub_category_id} with stats: {e}"
+            )
+            raise DatabaseError(
+                f"Failed to get sub-category with stats: {e}"
+            ) from e
+
+    def get_type_with_stats(self, type_id: int) -> Optional[Dict[str, Any]]:
+        """Fetch a single type with stats and full ancestor context.
+
+        Args:
+            type_id: The type's `id` column value.
+
+        Returns:
+            Type dict including all `types` columns plus:
+                - `sub_category_name`, `category_id`, `category_name`:
+                  Ancestor info for breadcrumb rendering.
+                - `transaction_count`: Count of all descendant transactions.
+                - `total_value`: Net sum of all descendant transaction amounts.
+                - `child_count`: Number of direct parties.
+            None if the type does not exist.
+
+        Raises:
+            DatabaseError: On query failure.
+        """
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT
+                        ty.id,
+                        ty.type,
+                        ty.description,
+                        ty.sub_category_id,
+                        ty.created_at,
+                        sc.sub_category            AS sub_category_name,
+                        c.id                       AS category_id,
+                        c.category                 AS category_name,
+                        COUNT(t.id)                AS transaction_count,
+                        COALESCE(SUM(t.amount), 0) AS total_value,
+                        (SELECT COUNT(*) FROM parties
+                         WHERE type_id = ty.id)    AS child_count
+                    FROM types ty
+                    JOIN sub_categories sc   ON sc.id = ty.sub_category_id
+                    JOIN categories c        ON c.id = sc.category_id
+                    LEFT JOIN parties p      ON p.type_id = ty.id
+                    LEFT JOIN transactions t ON t.party_id = p.id
+                    WHERE ty.id = ?
+                    GROUP BY ty.id
+                ''', (type_id,))
+                row = cursor.fetchone()
+
+            if not row:
+                logger.debug(f"Type {type_id} not found")
+                return None
+            return dict(row)
+
+        except Exception as e:
+            logger.error(f"Failed to get type {type_id} with stats: {e}")
+            raise DatabaseError(f"Failed to get type with stats: {e}") from e
+
+    def get_party_with_stats(self, party_id: int) -> Optional[Dict[str, Any]]:
+        """Fetch a single party with stats and full ancestor context.
+
+        Args:
+            party_id: The party's `id` column value.
+
+        Returns:
+            Party dict including all `parties` columns plus:
+                - `type_name`, `sub_category_id`, `sub_category_name`,
+                  `category_id`, `category_name`: Ancestor info for
+                  breadcrumb rendering.
+                - `transaction_count`: Count of this party's transactions.
+                - `total_value`: Net sum of this party's transaction amounts.
+            None if the party does not exist.
+
+        Raises:
+            DatabaseError: On query failure.
+        """
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT
+                        p.id,
+                        p.name,
+                        p.description,
+                        p.type_id,
+                        p.created_at,
+                        ty.type                    AS type_name,
+                        sc.id                      AS sub_category_id,
+                        sc.sub_category            AS sub_category_name,
+                        c.id                       AS category_id,
+                        c.category                 AS category_name,
+                        COUNT(t.id)                AS transaction_count,
+                        COALESCE(SUM(t.amount), 0) AS total_value
+                    FROM parties p
+                    JOIN types ty            ON ty.id = p.type_id
+                    JOIN sub_categories sc   ON sc.id = ty.sub_category_id
+                    JOIN categories c        ON c.id = sc.category_id
+                    LEFT JOIN transactions t ON t.party_id = p.id
+                    WHERE p.id = ?
+                    GROUP BY p.id
+                ''', (party_id,))
+                row = cursor.fetchone()
+
+            if not row:
+                logger.debug(f"Party {party_id} not found")
+                return None
+            return dict(row)
+
+        except Exception as e:
+            logger.error(f"Failed to get party {party_id} with stats: {e}")
+            raise DatabaseError(f"Failed to get party with stats: {e}") from e
+
+    # ========== Hierarchy Manager: Children + Stats ==========
+
+    def get_sub_categories_with_stats(
+        self, category_id: int
+    ) -> List[Dict[str, Any]]:
+        """Fetch all subcategories under a category, each with rolled-up stats.
+
+        Args:
+            category_id: Parent category to filter by.
+
+        Returns:
+            List of subcategory dicts, each including `transaction_count`
+            and `total_value` aggregated through types → parties →
+            transactions. Ordered by name. Empty list if the category
+            has no subcategories (or doesn't exist).
+
+        Raises:
+            DatabaseError: On query failure.
+        """
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT
+                        sc.id,
+                        sc.sub_category,
+                        sc.description,
+                        sc.category_id,
+                        sc.created_at,
+                        COUNT(t.id)                AS transaction_count,
+                        COALESCE(SUM(t.amount), 0) AS total_value
+                    FROM sub_categories sc
+                    LEFT JOIN types ty       ON ty.sub_category_id = sc.id
+                    LEFT JOIN parties p      ON p.type_id = ty.id
+                    LEFT JOIN transactions t ON t.party_id = p.id
+                    WHERE sc.category_id = ?
+                    GROUP BY sc.id
+                    ORDER BY sc.sub_category
+                ''', (category_id,))
+                rows = cursor.fetchall()
+
+            logger.debug(
+                f"Retrieved {len(rows)} sub-categories with stats "
+                f"for category {category_id}"
+            )
+            return [dict(row) for row in rows]
+
+        except Exception as e:
+            logger.error(
+                f"Failed to get sub-categories with stats for "
+                f"category {category_id}: {e}"
+            )
+            raise DatabaseError(
+                f"Failed to get sub-categories with stats: {e}"
+            ) from e
+
+    def get_types_with_stats(self, sub_category_id: int) -> List[Dict[str, Any]]:
+        """Fetch all types under a subcategory, each with rolled-up stats.
+
+        Args:
+            sub_category_id: Parent subcategory to filter by.
+
+        Returns:
+            List of type dicts, each including `transaction_count` and
+            `total_value` aggregated through parties → transactions.
+            Ordered by name. Empty list if the subcategory has no types
+            (or doesn't exist).
+
+        Raises:
+            DatabaseError: On query failure.
+        """
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT
+                        ty.id,
+                        ty.type,
+                        ty.description,
+                        ty.sub_category_id,
+                        ty.created_at,
+                        COUNT(t.id)                AS transaction_count,
+                        COALESCE(SUM(t.amount), 0) AS total_value
+                    FROM types ty
+                    LEFT JOIN parties p      ON p.type_id = ty.id
+                    LEFT JOIN transactions t ON t.party_id = p.id
+                    WHERE ty.sub_category_id = ?
+                    GROUP BY ty.id
+                    ORDER BY ty.type
+                ''', (sub_category_id,))
+                rows = cursor.fetchall()
+
+            logger.debug(
+                f"Retrieved {len(rows)} types with stats "
+                f"for sub-category {sub_category_id}"
+            )
+            return [dict(row) for row in rows]
+
+        except Exception as e:
+            logger.error(
+                f"Failed to get types with stats for "
+                f"sub-category {sub_category_id}: {e}"
+            )
+            raise DatabaseError(f"Failed to get types with stats: {e}") from e
+
+    def get_parties_with_stats(self, type_id: int) -> List[Dict[str, Any]]:
+        """Fetch all parties under a type, each with direct transaction stats.
+
+        Args:
+            type_id: Parent type to filter by.
+
+        Returns:
+            List of party dicts, each including `transaction_count` and
+            `total_value` for the party's own transactions. Ordered by
+            name. Empty list if the type has no parties (or doesn't
+            exist).
+
+        Raises:
+            DatabaseError: On query failure.
+        """
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT
+                        p.id,
+                        p.name,
+                        p.description,
+                        p.type_id,
+                        p.created_at,
+                        COUNT(t.id)                AS transaction_count,
+                        COALESCE(SUM(t.amount), 0) AS total_value
+                    FROM parties p
+                    LEFT JOIN transactions t ON t.party_id = p.id
+                    WHERE p.type_id = ?
+                    GROUP BY p.id
+                    ORDER BY p.name
+                ''', (type_id,))
+                rows = cursor.fetchall()
+
+            logger.debug(
+                f"Retrieved {len(rows)} parties with stats for type {type_id}"
+            )
+            return [dict(row) for row in rows]
+
+        except Exception as e:
+            logger.error(
+                f"Failed to get parties with stats for type {type_id}: {e}"
+            )
+            raise DatabaseError(
+                f"Failed to get parties with stats: {e}"
+            ) from e

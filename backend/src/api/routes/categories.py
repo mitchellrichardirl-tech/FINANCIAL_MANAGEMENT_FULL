@@ -1,7 +1,10 @@
-from flask import Blueprint, request
+from flask import Blueprint, request, jsonify
 
 from src.categorizer.party_matcher import PartyMatcherReadOnly
-from src.database.repositories.categories import CategoryRepository
+from src.database.repositories.categories import (
+  CategoryRepository,
+  RemapConflictError,
+)
 from src.api.utils.response_helpers import success_response
 from src.api.utils.route_helpers import handle_errors, require_json
 from src.api.utils.errors import required, invalid_value, not_found
@@ -99,7 +102,53 @@ def validate_create_party(data: dict) -> tuple[bool, dict, str | None]:
 
     return True, validator.validated, None
 
+def validate_update(data: dict, name_field: str) -> tuple[bool, dict, str | None]:
+    """Validate an update payload for any hierarchy level.
 
+    Extracts ``name_field`` and ``description`` from *data*.
+    At least one must be present.  Unknown keys are ignored.
+
+    Returns:
+        (is_valid, validated_dict, error_message)
+    """
+    validated = {}
+
+    if name_field in data:
+        val = data[name_field]
+        if val is None or not str(val).strip():
+            return False, {}, f'{name_field} cannot be empty'
+        validated[name_field] = str(val).strip()
+
+    if 'description' in data:
+        desc = data['description']
+        if desc is not None:
+            desc = str(desc).strip() or None
+        validated['description'] = desc          # None ⇒ clear in DB
+
+    if not validated:
+        return False, {}, (
+            f'No updatable fields provided. '
+            f'Supply at least one of: {name_field}, description'
+        )
+
+    return True, validated, None
+
+
+def validate_remap(data: dict, parent_field: str) -> tuple[bool, int, str | None]:
+    """Validate a remap payload — a single required positive-integer
+    parent id.
+
+    Returns:
+        (is_valid, parent_id, error_message)
+    """
+    if not data or parent_field not in data:
+        return False, 0, f'{parent_field} is required'
+
+    value = data[parent_field]
+    if not isinstance(value, int) or value < 1:
+        return False, 0, f'{parent_field} must be a positive integer'
+
+    return True, value, None
 # ==================== Categories ====================
 
 @bp.route('/categories', methods=['GET'])
@@ -155,6 +204,33 @@ def delete_category(category_id: int):
     return success_response(
         data={'deleted_id': category_id},
         message=f'Category {category_id} deleted successfully'
+    )
+
+
+@bp.route('/categories/<int:category_id>', methods=['PUT'])
+@handle_errors(entity='Category')
+@require_json
+@log_route(logger)
+def update_category(category_id: int):
+    """Update a category's name and/or description."""
+    data = request.get_json()
+    if not data:
+        raise required('Request body')
+
+    is_valid, validated, error_msg = validate_update(data, 'category')
+    if not is_valid:
+        raise invalid_value(error_msg)
+
+    repo = CategoryRepository()
+    updated = repo.update_category(category_id, **validated)
+
+    if updated is None:
+        raise not_found('Category', category_id)
+
+    logger.info(f"Updated category {category_id}")
+    return success_response(
+        data=updated,
+        message='Category updated successfully'
     )
 
 
@@ -225,6 +301,74 @@ def delete_sub_category(sub_category_id: int):
     )
 
 
+@bp.route('/sub-categories/<int:sub_category_id>', methods=['PUT'])
+@handle_errors(entity='Sub-category')
+@require_json
+@log_route(logger)
+def update_sub_category(sub_category_id: int):
+    """Update a sub-category's name and/or description."""
+    data = request.get_json()
+    if not data:
+        raise required('Request body')
+
+    if 'category_id' in data:
+        raise invalid_value(
+            'Cannot change category_id here. '
+            'Use PUT /sub-categories/<id>/remap instead.',
+            field='category_id'
+        )
+
+    is_valid, validated, error_msg = validate_update(data, 'sub_category')
+    if not is_valid:
+        raise invalid_value(error_msg)
+
+    repo = CategoryRepository()
+    updated = repo.update_sub_category(sub_category_id, **validated)
+
+    if updated is None:
+        raise not_found('Sub-category', sub_category_id)
+
+    logger.info(f"Updated sub-category {sub_category_id}")
+    return success_response(
+        data=updated,
+        message='Sub-category updated successfully'
+    )
+
+
+@bp.route('/sub-categories/<int:sub_category_id>/remap', methods=['PUT'])
+@handle_errors(entity='Sub-category')
+@require_json
+@log_route(logger)
+def remap_sub_category(sub_category_id: int):
+    """Move a sub-category to a different category.
+
+    Returns 409 if the target category already contains a sub-category
+    with the same name.
+    """
+    data = request.get_json()
+    if not data:
+        raise required('Request body')
+
+    is_valid, new_category_id, error_msg = validate_remap(data, 'category_id')
+    if not is_valid:
+        raise invalid_value(error_msg)
+
+    repo = CategoryRepository()
+    try:
+        result = repo.remap_sub_category(sub_category_id, new_category_id)
+    except RemapConflictError as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'data': {'conflicting_id': e.conflicting_id},
+        }), 409
+
+    logger.info(
+        f"Remap sub-category {sub_category_id}: {result['action']}"
+    )
+    return success_response(data=result)
+
+
 # ==================== Types ====================
 
 @bp.route('/types', methods=['GET'])
@@ -291,6 +435,76 @@ def delete_type(type_id: int):
         data={'deleted_id': type_id},
         message=f'Type {type_id} deleted successfully'
     )
+
+
+@bp.route('/types/<int:type_id>', methods=['PUT'])
+@handle_errors(entity='Type')
+@require_json
+@log_route(logger)
+def update_type(type_id: int):
+    """Update a type's name and/or description."""
+    data = request.get_json()
+    if not data:
+        raise required('Request body')
+
+    if 'sub_category_id' in data:
+        raise invalid_value(
+            'Cannot change sub_category_id here. '
+            'Use PUT /types/<id>/remap instead.',
+            field='sub_category_id'
+        )
+
+    is_valid, validated, error_msg = validate_update(data, 'type')
+    if not is_valid:
+        raise invalid_value(error_msg)
+
+    # DB column is "type" but Python param is "type_name"
+    if 'type' in validated:
+        validated['type_name'] = validated.pop('type')
+
+    repo = CategoryRepository()
+    updated = repo.update_type(type_id, **validated)
+
+    if updated is None:
+        raise not_found('Type', type_id)
+
+    logger.info(f"Updated type {type_id}")
+    return success_response(
+        data=updated,
+        message='Type updated successfully'
+    )
+
+
+@bp.route('/types/<int:type_id>/remap', methods=['PUT'])
+@handle_errors(entity='Type')
+@require_json
+@log_route(logger)
+def remap_type(type_id: int):
+    """Move a type to a different sub-category.
+
+    Returns 409 if the target sub-category already contains a type
+    with the same name.
+    """
+    data = request.get_json()
+    if not data:
+        raise required('Request body')
+
+    is_valid, new_sub_category_id, error_msg = validate_remap(data, 'sub_category_id')
+    if not is_valid:
+        raise invalid_value(error_msg)
+
+    repo = CategoryRepository()
+    try:
+        result = repo.remap_type(type_id, new_sub_category_id)
+    except RemapConflictError as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'data': {'conflicting_id': e.conflicting_id},
+        }), 409
+
+    logger.info(f"Remap type {type_id}: {result['action']}")
+    return success_response(data=result)
 
 
 # ==================== Parties ====================
@@ -365,32 +579,37 @@ def delete_party(party_id: int):
     )
 
 
-@bp.route('/parties/<int:party_id>/type', methods=['PUT'])
+@bp.route('/parties/<int:party_id>', methods=['PUT'])
 @handle_errors(entity='Party')
 @require_json
 @log_route(logger)
-def update_party_type(party_id: int):
-    """Update a party's type."""
+def update_party_details(party_id: int):
+    """Update a party's name and/or description."""
     data = request.get_json()
-    type_id = data.get('type_id') if data else None
+    if not data:
+        raise required('Request body')
 
-    if type_id is None:
-        raise required('type_id')
+    if 'type_id' in data:
+        raise invalid_value(
+            'Cannot change type_id here. '
+            'Use PUT /parties/<id>/remap instead.',
+            field='type_id'
+        )
 
-    if not isinstance(type_id, int) or type_id < 1:
-        raise invalid_value('type_id must be a positive integer', field='type_id')
+    is_valid, validated, error_msg = validate_update(data, 'name')
+    if not is_valid:
+        raise invalid_value(error_msg)
 
     repo = CategoryRepository()
-    logger.debug(f"Updating party {party_id} to type_id: {type_id}")
-    updated_party = repo.update_party(party_id=party_id, type_id=type_id)
+    updated = repo.update_party(party_id, **validated)
 
-    if updated_party is None:
+    if updated is None:
         raise not_found('Party', party_id)
 
-    logger.info(f"Updated party {party_id} type to {type_id}")
+    logger.info(f"Updated party {party_id}")
     return success_response(
-        data=updated_party,
-        message='Party type updated successfully'
+        data=updated,
+        message='Party updated successfully'
     )
 
 

@@ -14,6 +14,7 @@
 import { createPortal } from 'react-dom';
 import { useState, useEffect } from 'react';
 import { ErrorCode } from '@/lib/apiErrors';
+import '@/styles/Modal.css';
 import './CreateCategoryModal.css';
 import { createLogger } from '@/lib/logger';
 
