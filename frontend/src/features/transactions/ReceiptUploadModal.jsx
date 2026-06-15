@@ -32,6 +32,7 @@ export default function ReceiptUploadModal({
   isOpen,
   onClose,
   transactionId,
+  transaction,
   onReceiptLinked,
 }) {
   const { addToast } = useToast();
@@ -62,7 +63,18 @@ export default function ReceiptUploadModal({
     if (!file) return;
     setIsUploading(true);
     try {
-      const receipt = await uploadReceipt(file);
+      const receipt = await uploadReceipt(file, {
+        skipOcr: true,
+        vendor: 
+          transaction?.party_name ||
+          transaction?.cleaned_description ||
+          transaction?.description ||
+          null,
+        amount: transaction?.amount != null ? Math.abs(transaction.amount) : null,
+        date: transaction?.transaction_date
+          ? String(transaction.transaction_date).slice(0, 10)
+          : null,
+      });
       const receiptId = receipt?.id;
       if (!receiptId) {
         throw new Error('Upload succeeded but no receipt id was returned');

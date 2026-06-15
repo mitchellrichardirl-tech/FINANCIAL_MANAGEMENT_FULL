@@ -96,6 +96,24 @@ def apply_form_overrides(receipt: Receipt, form) -> Receipt:
 
     return receipt
 
+def build_receipt_from_form(form, original_filename: str) -> Receipt:
+    """Build a receipt from supplied form fields, skipping OCR.
+
+    Used when a receipt is uploaded against a known transaction: the
+    transaction's own date/amount/party are authoritative, so we don't
+    waste time OCR-ing data we already have. raw_text is left empty and
+    can be backfilled later via /reprocess if desired.
+    """
+    receipt = Receipt(
+        original_filename=Path(original_filename),
+        page_number=0,
+    )
+    receipt.confidence = 0
+    receipt.selected_method = 'transaction'   # provenance marker
+    receipt.extracted_text = None
+    # Form fields become the primary source rather than overrides.
+    return apply_form_overrides(receipt, form)
+
 
 def validate_receipt_filters(args) -> Dict:
     """
@@ -330,21 +348,27 @@ def upload_receipt():
     with TempFileManager() as temp_manager:
         temp_path = temp_manager.save_file_to_temp(file, suffix=validation.extension)
 
-        logger.info(f"Processing uploaded file: {validation.secured_filename}")
+        skip_ocr = str(request.form.get('skip_ocr', '')).lower() in ['true', '1', 'yes']
 
-        receipt = process_receipt_images(str(temp_path))
+        if skip_ocr:
+            logger.info(f"Skipping OCR for uploaded file: {validation.secured_filename}")
+            receipt = build_receipt_from_form(request.form, validation.secured_filename)
+        else:
+            logger.info(f"Processing uploaded file: {validation.secured_filename}")
 
-        if receipt is None:
-            logger.warning(f"Failed to process image: {validation.secured_filename}")
-            raise AppError(
-                code=ErrorCode.INVALID_VALUE,
-                message='Unable to process the uploaded image',
-                status_code=422,
-                field='file',
-            )
+            receipt = process_receipt_images(str(temp_path))
 
-        # Raises AppError on bad overrides
-        receipt = apply_form_overrides(receipt, request.form)
+            if receipt is None:
+                logger.warning(f"Failed to process image: {validation.secured_filename}")
+                raise AppError(
+                    code=ErrorCode.INVALID_VALUE,
+                    message='Unable to process the uploaded image',
+                    status_code=422,
+                    field='file',
+                )
+
+            # Raises AppError on bad overrides
+            receipt = apply_form_overrides(receipt, request.form)
 
         stored_filename = file_handler.generate_stored_filename(validation.secured_filename)
         stored_path = file_handler.move_to_permanent(temp_path, stored_filename)

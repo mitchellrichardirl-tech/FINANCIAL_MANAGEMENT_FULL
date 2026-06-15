@@ -10,6 +10,7 @@
  */
 
 import { apiCall, unwrap } from '@/lib/apiClient';
+import { OPS } from 'pdfjs-dist';
 
 /**
  * Filters accepted by {@link getTransactions}. Keys map 1:1 to the
@@ -450,9 +451,23 @@ export async function unlinkReceipt(transactionId) {
  * @returns {Promise<Object>} The created receipt record (includes `id`).
  * @throws {AppError|ApiError}
  */
-export async function uploadReceipt(file) {
+export async function uploadReceipt(file, opts = {}) {
+  const { skipOcr, vendor, amount, date } = opts;
   const formData = new FormData();
   formData.append('file', file);
+
+  if (skipOcr) {
+    formData.append('skip_ocr', 'true');
+  }
+  if (vendor != null && vendor !== '') {
+    formData.append('vendor', vendor);
+  }
+  if (amount != null) {
+    formData.append('amount', amount);
+  }
+  if (date != null && date !== '') {
+    formData.append('date', date);
+  }
 
   const response = await apiCall('/receipts/upload', {
     method: 'POST',

@@ -476,6 +476,7 @@ export default function TransactionRow({
           isOpen
           onClose={() => setReceiptModalMode(null)}
           transactionId={transaction.id}
+          transaction={transaction}
           onReceiptLinked={(updated) => onReceiptChange?.(updated)}
         />
       )}
