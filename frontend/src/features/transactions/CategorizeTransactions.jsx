@@ -433,6 +433,14 @@ export default function CategorizeTransactions() {
     (list, name, typeId) => list.find((p) => p.name === name && p.type_id === typeId)
   );
 
+  const handleReceiptChange = (updatedTransaction) => {
+    setTransactions((prevTransactions) =>
+      prevTransactions.map((txn) =>
+        txn.id === updatedTransaction.id ? { ...txn, ...updatedTransaction } : txn
+      )
+    );
+  };
+  
   // ── Misc handlers ─────────────────────────────────────────────────
 
   /** Replace filter state and reset to page 1. */
@@ -575,6 +583,7 @@ export default function CategorizeTransactions() {
         sortField={sortField}
         sortDir={sortDir}
         onSortChange={handleSortChange}
+        onReceiptChange={handleReceiptChange}
       />
 
       <Pagination

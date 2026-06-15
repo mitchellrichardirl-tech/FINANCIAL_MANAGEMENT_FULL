@@ -101,6 +101,7 @@ export default function TransactionTable({
   sortField,
   sortDir,
   onSortChange,
+  onReceiptChange,
 }) {
   // ── Modal state ───────────────────────────────────────────────────
   /**
@@ -585,6 +586,7 @@ export default function TransactionTable({
                 onSelectionChange={(checked) => handleRowSelection(transaction.id, checked)}
                 onRemapParty={onRemapParty}
                 onFindOrCreateParty={onFindOrCreateParty}
+                onReceiptChange={onReceiptChange}
               />
             ))}
           </tbody>
