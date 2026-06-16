@@ -2,9 +2,6 @@
  * @file editor/steps/StepSampleFile.jsx
  * Step 1 — upload a sample export so the editor can offer real column
  * names in Step 3 and run a live preview in Step 5.
- *
- * The file never leaves the preview endpoint; it isn't stored. Skipping
- * is allowed (column pickers fall back to free text, preview disabled).
  */
 
 import Button from '@/components/Button';
@@ -12,8 +9,11 @@ import FileDropzone from '@/components/FileDropzone';
 import FormField from '@/components/FormField';
 import NumberInput from '@/components/NumberInput';
 import PreviewTable from '@/features/statements/PreviewTable';
+// ❌ removed: import './StepSampleFile.css'
 
-import './StepSampleFile.css';
+/* Reused class strings */
+const infoBanner =
+  'rounded border-l-4 border-l-info-border bg-info-bg text-[13px] text-info-text';
 
 /**
  * @component
@@ -26,9 +26,6 @@ export default function StepSampleFile({ editor }) {
   const hasFile = !!file;
   const hasData = !!previewData;
 
-  // PreviewTable's `startRow` highlights the header row (yellow) and shades
-  // everything before it (red). The table's <th> still show row 1's values —
-  // possibly junk — but the yellow band makes the real header visible.
   const startRow = sample.headerRow;
 
   const handleSkipChange = (field) => (n) => {
@@ -36,7 +33,7 @@ export default function StepSampleFile({ editor }) {
   };
 
   return (
-    <div className="fe-step fe-step-sample">
+    <div className="fe-step">
       <h2>Sample file</h2>
       <p className="fe-step__sub">
         Upload a real export from this bank so we can read its column headers and
@@ -44,10 +41,11 @@ export default function StepSampleFile({ editor }) {
         nothing is imported.
       </p>
 
+      {/* ── No file yet ── */}
       {!hasFile && (
         <>
           {mode !== 'create' && (
-            <div className="fe-step-sample__optional">
+            <div className={`${infoBanner} mb-4 px-3.5 py-2.5`}>
               <strong>Optional.</strong> You can skip this and type column names
               manually in Step 3, but you won&apos;t be able to preview the result.
             </div>
@@ -56,11 +54,12 @@ export default function StepSampleFile({ editor }) {
         </>
       )}
 
+      {/* ── File loaded bar ── */}
       {hasFile && (
-        <div className="fe-step-sample__filebar">
-          <div className="fe-step-sample__fileinfo">
-            <div className="fe-step-sample__filename">{file.name}</div>
-            <div className="fe-step-sample__filemeta">
+        <div className="mb-4 flex flex-col items-stretch gap-4 rounded-md border border-gray-300 bg-gray-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="break-all font-semibold">{file.name}</div>
+            <div className="mt-0.5 text-xs text-gray-500">
               {formatBytes(file.size)}
               {hasData && (
                 <>
@@ -78,22 +77,28 @@ export default function StepSampleFile({ editor }) {
         </div>
       )}
 
+      {/* ── Loading ── */}
       {loading && (
-        <p className="fe-step-sample__status">Reading file…</p>
+        <p className="py-6 text-center text-gray-500">Reading file…</p>
       )}
 
+      {/* ── Error ── */}
       {error && (
-        <div className="fe-step-sample__error" role="alert">
-          <p>{error}</p>
+        <div
+          className="mb-4 flex items-center justify-between gap-4 rounded border border-danger-border bg-danger-bg px-4 py-3.5 text-danger-text"
+          role="alert"
+        >
+          <p className="m-0">{error}</p>
           <Button variant="secondary" onClick={clearSampleFile}>
             Try a different file
           </Button>
         </div>
       )}
 
+      {/* ── Preview controls + table ── */}
       {hasData && (
         <>
-          <div className="fe-step-sample__controls">
+          <div className="grid max-w-[720px] grid-cols-1 gap-4 sm:grid-cols-3">
             <FormField
               label="Column headers are on row"
               help="Row containing the column names. Rows above are ignored for this preview."
@@ -135,7 +140,7 @@ export default function StepSampleFile({ editor }) {
           </div>
 
           {sample.headerRow > 1 && (
-            <div className="fe-step-sample__detected">
+            <div className={`${infoBanner} mt-1 mb-3 border-l-[3px] rounded-[3px] px-3 py-2 break-words`}>
               <strong>Columns detected from row {sample.headerRow}:</strong>{' '}
               {editor.sampleColumns.length > 0
                 ? editor.sampleColumns.join(', ')
@@ -143,7 +148,12 @@ export default function StepSampleFile({ editor }) {
             </div>
           )}
 
-          <div className="fe-step-sample__table">
+          {/*
+           * PreviewTable flex-fills its parent, so it needs an explicit
+           * height. 50vh keeps the wizard footer visible without scrolling
+           * the whole page on typical laptop screens.
+           */}
+          <div className="mt-1 h-[50vh] min-h-[320px] overflow-hidden rounded-md border border-gray-300">
             <PreviewTable
               previewData={previewData}
               startRow={startRow}

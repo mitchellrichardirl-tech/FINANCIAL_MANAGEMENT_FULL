@@ -10,7 +10,7 @@
  */
 
 import Checkbox from '@/components/Checkbox';
-import './StepDefaults.css';
+// ❌ removed: import './StepDefaults.css'
 
 /** Human labels for known default fields. Unknown names fall back to a prettified key. */
 const LABELS = {
@@ -29,7 +29,7 @@ export default function StepDefaults({ editor, schema }) {
   const fields = schema?.allowed_defaults ?? [];
 
   return (
-    <div className="fe-step fe-step-defaults">
+    <div className="fe-step">
       <h2>Defaults</h2>
       <p className="fe-step__sub">
         Optional. Values set here are applied to <em>every</em> transaction imported with
@@ -40,7 +40,7 @@ export default function StepDefaults({ editor, schema }) {
       {fields.length === 0 ? (
         <p className="fe-step__placeholder">No defaultable fields are configured.</p>
       ) : (
-        <div className="fe-step-defaults__list">
+        <div className="flex flex-col gap-3.5 rounded-md border border-gray-200 bg-[#fcfcfd] p-4">
           {fields.map(({ name, type }) => {
             if (type === 'bool') {
               return (
@@ -52,9 +52,11 @@ export default function StepDefaults({ editor, schema }) {
                 />
               );
             }
-            // Future-proofing: surface unsupported types instead of hiding them.
             return (
-              <div key={name} className="fe-step-defaults__unsupported">
+              <div
+                key={name}
+                className="rounded bg-amber-100 px-2.5 py-2 text-[13px] text-amber-800"
+              >
                 <code>{name}</code> ({type}) — control not implemented yet.
               </div>
             );
