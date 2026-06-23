@@ -137,9 +137,10 @@ class BenchmarkHarness:
     def __init__(self, receipts_dir: Path, ground_truth_path: Path,
                  loader: Optional[ReceiptLoader] = None,
                  dump_text: bool = False,
-                 dump_dir: Optional[Path] = None):
+                 dump_dir: Optional[Path] = None,
+                 sample_size: Optional[int] = None):
         self.receipts_dir = Path(receipts_dir)
-        self.truth = load_ground_truth(ground_truth_path)
+        self.truth = load_ground_truth(ground_truth_path, sample_size)
         self.loader = loader or ReceiptLoader()
         self.dump_text = dump_text
         self.dump_dir = Path(dump_dir) if dump_dir else Path("benchmark_dumps")

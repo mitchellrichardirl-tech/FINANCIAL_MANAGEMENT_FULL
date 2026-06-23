@@ -5,7 +5,8 @@ Usage:
     python -m tests.benchmark.run_benchmark \
         --receipts data/benchmark/images \
         --truth data/benchmark/ground_truth.json \
-        [--dump-text] [--dump-dir benchmark_dumps]
+        [--dump-text] [--dump-dir benchmark_dumps] \
+        [--sample-size 10]
 """
 
 import argparse
@@ -44,11 +45,17 @@ def main():
         help="Directory to write dumped OCR text into "
              "(only used with --dump-text). Defaults to ./benchmark_dumps",
     )
+    ap.add_argument(
+        "--sample_size", type=int, default=None,
+        help="Randomly sample this many receipts from the benchmark set "
+             "for a quicker run. Useful for debugging.",
+    )
     args = ap.parse_args()
 
     harness = BenchmarkHarness(
         args.receipts, args.truth,
         dump_text=args.dump_text, dump_dir=args.dump_dir,
+        sample_size=args.sample_size
     )
 
     # OCR-focused comparison: same field extractor (regex) held constant,
