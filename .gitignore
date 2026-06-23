@@ -50,6 +50,7 @@ htmlcov/
 .tox/
 .hypothesis/
 notebooks/
+benchmark_dumps/
 
 # OS
 .DS_Store

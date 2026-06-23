@@ -27,7 +27,26 @@
       ],
       "settings": {
         "python.defaultInterpreterPath": "${workspaceFolder}/backend/.venv/bin/python",
+        "python.analysis.exclude": [
+          "**/node_modules",
+          "**/.venv",
+          "**/venv",
+          "**/__pycache__",
+          "**/dist",
+          "**/build"
+        ],
+        "files.watcherExclude": {
+          "**/node_modules/**": true,
+          "**/.venv/**": true,
+          "**/venv/**": true,
+          "**/__pycache__/**": true,
+          "**/.git/objects/**": true,
+          "**/.git/subtree-cache/**": true,
+          "**/dist/**": true,
+          "**/build/**": true
+        },
         "python.analysis.typeCheckingMode": "basic",
+        "python.formatting.provider": "none",
         "[python]": {
           "editor.defaultFormatter": "charliermarsh.ruff",
           "editor.formatOnSave": true,
