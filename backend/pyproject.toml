@@ -11,6 +11,7 @@ dependencies = [
     "flask-cors==4.0.0",
     "freezegun>=1.5.5",
     "fuzzywuzzy>=0.18.0",
+    "google-genai>=2.10.0",
     "gunicorn>=21.0.0",
     "numpy>=2.2.6",
     "odfpy>=1.4.1",

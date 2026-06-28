@@ -13,8 +13,7 @@
   "containerEnv": {
     "DATABASE_PATH": "${containerWorkspaceFolder}/backend/data-dev/financial_data.db",
     "UPLOAD_FOLDER": "${containerWorkspaceFolder}/backend/data-dev/uploads",
-    "LLM_GATEWAY_URL": "http://llm_gateway-api-1:8000",
-    "LLM_GATEWAY_API_KEY": "something-random"
+    "LLM_GATEWAY_URL": "http://llm_gateway-api-1:8000"
   },
   "remoteEnv": {
     "CCACHE_DIR": "/workspaces/FINANCIAL_MANAGEMENT_FULL/.ccache",
@@ -70,6 +69,7 @@
   ],
   "runArgs": [
     "--network=financial-management-network",
-    "--add-host=host.docker.internal:host-gateway"
+    "--add-host=host.docker.internal:host-gateway",
+    "--env-file",".devcontainer/devcontainer.env"
   ]
 }
