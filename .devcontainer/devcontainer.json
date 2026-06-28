@@ -5,13 +5,20 @@
     "ghcr.io/devcontainers/features/node:1": {
       "version": "20"
     },
-    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {},
+    "ghcr.io/devcontainers/features/common-utils:2": {}
   },
   "postCreateCommand": "bash .devcontainer/postCreate.sh",
   "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
   "containerEnv": {
     "DATABASE_PATH": "${containerWorkspaceFolder}/backend/data-dev/financial_data.db",
-    "UPLOAD_FOLDER": "${containerWorkspaceFolder}/backend/data-dev/uploads"
+    "UPLOAD_FOLDER": "${containerWorkspaceFolder}/backend/data-dev/uploads",
+    "LLM_GATEWAY_URL": "http://llm_gateway-api-1:8000",
+    "LLM_GATEWAY_API_KEY": "something-random"
+  },
+  "remoteEnv": {
+    "CCACHE_DIR": "/workspaces/FINANCIAL_MANAGEMENT_FULL/.ccache",
+    "CCACHE_MAXSIZE": "2G"
   },
   "remoteUser": "vscode",
   "customizations": {
@@ -60,5 +67,9 @@
   "forwardPorts": [5000, 5173, 8888],
   "mounts": [
     "source=C:/Users/User/OneDrive/Receipts,target=/workspace/receipts,type=bind"
+  ],
+  "runArgs": [
+    "--network=financial-management-network",
+    "--add-host=host.docker.internal:host-gateway"
   ]
 }
