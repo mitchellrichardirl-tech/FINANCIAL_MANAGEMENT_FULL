@@ -24,8 +24,12 @@ class GroundTruth:
     date: Optional[datetime]
     amount: Optional[float]
 
+    @property
+    def details(self):
+        return {'vendor': self.vendor, 'date': self.date, 'amount': self.amount}
 
-def load_ground_truth(path: str, sample_size: int = None) -> Dict[str, GroundTruth]:
+
+def load_ground_truth(path: str, sample_size: Optional[int] = None) -> Dict[str, GroundTruth]:
     raw = pd.read_csv(Path(path))
     if sample_size is not None:
         raw = raw.sample(n=sample_size)
@@ -36,7 +40,7 @@ def load_ground_truth(path: str, sample_size: int = None) -> Dict[str, GroundTru
         out[filename] = GroundTruth(
             vendor=row.get("party"),
             date=pd.to_datetime(date, errors="coerce", format="%Y-%m-%d") if date else None,
-            amount=row.get("amount", 0)*-1,
+            amount=abs(row.get("amount", 0)),
         )
     return out
 

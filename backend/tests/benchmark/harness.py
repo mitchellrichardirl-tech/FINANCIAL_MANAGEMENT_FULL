@@ -11,34 +11,44 @@ import argparse
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import List, Optional, Tuple, Any
 
-from src.receipts.base import ReceiptExtractorBase
 from src.models.receipt import Receipt
+from src.receipts.base import ReceiptExtractorBase
 from src.receipts.receipt_loader import ReceiptLoader
-from tests.benchmark.ground_truth import GroundTruth, load_ground_truth
 from src.utils.logging import ContextLogger
 
+from src.categorizer.party_matcher_raw import PartyMatcherRaw
+from tests.benchmark.ground_truth import load_ground_truth
+
 logger = ContextLogger(__name__)
+scorer = PartyMatcherRaw.custom_scorer
 
-
-def _vendor_match(pred: Optional[str], truth: Optional[str]) -> bool:
+def _vendor_match(
+        pred: Optional[str],
+        truth: Optional[str],
+        threshold: int=90
+        ) -> Tuple[bool, int]:
     """Lenient vendor comparison: case-insensitive substring either way."""
     if not pred or not truth:
-        return pred is None and truth is None
+        return pred is None and truth is None, 0.0
+
     p, t = pred.lower().strip(), truth.lower().strip()
-    return p in t or t in p
+    score = int(scorer(p, t, threshold))
+    return score >= threshold, score
 
 
 def _amount_match(pred: Optional[float], truth: Optional[float]) -> bool:
     if pred is None or truth is None:
         return pred is None and truth is None
+
     return abs(pred - truth) < 0.01
 
 
 def _date_match(pred, truth) -> bool:
     if pred is None or truth is None:
         return pred is None and truth is None
+
     return pred.date() == truth.date()
 
 
@@ -47,37 +57,32 @@ def _safe_stem(name: str) -> str:
     return Path(name).stem.replace(" ", "_")
 
 
-def _extract_raw_text(pipeline: ReceiptExtractorBase, receipt: Receipt) -> Optional[str]:
-    """Best-effort extraction of the raw OCR text associated with a receipt,
-    after pipeline.process_receipt() has run.
+def _extract_raw_text(
+    pipeline: ReceiptExtractorBase,
+    receipt: Receipt,
+) -> Optional[str]:
+    """Get the raw OCR text from a completed pipeline run.
 
-    Tries several conventions so this works regardless of which pipeline
-    implementation is in play:
-      1. receipt.raw_text / receipt.ocr_text attribute set by the pipeline.
-      2. pipeline.last_ocr_text (if the pipeline caches its most recent run).
-      3. pipeline.ocr_engine.extract_text(receipt) re-run directly.
+    Reads pipeline.last_ocr_text, set faithfully by process_receipt()
+    to the exact text that was scored — including "" for empty OCR.
+    Falls back to receipt.extracted_text only for legacy pipelines
+    that predate the caching, with a warning about shared-receipt
+    staleness.
     """
-    for attr in ("raw_text", "ocr_text"):
-        text = getattr(receipt, attr, None)
-        if text:
-            return text
-
     text = getattr(pipeline, "last_ocr_text", None)
-    if text:
+    if text is not None:  # "" is faithful (empty OCR), don't skip it
         return text
 
-    logger.error(
-        f"[{pipeline.name}] last_ocr_text not cached — falling back to re-running "
-        f"OCR for dump. This may not match the exact variant that was scored."
-    )
-    
-    ocr_engine = getattr(pipeline, "ocr_engine", None)
-    if ocr_engine is not None and hasattr(ocr_engine, "extract_text"):
-        try:
-            return ocr_engine.extract_text(receipt)
-        except Exception as e:
-            logger.warning(f"Could not re-run OCR engine for text dump: {e}")
+    text = getattr(receipt, "extracted_text", None)
+    if text is not None:
+        logger.warning(
+            f"[{pipeline.name}] last_ocr_text not set — falling back to "
+            f"receipt.extracted_text (may be stale if receipt is shared "
+            f"across pipelines)."
+        )
+        return text
 
+    logger.error(f"[{pipeline.name}] no OCR text available to dump")
     return None
 
 
@@ -85,20 +90,46 @@ def _extract_raw_text(pipeline: ReceiptExtractorBase, receipt: Receipt) -> Optio
 class FieldScore:
     correct: int = 0
     total: int = 0
+    values: list = field(default_factory=list)
 
-    def add(self, ok: bool):
+    def add(self, ok: bool, value: Optional[Any] = " - "):
         self.total += 1
         self.correct += int(ok)
+        self.values.append(value)
+
 
     @property
     def accuracy(self) -> float:
         return self.correct / self.total if self.total else 0.0
 
+    @property
+    def responses(self) -> list:
+        return self.values
+    
+@dataclass
+class FieldContinuous:
+    total: int = 0
+    count: int = 0
+    values: list = field(default_factory=list)
+
+    def add(self, score: int, value: Optional[Any] = " - "):
+        self.total += score
+        self.count += 1
+        self.values.append(value)
+
+    @property
+    def accuracy(self) -> float:
+        return self.total / (self.count*100) if self.count else 0.0
+
+    @property
+    def responses(self) -> list:
+        return self.values
 
 @dataclass
 class PipelineReport:
     pipeline: str
     vendor: FieldScore = field(default_factory=FieldScore)
+    vendor_score: FieldContinuous = field(default_factory=FieldContinuous)
     amount: FieldScore = field(default_factory=FieldScore)
     date: FieldScore = field(default_factory=FieldScore)
     total_seconds: float = 0.0
@@ -112,6 +143,7 @@ class PipelineReport:
             f"  receipts:     {self.n_receipts} ({self.errors} errors)\n"
             f"  vendor acc:   {self.vendor.accuracy:6.1%} "
             f"({self.vendor.correct}/{self.vendor.total})\n"
+            f"  vendor score: {self.vendor_score.accuracy:6.1%}\n"
             f"  amount acc:   {self.amount.accuracy:6.1%} "
             f"({self.amount.correct}/{self.amount.total})\n"
             f"  date acc:     {self.date.accuracy:6.1%} "
@@ -119,6 +151,13 @@ class PipelineReport:
             f"  avg time:     {avg:6.2f}s/receipt "
             f"(total {self.total_seconds:.1f}s)\n"
         )
+    
+    def detail(self) -> dict:
+        return {
+            'vendor': self.vendor.responses,
+            'amount': self.amount.responses,
+            'date': self.date.responses
+        }
 
 
 class BenchmarkHarness:
@@ -134,11 +173,15 @@ class BenchmarkHarness:
             `benchmark_dumps/` under the current working directory.
     """
 
-    def __init__(self, receipts_dir: Path, ground_truth_path: Path,
-                 loader: Optional[ReceiptLoader] = None,
-                 dump_text: bool = False,
-                 dump_dir: Optional[Path] = None,
-                 sample_size: Optional[int] = None):
+    def __init__(
+        self,
+        receipts_dir: Path,
+        ground_truth_path: Path,
+        loader: Optional[ReceiptLoader] = None,
+        dump_text: bool = False,
+        dump_dir: Optional[Path] = None,
+        sample_size: Optional[int] = None,
+    ):
         self.receipts_dir = Path(receipts_dir)
         self.truth = load_ground_truth(ground_truth_path, sample_size)
         self.loader = loader or ReceiptLoader()
@@ -156,15 +199,21 @@ class BenchmarkHarness:
             if not fpath.exists():
                 logger.warning(f"Missing benchmark file: {fpath}")
                 continue
+
             # page 0 only for benchmark simplicity
             pages = list(self.loader.process_file(fpath))
             if pages:
                 pages[0]._benchmark_filename = fname  # tag for lookup
                 receipts.append(pages[0])
+
         return receipts
 
-    def _dump_text_for(self, pipeline: ReceiptExtractorBase, receipt: Receipt,
-                        fname: str) -> None:
+    def _dump_text_for(
+        self,
+        pipeline: ReceiptExtractorBase,
+        receipt: Receipt,
+        fname: str,
+    ) -> None:
         text = _extract_raw_text(pipeline, receipt)
         if text is None:
             logger.warning(
@@ -177,37 +226,49 @@ class BenchmarkHarness:
         out_path = pipeline_dir / f"{_safe_stem(fname)}.txt"
         out_path.write_text(text, encoding="utf-8")
 
-    def run(self, pipelines: List[ReceiptExtractorBase]) -> List[PipelineReport]:
+    def run(self, pipelines: List[ReceiptExtractorBase]) -> Tuple[List[PipelineReport], dict]:
+        names = [p.name for p in pipelines]
+        dupes = {n for n in names if names.count(n) > 1}
+        if dupes:
+            raise ValueError(f"Duplicate pipeline names found: {dupes}")
         receipts = self._load_receipts()
         logger.info(f"Loaded {len(receipts)} receipts for benchmarking")
 
         reports = []
         for pipeline in pipelines:
             report = PipelineReport(pipeline=pipeline.name)
-            for receipt in receipts:
+            for i, receipt in enumerate(receipts):
                 fname = receipt._benchmark_filename
                 gt = self.truth[fname]
-                logger.info(f"[{pipeline.name}] processing {fname} with ground truth {gt}")
+                logger.info(
+                    f"[{pipeline.name}] processing {fname} with ground truth {gt}"
+                )
                 try:
                     start = time.perf_counter()
                     pipeline.process_receipt(receipt)
                     report.total_seconds += time.perf_counter() - start
-
                     if self.dump_text:
                         self._dump_text_for(pipeline, receipt, fname)
-
-                    report.vendor.add(_vendor_match(receipt.vendor, gt.vendor))
-                    report.amount.add(_amount_match(receipt.amount, gt.amount))
-                    report.date.add(_date_match(receipt.date, gt.date))
+                    match, score = _vendor_match(receipt.vendor, gt.vendor)
+                    report.vendor.add(match, receipt.vendor)
+                    report.vendor_score.add(score)
+                    report.amount.add(_amount_match(receipt.amount, gt.amount), receipt.amount)
+                    report.date.add(_date_match(receipt.date, gt.date), receipt.date)
                     report.n_receipts += 1
+                    logger.info(f'Receipt {i+1}/{len(receipts)} receipt vendor={receipt.vendor}, true vendor={gt.vendor}, score={score}: {match}')
+                    logger.info(f'receipt amount={receipt.amount}, true amount={gt.amount}')
+                    logger.info(f'receipt date={receipt.date}, true date={gt.date}')
                 except Exception as e:
                     report.errors += 1
                     logger.error(f"[{pipeline.name}] failed on {fname}: {e}")
+
             reports.append(report)
             print(report.summary())
+
         if self.dump_text:
             print(f"\nRaw OCR text dumped to: {self.dump_dir.resolve()}")
-        return reports
+
+        return reports, self.truth
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -215,49 +276,29 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         description="A/B benchmark harness for receipt-extraction pipelines."
     )
     parser.add_argument(
-        "--receipts-dir", type=Path, required=True,
+        "--receipts-dir",
+        type=Path,
+        required=True,
         help="Folder of receipt image/PDF files.",
     )
     parser.add_argument(
-        "--ground-truth", type=Path, required=True,
+        "--ground-truth",
+        type=Path,
+        required=True,
         help="JSON file of correct field values.",
     )
     parser.add_argument(
-        "--dump-text", action="store_true",
+        "--dump-text",
+        action="store_true",
         help="Write each pipeline's raw OCR text per receipt to disk "
-             "(default: benchmark_dumps/<pipeline_name>/<file_stem>.txt) "
-             "for manual inspection of failure cases.",
+        "(default: benchmark_dumps/<pipeline_name>/<file_stem>.txt) "
+        "for manual inspection of failure cases.",
     )
     parser.add_argument(
-        "--dump-dir", type=Path, default=None,
+        "--dump-dir",
+        type=Path,
+        default=None,
         help="Directory to write dumped OCR text into "
-             "(only used with --dump-text). Defaults to ./benchmark_dumps",
+        "(only used with --dump-text). Defaults to ./benchmark_dumps",
     )
     return parser
-
-
-if __name__ == "__main__":
-    args = _build_arg_parser().parse_args()
-
-    harness = BenchmarkHarness(
-        receipts_dir=args.receipts_dir,
-        ground_truth_path=args.ground_truth,
-        dump_text=args.dump_text,
-        dump_dir=args.dump_dir,
-    )
-
-    # Wire up the pipelines to compare; import lazily so --help works
-    # even if optional deps (paddle/ollama) aren't installed.
-    from src.receipts.pipelines import (
-        OCRRegexExtractor,
-        OCRLLMExtractor,
-        PaddleRegexExtractor,
-    )
-
-    pipelines = [
-        OCRRegexExtractor(),
-        PaddleRegexExtractor(),
-        OCRLLMExtractor(),
-    ]
-
-    harness.run(pipelines)

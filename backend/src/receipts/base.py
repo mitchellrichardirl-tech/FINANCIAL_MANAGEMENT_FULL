@@ -68,6 +68,8 @@ class OCREngine(ABC):
 
 class FieldExtractor(ABC):
     """Parses structured fields out of OCR text."""
+    def __init__(self, name: Optional[str] = None):
+        self.my_name = name
 
     @property
     @abstractmethod
@@ -96,10 +98,13 @@ class ReceiptExtractorBase(ABC):
         self.ocr = ocr
         self.fields = fields
         self.last_ocr_text: Optional[str] = None
+        self.my_name: Optional[str] = None  # overridable for benchmark reports
 
     @property
     def name(self) -> str:
         """Composite identifier, e.g. 'paddle+llm'."""
+        if self.my_name:
+            return self.my_name
         return f"{self.ocr.name}+{self.fields.name}"
 
     @abstractmethod
@@ -128,12 +133,16 @@ class ReceiptExtractorBase(ABC):
 
     def process_receipt(self, receipt: Receipt) -> Receipt:
         """Template method: OCR -> field extraction -> populate Receipt."""
+        self.last_ocr_text = None
         if not getattr(receipt, "processed_images", None):
             logger.warning(f"[{self.name}] receipt has no processed images")
             receipt.confidence = 0
+            receipt.extracted_text = ""
+            receipt.selected_method = None
             return receipt
 
         text, method = self._best_ocr_text(receipt)
+        self.last_ocr_text = text
         if not text:
             logger.warning(f"[{self.name}] OCR produced no text")
             receipt.confidence = 0
@@ -141,7 +150,6 @@ class ReceiptExtractorBase(ABC):
             receipt.selected_method = method
             return receipt
 
-        self.last_ocr_text = text
         fields = self.fields.extract(text)
 
         receipt.vendor = fields.vendor
@@ -151,7 +159,7 @@ class ReceiptExtractorBase(ABC):
         receipt.selected_method = method
         receipt.confidence = fields.confidence
 
-        logger.debug(
+        logger.info(
             f"[{self.name}] vendor={fields.vendor}, amount={fields.amount}, "
             f"date={fields.date.date() if fields.date else None}, "
             f"confidence={fields.confidence}, method={method}"

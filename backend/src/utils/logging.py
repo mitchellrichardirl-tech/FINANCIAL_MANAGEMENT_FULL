@@ -19,6 +19,7 @@ Log output format (set by `setup_logging()`):
     2024-01-15 10:30:45 | INFO     | src.api.routes.accounts | [AccountRepository.get_all] Retrieved 5 accounts
 """
 
+import sys
 import inspect
 import logging
 from logging.handlers import RotatingFileHandler
@@ -111,7 +112,7 @@ class ContextLogger:
             `timestamp | LEVEL | module.name | message`
         """
         # Console output
-        console = logging.StreamHandler()
+        console = logging.StreamHandler(sys.stdout)
         console.setFormatter(logging.Formatter(
             "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
         ))

@@ -21,6 +21,9 @@ class PaddleEngine(OCREngine):
     def name(self) -> str:
         return "paddle"
 
+    def prime(self):
+        return self._engine()
+            
     def _engine(self):
         if self._ocr is None:
             from paddleocr import PaddleOCR
