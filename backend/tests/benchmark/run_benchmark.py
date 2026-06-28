@@ -23,6 +23,7 @@ from src.receipts.engines.paddle_engine import PaddleEngine
 from src.receipts.extractors.ocr_regex_extractor import OCRRegexExtractor
 from src.receipts.field_extractors.llm_extractor import LLMFieldExtractor
 from src.receipts.field_extractors.regex_extractor import RegexFieldExtractor
+from src.receipts.extractors.multimodal_extractor import MultimodalExtractor
 from src.utils.logging import ContextLogger
 
 from tests.benchmark.harness import BenchmarkHarness
@@ -140,7 +141,12 @@ def main():
         action="store_true",
         help="Disable regex backfill on LLM pipeline (measure LLM-alone).",
     )
-
+    mm_group = ap.add_argument_group('MultiModal Pipeline')
+    mm_group.add_argument(
+        "--mm",
+        action="store_true",
+        help="Include the MultiModal pipeline in the comparison"
+    )
     args = ap.parse_args()
     harness = BenchmarkHarness(
         args.receipts,
@@ -175,6 +181,9 @@ def main():
                     api_key="something-random",
                 )
             )
+
+    if args.mm:
+        pipelines.append(MultimodalExtractor())
 
     reports, truth = harness.run(pipelines)
 
