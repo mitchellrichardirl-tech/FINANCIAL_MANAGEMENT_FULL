@@ -29,6 +29,7 @@ import './BulkUploadReceipts.css';
 import { API_BASE_URL } from '@/lib/apiClient';
 import { createLogger } from '@/lib/logger';
 import { AppError } from '@/lib/errors';
+import { getErrorMessage } from '@/lib/apiErrors';
 
 /** @type {import('@/lib/logger').Logger} */
 const logger = createLogger('BulkUploadReceipts');
@@ -165,12 +166,13 @@ function BulkUploadReceipts({
       );
 
       if (!response.ok) {
-        const errorBody = await response.json().catch(() => null);
-        throw new AppError({
-          message: `Upload failed: ${response.status} ${response.statusText}`,
-          userMessage: errorBody?.user_message, // falls back to STATUS_MESSAGES via AppError
-          status: response.status,
-        });
+        throw response;
+        // const errorBody = await response.json().catch(() => null);
+        // throw new AppError({
+        //   message: `Upload failed: ${response.status} ${response.statusText}`,
+        //   userMessage: errorBody?.user_message, // falls back to STATUS_MESSAGES via AppError
+        //   status: response.status,
+        // });
       }
 
       const reader = response.body.getReader();
@@ -241,7 +243,8 @@ function BulkUploadReceipts({
       clearFiles();
     } catch (error) {
       logger.error('Bulk upload error:', error);
-      onError?.(error.userMessage || error.message || 'Failed to process receipts');
+      const message = await getErrorMessage(error, 'Receipt upload')
+      onError?.(message);
     } finally {
       setIsProcessing(false);
       setProgress({ current: 0, total: 0 });
