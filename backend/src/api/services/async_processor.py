@@ -2,6 +2,10 @@ import asyncio
 import queue
 import threading
 
+from typing import Optional
+
+from flask import current_app
+
 from src.receipts.extractor_factory import create_extractor
 
 from src.api.services.receipt_processor import receipt_worker_async
@@ -13,9 +17,12 @@ from src.database.repositories.receipts import ReceiptRepository
 
 class AsyncReceiptStreamProcessor:
     def __init__(self, upload_folder, allowed_extensions,
-                 max_concurrency: int = 4, extractor_config=None):
+                 max_concurrency: Optional[int], extractor_config=None):
         self.upload_folder = upload_folder
-        self.max_concurrency = max_concurrency
+        self.max_concurrency = (
+            max_concurrency if max_concurrency
+            else current_app.config.get("GEMINI_MAX_CONCURRENCY")
+        )
         self.extractor_config = extractor_config or {}
 
     async def _aprocess(self, temp_files):

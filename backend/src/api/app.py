@@ -46,6 +46,10 @@ def create_app(config=None):
         DATABASE_PATH=os.getenv("DATABASE_PATH", str(Path(BASE_DIR, "data", "financial_data.db"))),
         # JSON settings
         JSON_SORT_KEYS=False,
+        # LLM settings
+        RECEIPT_EXTRACTION_METHOD=os.getenv("RECEIPT_EXTRACTION_METHOD", "multimodal"),
+        GEMINI_MODEL=os.getenv("GEMINI_MODEL", "gemini-3.5-flash"),
+        GEMINI_MAX_CONCURRENCY=os.getenv("GEMINI_MAX_CONCURRENCY", 4)
     )
 
     if config:

@@ -7,6 +7,7 @@ from typing import Optional
 
 import json
 import asyncio
+from flask import current_app
 
 # import requests
 from src.receipts.base import ExtractedFields, FieldExtractor
@@ -73,7 +74,7 @@ class GeminiFieldExtractor(MultiModalFieldExtractor):
         timeout: float = 120.0,
     ):
         super().__init__(
-            model,
+            model if model else current_app.config.get("GEMINI_MODEL"),
             api_key if api_key else os.environ.get("GEMINI_API_KEY"),
             max_retries,
             timeout

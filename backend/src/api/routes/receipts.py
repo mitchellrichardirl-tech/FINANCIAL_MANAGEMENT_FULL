@@ -281,9 +281,17 @@ def upload_receipts_stream():
 
         logger.info(f"Processing {len(temp_files)} valid files via stream")
 
-        form_data = request.form.to_dict() if request.form else None
+        form_data = request.form.to_dict() if request.form else {}
 
-        extraction_method = form_data.get('extraction_method', 'ocr')
+        extraction_method = current_app.config.get(
+            'RECEIPT_EXTRACTION_METHOD',
+            'ocr'
+            )
+        if request.form:
+            extraction_method = form_data.get(
+                'extraction_method',
+                extraction_method
+                )
         logger.info(f"Using {extraction_method} extraction")
         upload_folder=file_handler.ensure_upload_folder()
         allowed_extensions=file_handler.allowed_extensions        
@@ -291,9 +299,13 @@ def upload_receipts_stream():
             processor = AsyncReceiptStreamProcessor(
                 upload_folder=upload_folder,
                 allowed_extensions=allowed_extensions,
-                max_concurrency=current_app.config.get('GEMINI_MAX_CONCURRENCY', 4),
+                max_concurrency=current_app.config.get(
+                    'GEMINI_MAX_CONCURRENCY',
+                    4
+                    ),
             )
         else:
+            # TODO remove the allowed extensions argument - this isn't used as far as I can see
             processor = ReceiptStreamProcessor(
                 upload_folder=upload_folder,
                 allowed_extensions=allowed_extensions
