@@ -72,11 +72,6 @@ function BulkUploadReceipts({
 
   /** Ref to the hidden `<input type="file">` so we can reset its value. */
   const fileInputRef = useRef(null);
-  /**
-   * Tracks `receipt_id`s already emitted, so duplicate SSE lines (or
-   * multi-page PDFs that echo the same id) don't double-count.
-   */
-  const processedIdsRef = useRef(new Set());
   /** Collects stream events whose `status !== 'success'`. */
   const failedRef = useRef([]);
   /** When true, the backend uses the multimodal (LLM) extractor instead of OCR. */
@@ -127,13 +122,37 @@ function BulkUploadReceipts({
 
   // ── Upload + stream parse ─────────────────────────────────────────
 
+  /** Indices of tasks that have reached a terminal state (success or failure). */
+  const completedIndicesRef = useRef(new Set());
+  /**
+   * Handle one parsed stream event. Terminal events (success/error) drive
+   * progress, keyed by task `index` -- present on every event, unlike
+   * `receipt_id`, which failures lack.
+   */
+  const handleStreamEvent = (result, totalFiles) => {
+    const isTerminal = result.status === 'success' || result.status === 'error';
+    if (!isTerminal || result.index == null) return;
+    if (completedIndicesRef.current.has(result.index)) return;
+    completedIndicesRef.current.add(result.index);
+    if (result.status === 'success') {
+      onReceiptProcessed?.(result);
+    } else {
+      failedRef.current.push(result);
+      logger.warn(`Receipt ${result.identifier ?? result.index} failed to process:`, result);
+    }
+    setProgress((prev) => ({
+      ...prev,
+      current: Math.min(completedIndicesRef.current.size, totalFiles),
+    }));
+  };
+
   /**
    * POST all queued files to `/receipts/upload-stream` and parse the
    * streamed response line-by-line.
    *
    * The server sends SSE-style lines: `data: {json}\n`. Each JSON
    * object has at least `{ receipt_id, status }`. We:
-   *  - De-duplicate by `receipt_id` via `processedIdsRef`.
+   *  - De-duplicate by `receipt_id` via `completedIndicesRef`.
    *  - Call `onReceiptProcessed` for successes.
    *  - Collect failures into `failedRef` for the summary callback.
    *  - Update the progress bar as unique ids arrive.
@@ -148,7 +167,7 @@ function BulkUploadReceipts({
     failedRef.current = [];
     setIsProcessing(true);
     setProgress({ current: 0, total: totalFiles });
-    processedIdsRef.current = new Set();
+    completedIndicesRef.current = new Set();
     onProcessingStart?.();
 
     const formData = new FormData();
@@ -196,22 +215,7 @@ function BulkUploadReceipts({
               const jsonStr = trimmedLine.slice(6);
               const result = JSON.parse(jsonStr);
               logger.debug('Receipt result:', result);
-
-              if (result.receipt_id && !processedIdsRef.current.has(result.receipt_id)) {
-                processedIdsRef.current.add(result.receipt_id);
-
-                if (result.status === 'success') {
-                  onReceiptProcessed?.(result);
-                } else {
-                  failedRef.current.push(result);
-                  logger.warn(`Receipt ${result.receipt_id} failed to process:`, result);
-                }
-
-                setProgress((prev) => ({
-                  ...prev,
-                  current: Math.min(processedIdsRef.current.size, totalFiles),
-                }));
-              }
+              handleStreamEvent(result, totalFiles)
             } catch (parseError) {
               logger.error('Failed to parse SSE data:', parseError, trimmedLine);
             }
@@ -224,19 +228,15 @@ function BulkUploadReceipts({
         try {
           const jsonStr = buffer.trim().slice(6);
           const result = JSON.parse(jsonStr);
-          if (result.receipt_id && !processedIdsRef.current.has(result.receipt_id)) {
-            processedIdsRef.current.add(result.receipt_id);
-            if (result.status === 'success') {
-              onReceiptProcessed?.(result);
-            }
-          }
+          logger.debug('Receipt result:', result);
+          handleStreamEvent(result, totalFiles);
         } catch (parseError) {
           logger.error('Failed to parse final SSE data:', parseError);
         }
       }
 
       onProcessingComplete?.({
-        succeeded: processedIdsRef.current.size - failedRef.current.length,
+        succeeded: completedIndicesRef.current.size - failedRef.current.length,
         failed: failedRef.current.length,
         failures: failedRef.current,
       });
@@ -248,7 +248,7 @@ function BulkUploadReceipts({
     } finally {
       setIsProcessing(false);
       setProgress({ current: 0, total: 0 });
-      processedIdsRef.current = new Set();
+      completedIndicesRef.current = new Set();
     }
   };
 
