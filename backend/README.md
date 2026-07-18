@@ -110,6 +110,15 @@ Both paths stream progress to the frontend via Server-Sent Events
 (`api/utils/sse.py`), driven through a shared `StreamEventReporter` so the event
 protocol is identical regardless of engine.
 
+#### MULTIMODAL PRIVACY
+
+At present Multimodal extraction uses the paid tier of Gemini Flash 3.5. Google
+do not use prompts as training data so it is OK to send financial receipts.
+If you switch to a free tier model this may no longer be the case so be sure
+to check terms and conditions if switching
+
+[Gemini AI terms and conditions](https://ai.google.dev/gemini-api/terms)
+
 ### Party matching
 ```
 Transaction description
