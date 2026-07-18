@@ -71,6 +71,7 @@ data/
 notebooks
 tree.txt
 .worktrees/
+approach
 
 # Temporary files
 tmp/
