@@ -292,6 +292,11 @@ def upload_receipts_stream():
                 'extraction_method',
                 extraction_method
                 )
+        if extraction_method not in ("ocr", "multimodal"):
+            return create_error_sse_response(
+                f"Unknown extraction_method: {extraction_method}. "
+                "Must be ocr or multimodal"
+                )
         logger.info(f"Using {extraction_method} extraction")
         upload_folder=file_handler.ensure_upload_folder()
         allowed_extensions=file_handler.allowed_extensions        

@@ -16,10 +16,15 @@
  *  - `onReceiptProcessed(result)` — one receipt succeeded.
  *  - `onProcessingComplete({succeeded, failed, failures})` — batch done.
  *  - `onError(message)` — transport-level failure (non-2xx, network).
+ * 
+ * Sends an `extraction_method` form field (`'ocr'` | `'multimodal'`)
+ *  - controlled by the "AI extraction" checkbox, selecting the backend
+ *  - extraction engine per batch.
  */
 
 import { useState, useRef } from 'react';
 import FilePreview from '@/components/FilePreview';
+import Checkbox from '@/components/Checkbox';
 import './BulkUploadReceipts.css';
 import { API_BASE_URL } from '@/lib/apiClient';
 import { createLogger } from '@/lib/logger';
@@ -73,6 +78,8 @@ function BulkUploadReceipts({
   const processedIdsRef = useRef(new Set());
   /** Collects stream events whose `status !== 'success'`. */
   const failedRef = useRef([]);
+  /** When true, the backend uses the multimodal (LLM) extractor instead of OCR. */
+  const [useMultimodal, setUseMultimodal] = useState(false);  
 
   // ── File selection ────────────────────────────────────────────────
 
@@ -148,6 +155,8 @@ function BulkUploadReceipts({
       logger.debug(`Adding file ${file.name} to payload`);
       formData.append('files', file);
     });
+    formData.append('extraction_method', useMultimodal ? 'multimodal' : 'ocr');
+    logger.debug(`Extraction method: ${useMultimodal ? 'multimodal' : 'ocr'}`);
 
     try {
       const response = await fetch(
@@ -282,15 +291,23 @@ function BulkUploadReceipts({
 
           {!compact && <FilePreview files={files} onRemove={removeFile} disabled={isProcessing} />}
 
-          <button
-            onClick={processReceipts}
-            disabled={isProcessing || files.length === 0}
-            className="btn-process"
-          >
-            {isProcessing
-              ? `Processing ${progress.current}/${progress.total}...`
-              : `Process ${files.length} Receipt${files.length !== 1 ? 's' : ''}`}
-          </button>
+          <div className="process-controls">
+            <Checkbox
+              checked={useMultimodal}
+              onChange={setUseMultimodal}
+              disabled={isProcessing}
+              label="AI extraction"
+            />
+            <button
+              onClick={processReceipts}
+              disabled={isProcessing || files.length === 0}
+              className="btn-process"
+            >
+              {isProcessing
+                ? `Processing ${progress.current}/${progress.total}...`
+                : `Process ${files.length} Receipt${files.length !== 1 ? 's' : ''}`}
+            </button>
+          </div>
         </div>
       )}
 

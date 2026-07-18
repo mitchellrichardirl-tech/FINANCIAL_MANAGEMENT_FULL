@@ -146,3 +146,12 @@
   background: #007bff;
   transition: width 0.3s ease;
 }
+
+.process-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.process-controls .btn-process {
+  flex: 1;
+}
