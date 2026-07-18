@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify, send_file
+from flask import Blueprint, request, jsonify, send_file, current_app
 from datetime import datetime
 from typing import Dict, Optional
 import os
@@ -26,6 +26,7 @@ from src.api.utils.validators import (
 )
 from src.api.formatters.receipt_formatter import ReceiptFormatter
 from src.api.services.receipt_processor import ReceiptStreamProcessor
+from src.api.services.async_processor import AsyncReceiptStreamProcessor
 from src.utils.logging import ContextLogger, log_route
 
 bp = Blueprint('receipts', __name__)
@@ -282,10 +283,21 @@ def upload_receipts_stream():
 
         form_data = request.form.to_dict() if request.form else None
 
-        processor = ReceiptStreamProcessor(
-            upload_folder=file_handler.ensure_upload_folder(),
-            allowed_extensions=file_handler.allowed_extensions
-        )
+        extraction_method = form_data.get('extraction_method', 'ocr')
+        logger.info(f"Using {extraction_method} extraction")
+        upload_folder=file_handler.ensure_upload_folder()
+        allowed_extensions=file_handler.allowed_extensions        
+        if extraction_method == 'multimodal':
+            processor = AsyncReceiptStreamProcessor(
+                upload_folder=upload_folder,
+                allowed_extensions=allowed_extensions,
+                max_concurrency=current_app.config.get('GEMINI_MAX_CONCURRENCY', 4),
+            )
+        else:
+            processor = ReceiptStreamProcessor(
+                upload_folder=upload_folder,
+                allowed_extensions=allowed_extensions
+            )
 
         def cleanup_and_stream():
             try:

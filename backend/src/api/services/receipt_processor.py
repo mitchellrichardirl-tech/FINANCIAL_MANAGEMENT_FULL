@@ -4,6 +4,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Generator, List, Optional, Set, Tuple
+import asyncio
 
 from src.api.services.parallel_processor import (
     ParallelStreamProcessor,
@@ -14,99 +15,54 @@ from src.utils.logging import ContextLogger
 
 logger = ContextLogger(__name__)
 
-
 def receipt_worker(args: Tuple) -> ProcessingResult:
-    """
-    Worker function for processing a single receipt.
-    
-    Runs in a separate process - imports are done here to avoid pickling issues.
-    """
+    """Sync worker for the multiprocessing (OCR/Regex) path."""
     (index, identifier, temp_path, upload_folder_path, _allowed_extensions) = args
-
-    # Import in worker process
     from src.receipts.receipt_extractor import ReceiptExtractor
-    from src.receipts.receipt_loader import ReceiptLoader
     from src.database.repositories.receipts import ReceiptRepository
-
-    extractor = ReceiptExtractor()
-    loader = ReceiptLoader()
-    repository = ReceiptRepository()
-
-    stored_path = None
-
+    from src.receipts import worker_common as wc
     try:
-        # Load and process
-        receipts = list(loader.process_files(Path(temp_path), yield_pages=True))
-
-        if not receipts:
-            return ProcessingResult(
-                index=index,
-                identifier=identifier,
-                success=False,
-                error="Unable to process image"
-            )
-
-        # Process - take best confidence for multi-page
-        if len(receipts) > 1:
-            processed = [extractor.process_receipt(r) for r in receipts]
-            receipt = max(processed, key=lambda r: r.confidence)
-        else:
-            receipt = extractor.process_receipt(receipts[0])
-
-        # Generate stored filename
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        name, ext = os.path.splitext(identifier)
-        random_suffix = uuid.uuid4().hex[:8]
-        stored_filename = f"receipt_{timestamp}_{name}_{random_suffix}{ext}"
-
-        # Copy to permanent storage
-        stored_path = Path(upload_folder_path) / stored_filename
-        shutil.copy2(temp_path, stored_path)
-
-        # Update receipt and save
-        receipt.original_filename = identifier
-        receipt.stored_filename = stored_filename
-        receipt.file_path = stored_path
-
-        receipt_id = repository.save(receipt)
-
+        pages = wc.load_pages(temp_path)
+        if not pages:
+            return wc.failure(index, identifier, "Unable to process image")
+        extractor = ReceiptExtractor()
+        receipt = wc.select_best([extractor.process_receipt(p) for p in pages])
+        receipt_id, stored_filename = wc.persist(
+            temp_path, identifier, upload_folder_path,
+            receipt, ReceiptRepository(),
+        )
         if receipt_id is None:
-            if stored_path and stored_path.exists():
-                stored_path.unlink()
-            return ProcessingResult(
-                index=index,
-                identifier=identifier,
-                success=False,
-                error="Failed to save to database"
-            )
-
-        return ProcessingResult(
-            index=index,
-            identifier=identifier,
-            success=True,
-            data={
-                "receipt_id": receipt_id,
-                "extracted_data": {
-                    "vendor": receipt.vendor,
-                    "amount": receipt.amount,
-                    "date": receipt.date.isoformat() if receipt.date else None,
-                    "confidence": getattr(receipt, 'confidence', None)
-                },
-                "stored_filename": stored_filename
-            }
-        )
-
+            return wc.failure(index, identifier, "Failed to save to database")
+        return wc.success(index, identifier, receipt_id, receipt, stored_filename)
     except Exception as e:
-        if stored_path and Path(stored_path).exists():
-            stored_path.unlink()
+        return wc.failure(index, identifier, str(e))
 
-        return ProcessingResult(
-            index=index,
-            identifier=identifier,
-            success=False,
-            error=str(e)
+async def receipt_worker_async(
+    task: ProcessingTask,
+    upload_folder: str,
+    extractor,      # shared MultimodalExtractor instance
+    repository,     # shared repository (connection-per-save, so thread-safe)
+) -> ProcessingResult:
+    """Async worker for the multimodal (Gemini) path."""
+    from src.receipts import worker_common as wc
+    index, identifier, temp_path = task.index, task.identifier, task.data
+    try:
+        pages = await asyncio.to_thread(wc.load_pages, temp_path)
+        if not pages:
+            return wc.failure(index, identifier, "Unable to process image")
+        processed = await asyncio.gather(
+            *(extractor.aprocess_receipt(p) for p in pages)
         )
-
+        receipt = wc.select_best(list(processed))
+        receipt_id, stored_filename = await asyncio.to_thread(
+            wc.persist, temp_path, identifier, upload_folder,
+            receipt, repository,
+        )
+        if receipt_id is None:
+            return wc.failure(index, identifier, "Failed to save to database")
+        return wc.success(index, identifier, receipt_id, receipt, stored_filename)
+    except Exception as e:
+        return wc.failure(index, identifier, str(e))
 
 class ReceiptStreamProcessor:
     """Handles streaming receipt processing with parallel execution."""
