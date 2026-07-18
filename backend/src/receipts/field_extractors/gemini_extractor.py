@@ -9,6 +9,8 @@ import json
 import asyncio
 from flask import current_app
 
+from google.genai import errors as genai_errors
+
 # import requests
 from src.receipts.base import ExtractedFields, FieldExtractor
 
@@ -43,6 +45,14 @@ RECEIPT_SCHEMA = {
     },
     "required": ["vendor", "date", "amount"],
 }
+
+_RETRYABLE_STATUS = {408, 429, 500, 502, 503, 504}
+
+class SchemaParseError(ValueError):
+    """Model output could not be parsed into the receipt schema.
+    Deterministic at temperature=0 -- retrying costs money and
+    returns the same failure.
+    """
 
 class MultiModalFieldExtractor(FieldExtractor):
     def __init__(
@@ -91,10 +101,24 @@ class GeminiFieldExtractor(MultiModalFieldExtractor):
         return self.client
 
     def _parse_response(self, response_text) -> ExtractedFields:
+        if not response_text:
+            raise SchemaParseError("Model returned empty output")
+        response_text = response_text.strip()
+        if response_text.startswith("```"):
+            response_text = response_text.strup("`").removeprefix("json").strip()
         try:
             response_json = json.loads(response_text)
-        except Exception as e:
-            raise ValueError(f'Unable to convert {response_text[:200]} to json: {e}')
+        except json.JSONDecodeError as e:
+            # Response could contain private financial details. Do not expose
+            # through logs above debug level
+            logger.debug(
+                f'Unable to convert {response_text[:200]!r} to json: {e}'
+                )
+            raise SchemaParseError('Unable to convert response to json') from e
+        if not isinstance(response_json, dict):
+            raise SchemaParseError(
+                f"Expected JSON object, got {type(response_json).__name__}"
+                )
         raw_date = response_json.get("date")
         parsed_date = None
         if raw_date:
@@ -124,6 +148,15 @@ class GeminiFieldExtractor(MultiModalFieldExtractor):
         )
         return self._parse_response(response.output_text)
 
+    @staticmethod
+    def _is_retryable(exc: Exception) -> bool:
+        if isinstance(exc, genai_errors.APIError):
+            return exc.code in _RETRYABLE_STATUS
+        # network-level timeouts/disconnects from the underlying HTTP client
+        if isinstance(exc, (asyncio.TimeoutError, ConnectionError)):
+            return True
+        return False
+
     async def aextract(self, image: bytes) -> ExtractedFields:
         client = self._get_client()
         last_exc = None
@@ -143,11 +176,21 @@ class GeminiFieldExtractor(MultiModalFieldExtractor):
                     },
                 )
                 return self._parse_response(response.output_text)
-            except Exception as e:
-                last_exc = e
+            except SchemaParseError:
                 self.llm_failures += 1
+                raise
+            except Exception as e:
+                if not self._is_retryable(e):
+                    self.llm_failures += 1
+                    raise
+                last_exc = e
+                logger.warning(
+                    f"Transient API error (attempt {attempt + 1})/"
+                    f"{self.max_retries + 1}): {e}"
+                )
                 if attempt < self.max_retries:
                     await asyncio.sleep(2 ** attempt)  # 1s, 2s, ...
+        self.llm_failures += 1
         raise last_exc
 
 if __name__ == "__main__":
