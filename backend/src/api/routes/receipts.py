@@ -234,6 +234,14 @@ def validate_confirm_receipt(data: Dict) -> Dict:
 
     return validator.validated
 
+def _cleanup_temp_files(temp_files):
+    for _, temp_path in temp_files:
+        if os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+                logger.debug(f"Cleaned up temp file: {temp_path}")
+            except Exception as e:
+                logger.error(f"Failed to cleanup {temp_path}: {e}")
 
 # =============================================================================
 # Streaming Upload Endpoint
@@ -243,6 +251,7 @@ def validate_confirm_receipt(data: Dict) -> Dict:
 # try to return a JSON error_response on failure, which breaks SSE clients.
 
 @bp.route('/receipts/upload-stream', methods=['POST'])
+@handle_errors(entity='Receipt')
 @log_route(logger)
 def upload_receipts_stream():
     """Upload and process multiple receipt images with streaming responses."""
@@ -252,9 +261,22 @@ def upload_receipts_stream():
         file_handler = FileHandler.from_app_config(prefix="receipt")
         files = request.files.getlist('files')
 
+        max_batch = current_app.config["MAX_RECEIPT_BATCH_SIZE"]
+
+        if len(files) > max_batch:
+            raise AppError(
+                code=ErrorCode.INSUFFICIENT_CAPACITY,
+                message=(
+                    f"Too many files. {len(files)} submitted, "
+                    f"maximum is {max_batch} per batch"
+                    )
+            )
         if not files or (len(files) == 1 and files[0].filename == ''):
             logger.warning("No files provided in stream upload")
-            return create_error_sse_response("No files provided")
+            raise AppError(
+                code=ErrorCode.UNSUPPORTED_FILE_TYPE,
+                message='No files provided'
+            )
 
         logger.info(f"Received {len(files)} files for stream processing")
 
@@ -277,7 +299,10 @@ def upload_receipts_stream():
 
         if not temp_files:
             logger.warning("No valid files after validation")
-            return create_error_sse_response("No valid files to process")
+            raise AppError(
+                code=ErrorCode.UNSUPPORTED_FILE_TYPE,
+                message='No receipt files left to process after validation'
+            )
 
         logger.info(f"Processing {len(temp_files)} valid files via stream")
 
@@ -293,10 +318,13 @@ def upload_receipts_stream():
                 extraction_method
                 )
         if extraction_method not in ("ocr", "multimodal"):
-            return create_error_sse_response(
-                f"Unknown extraction_method: {extraction_method}. "
-                "Must be ocr or multimodal"
-                )
+            raise AppError(
+                code=ErrorCode.INVALID_VALUE,
+                message=(
+                    f"Unknown extraction_method: {extraction_method}. "
+                    "Must be ocr or multimodal"
+                    )
+            )
         logger.info(f"Using {extraction_method} extraction")
         upload_folder=file_handler.ensure_upload_folder()
         allowed_extensions=file_handler.allowed_extensions        
@@ -320,13 +348,7 @@ def upload_receipts_stream():
             try:
                 yield from processor.process_files(temp_files, form_data)
             finally:
-                for _, temp_path in temp_files:
-                    if os.path.exists(temp_path):
-                        try:
-                            os.unlink(temp_path)
-                            logger.debug(f"Cleaned up temp file: {temp_path}")
-                        except Exception as e:
-                            logger.error(f"Failed to cleanup {temp_path}: {e}")
+                _cleanup_temp_files(temp_files)
 
         return create_sse_response(
             cleanup_and_stream(),
@@ -335,13 +357,8 @@ def upload_receipts_stream():
 
     except Exception as e:
         logger.error(f"Stream upload failed: {e}", exc_info=True)
-        for _, temp_path in temp_files:
-            if os.path.exists(temp_path):
-                try:
-                    os.unlink(temp_path)
-                except Exception:
-                    pass
-        return create_error_sse_response("Internal server error", str(e))
+        _cleanup_temp_files(temp_files)
+        raise
 
 
 # =============================================================================

@@ -30,6 +30,7 @@ def create_app(config=None):
     app.config.update(
         # File upload settings
         MAX_CONTENT_LENGTH=50 * 1024 * 1024,  # 50MB max file size
+        MAX_RECEIPT_BATCH_SIZE = int(os.environ.get("MAX_RECEIPT_BATCH_SIZE", 50)),
         UPLOAD_FOLDER=os.getenv("UPLOAD_FOLDER", str(Path(BASE_DIR, "data", "uploads"))),
         ALLOWED_EXTENSIONS={
             "png",
