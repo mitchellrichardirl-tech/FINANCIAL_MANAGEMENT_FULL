@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Optional
 
 import json
+import asyncio
 
 # import requests
 from src.receipts.base import ExtractedFields, FieldExtractor
@@ -27,7 +28,7 @@ Rules:
 - "amount" is the grand total the customer paid, not subtotal or tax.
 - If the date is ambiguous, prefer day-first (European) interpretation.
 - Do not invent values. Use null when unsure.
-Receipt text:
+Receipt image follows
 
 """
 # type unions allow the model to abstain (null) rather than hallucinate;
@@ -42,7 +43,28 @@ RECEIPT_SCHEMA = {
     "required": ["vendor", "date", "amount"],
 }
 
-class GeminiFieldExtractor(FieldExtractor):
+class MultiModalFieldExtractor(FieldExtractor):
+    def __init__(
+            self,
+            model: str,
+            api_key: str,
+            max_retries: int = 2,
+            timeout: float = 120.0,
+    ):
+        self.model = model
+        self.api_key = api_key
+        self.max_retries = max_retries
+        self.timeout = timeout
+        self.llm_calls = 0
+        self.llm_failures = 0
+
+    def _get_client(self):
+        raise NotImplementedError('MultiModalFieldExtractor is a base class without implemented functionality')
+
+    def extract(self, image: bytes) -> ExtractedFields:
+        raise NotImplementedError('MultiModalFieldExtractor is a base class without implemented functionality')
+            
+class GeminiFieldExtractor(MultiModalFieldExtractor):
     def __init__(
         self,
         model: str = "gemini-3.5-flash",
@@ -50,13 +72,13 @@ class GeminiFieldExtractor(FieldExtractor):
         max_retries: int = 2,
         timeout: float = 120.0,
     ):
-        self.model = model
-        self.api_key = api_key if api_key else os.environ.get("GEMINI_API_KEY")
-        self.max_retries = max_retries
-        self.timeout = timeout
+        super().__init__(
+            model,
+            api_key if api_key else os.environ.get("GEMINI_API_KEY"),
+            max_retries,
+            timeout
+        )
         self.client = genai.Client(api_key=self.api_key)
-        self.llm_calls = 0
-        self.llm_failures = 0
 
     @property
     def name(self) -> str:
@@ -66,14 +88,32 @@ class GeminiFieldExtractor(FieldExtractor):
         if self.client is None:
             self.client = genai.Client(api_key=self.api_key)
         return self.client
-    
+
+    def _parse_response(self, response_text) -> ExtractedFields:
+        try:
+            response_json = json.loads(response_text)
+        except Exception as e:
+            raise ValueError(f'Unable to convert {response_text[:200]} to json: {e}')
+        raw_date = response_json.get("date")
+        parsed_date = None
+        if raw_date:
+            try:
+                parsed_date = datetime.strptime(raw_date, "%Y-%m-%d")
+            except ValueError:
+                logger.warning(f"Model returned unparseable date: {raw_date!r}")
+        return ExtractedFields(
+            vendor=response_json.get("vendor"),
+            date=parsed_date,
+            amount=response_json.get("amount"),
+        )
+
     def extract(self, image: bytes) -> ExtractedFields:
         client = self._get_client()
         response = client.interactions.create(
             model=self.model,
             input=[
                 {"type": "text", "text": PROMPT},
-                {"type": "image", "data": image, "mime_type": "image/jpeg"},
+                {"type": "image", "data": image, "mime_type": "image/png"},
             ],
             response_format={
                 "type": "text",
@@ -81,16 +121,33 @@ class GeminiFieldExtractor(FieldExtractor):
                 "schema": RECEIPT_SCHEMA
             }
         )
-        try:
-            response_json = json.loads(response.output_text)
-        except Exception as e:
-            raise ValueError(f'Unable to convert {response.output_text[:200]} to json: {e}')
-        return ExtractedFields(
-            vendor=response_json.get('vendor', None),
-            date=datetime.strptime(response_json.get('date'), '%Y-%m-%d') if 'date' in response_json else None,
-            amount=response_json.get('amount', None)
-        )
+        return self._parse_response(response.output_text)
 
+    async def aextract(self, image: bytes) -> ExtractedFields:
+        client = self._get_client()
+        last_exc = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                self.llm_calls += 1
+                response = await client.aio.interactions.create(
+                    model=self.model,
+                    input=[
+                        {"type": "text", "text": PROMPT},
+                        {"type": "image", "data": image, "mime_type": "image/jpeg"},
+                    ],
+                    response_format={
+                        "type": "text",
+                        "mime_type": "application/json",
+                        "schema": RECEIPT_SCHEMA,
+                    },
+                )
+                return self._parse_response(response.output_text)
+            except Exception as e:
+                last_exc = e
+                self.llm_failures += 1
+                if attempt < self.max_retries:
+                    await asyncio.sleep(2 ** attempt)  # 1s, 2s, ...
+        raise last_exc
 
 if __name__ == "__main__":
     from src.utils.image_loader import ImageLoader
@@ -118,4 +175,4 @@ if __name__ == "__main__":
     #     logger.error(f'Not an image: {e}')
     extractor = GeminiFieldExtractor()
     logger.info("Generated gemini extractor")
-    extractor.extract(image=img_byte_string)
+    asyncio.run(extractor.aextract(image=img_byte_string))

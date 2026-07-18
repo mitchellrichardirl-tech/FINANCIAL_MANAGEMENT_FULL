@@ -16,7 +16,7 @@ migration without disturbing the loader or repository layers.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, Dict
+from typing import Optional, Dict, Tuple
 
 import numpy as np
 
@@ -131,37 +131,57 @@ class ReceiptExtractorBase(ABC):
         """Early-stop heuristic; overridable per pipeline."""
         return len(text) > 200
 
-    def process_receipt(self, receipt: Receipt) -> Receipt:
-        """Template method: OCR -> field extraction -> populate Receipt."""
+    def _prepare(self, receipt: Receipt) -> Optional[Tuple[str, Optional[str]]]:
+        """
+        Shared pre-extraction steps.
+        Returns (text, method) to proceed, or None if we've already handled an
+        early-exit case (receipt is fully populated on return).
+        """
         self.last_ocr_text = None
         if not getattr(receipt, "processed_images", None):
             logger.warning(f"[{self.name}] receipt has no processed images")
-            receipt.confidence = 0
-            receipt.extracted_text = ""
-            receipt.selected_method = None
-            return receipt
-
+            self._mark_empty(receipt, method=None)
+            return None
         text, method = self._best_ocr_text(receipt)
         self.last_ocr_text = text
         if not text:
             logger.warning(f"[{self.name}] OCR produced no text")
-            receipt.confidence = 0
-            receipt.extracted_text = ""
-            receipt.selected_method = method
-            return receipt
+            self._mark_empty(receipt, method=method)
+            return None
+        return text, method
 
-        fields = self.fields.extract(text)
+    def _mark_empty(self, receipt: Receipt, method: Optional[str]) -> None:
+        receipt.confidence = 0
+        receipt.extracted_text = ""
+        receipt.selected_method = method
 
+    def _populate(
+        self,
+        receipt: Receipt,
+        fields: ExtractedFields,
+        text: str,
+        method: Optional[str],
+    ) -> Receipt:
+        """Shared post-extraction steps."""
         receipt.vendor = fields.vendor
         receipt.amount = fields.amount
         receipt.date = fields.date
         receipt.extracted_text = text
         receipt.selected_method = method
         receipt.confidence = fields.confidence
-
         logger.info(
             f"[{self.name}] vendor={fields.vendor}, amount={fields.amount}, "
             f"date={fields.date.date() if fields.date else None}, "
             f"confidence={fields.confidence}, method={method}"
         )
         return receipt
+
+    def process_receipt(self, receipt: Receipt) -> Receipt:
+        """Template method: OCR -> field extraction -> populate Receipt."""
+        prepared = self._prepare(receipt)
+        if prepared is None:
+            return receipt
+        text, method = prepared
+        fields = self.fields.extract(text)
+        return self._populate(receipt, fields, text, method)
+
