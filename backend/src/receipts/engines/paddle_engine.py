@@ -34,7 +34,7 @@ class PaddleEngine(OCREngine):
             self._ocr = PaddleOCR(
                 use_angle_cls=True,
                 lang=self.lang,
-                use_gpu=self.use_gpu,      # actually pass it
+                use_gpu=self.use_gpu
             )
         return self._ocr
 

@@ -24,6 +24,9 @@ def create_extractor(method: str = "ocr", config: Optional[Dict] = None):
             ),
         )
     if method == "ocr":
+        from src.receipts.extractors.ocr_regex_extractor import PaddleRegexExtractor
+        return PaddleRegexExtractor()
+    if method == "tesseract":
         from src.receipts.receipt_extractor import ReceiptExtractor
         return ReceiptExtractor()
     raise ValueError(f"Unknown extraction method: {method!r}")

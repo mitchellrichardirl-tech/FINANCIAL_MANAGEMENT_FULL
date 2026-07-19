@@ -7,10 +7,17 @@ from typing import List, Optional, Tuple
 from src.api.services.parallel_processor import ProcessingResult
 from src.models.receipt import Receipt
 
-def load_pages(temp_path: str) -> List[Receipt]:
+def load_pages(
+        temp_path: str,
+        apply_methods: Optional[bool]=True
+        ) -> List[Receipt]:
     # Deferred import: safe inside multiprocessing workers
     from src.receipts.receipt_loader import ReceiptLoader
-    return list(ReceiptLoader().process_files(Path(temp_path), yield_pages=True))
+    return list(ReceiptLoader().process_files(
+        Path(temp_path),
+        yield_pages=True,
+        apply_methods=apply_methods
+        ))
 
 def select_best(processed: List[Receipt]) -> Receipt:
     """Best-confidence page; works for single-page lists too."""

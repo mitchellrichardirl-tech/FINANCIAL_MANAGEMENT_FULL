@@ -14,18 +14,18 @@ from src.api.services.parallel_processor import (
 from src.utils.logging import ContextLogger
 
 logger = ContextLogger(__name__)
-
+    
 def receipt_worker(args: Tuple) -> ProcessingResult:
     """Sync worker for the multiprocessing (OCR/Regex) path."""
     (index, identifier, temp_path, upload_folder_path, _allowed_extensions) = args
-    from src.receipts.receipt_extractor import ReceiptExtractor
+    from src.receipts.extractor_factory import get_extractor
     from src.database.repositories.receipts import ReceiptRepository
     from src.receipts import worker_common as wc
     try:
-        pages = wc.load_pages(temp_path)
+        pages = wc.load_pages(temp_path, apply_methods=False)
         if not pages:
             return wc.failure(index, identifier, "Unable to process image")
-        extractor = ReceiptExtractor()
+        extractor = get_extractor('ocr')
         receipt = wc.select_best([extractor.process_receipt(p) for p in pages])
         receipt_id, stored_filename = wc.persist(
             temp_path, identifier, upload_folder_path,
@@ -47,7 +47,7 @@ async def receipt_worker_async(
     from src.receipts import worker_common as wc
     index, identifier, temp_path = task.index, task.identifier, task.data
     try:
-        pages = await asyncio.to_thread(wc.load_pages, temp_path)
+        pages = await asyncio.to_thread(wc.load_pages, temp_path, apply_methods=False)
         if not pages:
             return wc.failure(index, identifier, "Unable to process image")
         processed = await asyncio.gather(
