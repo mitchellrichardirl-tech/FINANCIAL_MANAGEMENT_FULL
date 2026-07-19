@@ -131,14 +131,14 @@ function BulkUploadReceipts({
    */
   const handleStreamEvent = (result, totalFiles) => {
     const isTerminal = result.status === 'success' || result.status === 'error';
-    if (!isTerminal || result.index == null) return;
-    if (completedIndicesRef.current.has(result.index)) return;
-    completedIndicesRef.current.add(result.index);
+    if (!isTerminal || result.file_index == null) return;
+    if (completedIndicesRef.current.has(result.file_index)) return;
+    completedIndicesRef.current.add(result.file_index);
     if (result.status === 'success') {
       onReceiptProcessed?.(result);
     } else {
       failedRef.current.push(result);
-      logger.warn(`Receipt ${result.identifier ?? result.index} failed to process:`, result);
+      logger.warn(`Receipt ${result.identifier ?? result.file_index} failed to process:`, result);
     }
     setProgress((prev) => ({
       ...prev,
