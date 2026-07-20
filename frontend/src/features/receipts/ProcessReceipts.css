@@ -2,15 +2,14 @@
   padding: 1.5rem 2rem;
   max-width: calc(100vw - 4rem);
   margin: 0 auto;
-}
-
-.page-header {
+  height: 100%;              /* own the viewport */
+  flex: 1;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1.5rem;
-  flex-wrap: wrap;
-  gap: 1rem;
+  flex-direction: column;
+  box-sizing: border-box;     /* so padding doesn't overflow */
+}
+.page-header {
+  flex-shrink: 0;             /* header keeps its natural height */
 }
 
 .page-header h1 {
@@ -53,13 +52,14 @@
   display: grid;
   grid-template-columns: minmax(520px, 600px) minmax(400px, 1fr) minmax(600px, 700px);
   gap: 2rem;
-  min-height: calc(100vh - 200px);
+  flex: 1;                    /* fill the remaining space... */
+  min-height: 0;              /* ...and allow children to scroll */
 }
-
 .column {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+  min-height: 0;              /* key: lets inner sections shrink & scroll */
 }
 
 .column-section {
@@ -88,9 +88,8 @@
 
 .receipt-list-section {
   flex: 1;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .section-header {
@@ -162,7 +161,7 @@
 
 .candidates-section {
   flex: 1;
-  overflow: hidden;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -335,9 +334,8 @@
 
 .candidates-container {
   flex: 1;
-  overflow-y: auto;
   min-height: 0;
-  max-height: calc(100vh - 550px); /* Adjust based on your needs */
+  overflow-y: auto;
 }
 
 /* Scrollbar styling */
