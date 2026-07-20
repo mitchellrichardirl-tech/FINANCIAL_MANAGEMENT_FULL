@@ -341,7 +341,9 @@ def upload_receipts_stream():
             # TODO remove the allowed extensions argument - this isn't used as far as I can see
             processor = ReceiptStreamProcessor(
                 upload_folder=upload_folder,
-                allowed_extensions=allowed_extensions
+                allowed_extensions=allowed_extensions,
+                max_workers=current_app.config.get('MAX_WORKERS', 4),
+                ocr_method=current_app.config.get('OCR_METHOD', 'tesseract')
             )
 
         def cleanup_and_stream():

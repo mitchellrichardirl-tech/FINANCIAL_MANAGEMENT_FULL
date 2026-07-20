@@ -5,7 +5,7 @@ from typing import Dict, Optional
 # reuses it (and its underlying HTTP client) across tasks.
 _EXTRACTOR_CACHE: Dict[tuple, object] = {}
 
-def create_extractor(method: str = "ocr", config: Optional[Dict] = None):
+def create_extractor(method: str = "tesseract", config: Optional[Dict] = None):
     config = config or {}
     if method == "multimodal":
         # Imports deferred so OCR-only deployments don't need google-genai
@@ -23,7 +23,7 @@ def create_extractor(method: str = "ocr", config: Optional[Dict] = None):
                 timeout=config.get("timeout", 120.0),
             ),
         )
-    if method == "ocr":
+    if method == "paddle":
         from src.receipts.extractors.ocr_regex_extractor import PaddleRegexExtractor
         return PaddleRegexExtractor()
     if method == "tesseract":
@@ -31,7 +31,7 @@ def create_extractor(method: str = "ocr", config: Optional[Dict] = None):
         return ReceiptExtractor()
     raise ValueError(f"Unknown extraction method: {method!r}")
 
-def get_extractor(method: str = "ocr", config: Optional[Dict] = None):
+def get_extractor(method: str = "tesseract", config: Optional[Dict] = None):
     key = (method, tuple(sorted((config or {}).items())))
     if key not in _EXTRACTOR_CACHE:
         _EXTRACTOR_CACHE[key] = create_extractor(method, config)

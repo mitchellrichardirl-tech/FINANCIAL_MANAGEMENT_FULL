@@ -1,9 +1,8 @@
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
-from src.api.utils.sse import SSEEventBuilder, ProgressInfo
 from src.api.utils.stream_reporter import StreamEventReporter
 
 from src.utils.logging import ContextLogger
@@ -52,10 +51,13 @@ class ParallelStreamProcessor:
     def __init__(
         self,
         worker_function: Callable[[Tuple], ProcessingResult],
-        max_workers: Optional[int] = None
+        *,
+        max_workers: Optional[int] = None,
+        ocr_method: Optional[str] = 'tesseract',
     ):
         self.worker_function = worker_function
         self.max_workers = get_optimal_workers(max_workers)
+        self.ocr_method = ocr_method
         logger.debug(
             f"Initialized processor with worker={worker_function.__name__}, "
             f"max_workers={self.max_workers}"
@@ -64,17 +66,20 @@ class ParallelStreamProcessor:
     def process(self, tasks, extra_worker_args=()):
         reporter = StreamEventReporter(total=len(tasks))
         yield reporter.starting(workers=self.max_workers)
-        worker_args = [(t.index, t.identifier, t.data, *extra_worker_args) for t in tasks]
+        worker_args = [
+            (t.index, t.identifier, t.data, *extra_worker_args, self.ocr_method)
+            for t in tasks
+            ]
         with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
             future_to_task = {}
             for task, args in zip(tasks, worker_args):
                 yield reporter.queued(task)
                 future_to_task[executor.submit(self.worker_function, args)] = task
-        for future in as_completed(future_to_task):
-            task = future_to_task[future]
-            try:
-                yield reporter.result(future.result())
-            except Exception as e:
-                logger.error(f"Worker exception for task {task.index} ({task.identifier}): {e}")
-                yield reporter.exception(task, e)
+            for future in as_completed(future_to_task):
+                task = future_to_task[future]
+                try:
+                    yield reporter.result(future.result())
+                except Exception as e:
+                    logger.error(f"Worker exception for task {task.index} ({task.identifier}): {e}")
+                    yield reporter.exception(task, e)
         yield reporter.completed()

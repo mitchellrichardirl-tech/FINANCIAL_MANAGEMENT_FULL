@@ -1,5 +1,3 @@
-import asyncio
-
 from src.api.utils.sse import SSEEventBuilder, ProgressInfo
 from src.utils.logging import ContextLogger
 logger = ContextLogger(__name__)

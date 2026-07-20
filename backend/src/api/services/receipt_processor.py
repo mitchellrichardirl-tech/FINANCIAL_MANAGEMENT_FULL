@@ -1,7 +1,3 @@
-import os
-import uuid
-import shutil
-from datetime import datetime
 from pathlib import Path
 from typing import Dict, Generator, List, Optional, Set, Tuple
 import asyncio
@@ -17,7 +13,7 @@ logger = ContextLogger(__name__)
     
 def receipt_worker(args: Tuple) -> ProcessingResult:
     """Sync worker for the multiprocessing (OCR/Regex) path."""
-    (index, identifier, temp_path, upload_folder_path, _allowed_extensions) = args
+    (index, identifier, temp_path, upload_folder_path, _, ocr_method) = args
     from src.receipts.extractor_factory import get_extractor
     from src.database.repositories.receipts import ReceiptRepository
     from src.receipts import worker_common as wc
@@ -25,7 +21,7 @@ def receipt_worker(args: Tuple) -> ProcessingResult:
         pages = wc.load_pages(temp_path, apply_methods=False)
         if not pages:
             return wc.failure(index, identifier, "Unable to process image")
-        extractor = get_extractor('ocr')
+        extractor = get_extractor(ocr_method)
         receipt = wc.select_best([extractor.process_receipt(p) for p in pages])
         receipt_id, stored_filename = wc.persist(
             temp_path, identifier, upload_folder_path,
@@ -71,13 +67,17 @@ class ReceiptStreamProcessor:
         self,
         upload_folder: Path,
         allowed_extensions: Set[str],
+        *,
+        ocr_method: Optional[str] = 'tesseract',
         max_workers: Optional[int] = None
     ):
         self.upload_folder = upload_folder
         self.allowed_extensions = allowed_extensions
+        self.ocr_method = ocr_method
         self._processor = ParallelStreamProcessor(
             worker_function=receipt_worker,
-            max_workers=max_workers
+            max_workers=max_workers,
+            ocr_method=ocr_method
         )
         logger.debug(
             f"Initialized with upload_folder={upload_folder}, "
@@ -115,6 +115,9 @@ class ReceiptStreamProcessor:
         ]
 
         # Extra args passed to worker: (upload_folder, allowed_extensions)
-        extra_args = (str(self.upload_folder), self.allowed_extensions)
+        extra_args = (
+            str(self.upload_folder),
+            self.allowed_extensions
+            )
 
         yield from self._processor.process(tasks, extra_worker_args=extra_args)
