@@ -6,37 +6,40 @@
   border-radius: 8px;
   text-align: center;
 }
-
 /* Container */
 .image-preview-container {
   position: relative;
   width: 100%;
+  overflow: hidden;
 }
-
 .image-preview-container.zoomable {
   cursor: zoom-in;
 }
-
+/* Safety net: target the element, not react-pdf's class names, which
+   vary by version. JS sizing should already prevent overflow. */
+.image-preview-container canvas {
+  max-width: 100% !important;
+  height: auto !important;
+}
 /* Loading State */
 .image-preview-loading {
   padding: 40px;
   text-align: center;
   color: #666;
 }
-
 /* Hidden Elements */
 .hidden {
   display: none;
 }
-
-/* Image Preview */
+/* Inline Image */
 .image-preview-img {
   max-width: 100%;
+  height: auto;
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   display: block;
+  margin: 0 auto;
 }
-
 /* Pagination Controls */
 .image-preview-pagination {
   display: flex;
@@ -45,7 +48,6 @@
   gap: 10px;
   margin-top: 10px;
 }
-
 .pagination-btn {
   padding: 5px 10px;
   cursor: pointer;
@@ -54,16 +56,13 @@
   border-radius: 4px;
   transition: background-color 0.2s;
 }
-
 .pagination-btn:hover:not(:disabled) {
   background-color: #f0f0f0;
 }
-
 .pagination-btn:disabled {
   cursor: not-allowed;
   opacity: 0.5;
 }
-
 /* Zoom Hint */
 .image-preview-zoom-hint {
   position: absolute;
@@ -76,66 +75,97 @@
   font-size: 12px;
   cursor: pointer;
 }
-
 .image-preview-zoom-hint.with-pagination {
   bottom: 50px;
 }
-
-/* Modal Overlay */
+/* ── Modal: scroll container. Plain block — NOT flex. Centring here
+      would trap overflow past the top/left edge. ── */
 .image-preview-modal {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  inset: 0;
   background-color: rgba(0, 0, 0, 0.9);
+  z-index: 1000;
+  overflow: auto;
+  cursor: zoom-out;
+  overscroll-behavior: contain;
+}
+.image-preview-modal.is-zoomed { cursor: grab; }
+.image-preview-modal.is-dragging { cursor: grabbing; }
+/* max(viewport, content) in both axes. Because the stage is never
+   smaller than its content, free space is never negative, so centring
+   here cannot push anything out of scroll reach. */
+.ip-modal-stage {
+  min-width: 100%;
+  width: max-content;
+  min-height: 100%;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
-  cursor: zoom-out;
-  padding: 20px;
 }
-
-/* Modal Close Button */
-.modal-close-btn {
-  position: absolute;
-  top: 20px;
-  right: 20px;
-  background: transparent;
-  border: none;
-  color: white;
-  font-size: 32px;
-  cursor: pointer;
-  z-index: 1001;
-  padding: 0;
-  line-height: 1;
-}
-
-.modal-close-btn:hover {
-  color: #ccc;
-}
-
-/* Modal Content */
-.modal-content {
+/*
+ * NOTE: deliberately namespaced. A generic `.modal-content` exists
+ * elsewhere in the app with `width: 560px; overflow: hidden`, which
+ * clipped the zoomed canvas and killed all scrolling. The explicit
+ * resets below are belt-and-braces against any other app-wide styles
+ * leaking in: nothing in this subtree may be size-constrained or clipped.
+ */
+.ip-modal-figure {
+  width: auto;
+  max-width: none;
+  height: auto;
+  max-height: none;
+  overflow: visible;
+  padding: 72px 24px 24px;
   display: flex;
   flex-direction: column;
   align-items: center;
+  cursor: default;
 }
-
-.modal-image {
-  max-width: 90vw;
-  max-height: 90vh;
-  object-fit: contain;
+.image-preview-modal.is-zoomed .ip-modal-figure { cursor: inherit; }
+.ip-modal-image {
+  display: block;
+  max-width: none;
+  max-height: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  /* Size comes from JS — see modalImgStyle. */
 }
-
-/* Modal Pagination */
-.modal-pagination {
+/* Modal pagination */
+.ip-modal-pagination {
   margin-top: 20px;
   color: white;
 }
-
-.modal-pagination .pagination-btn {
+.ip-modal-pagination .pagination-btn {
   padding: 8px 16px;
 }
+/* Toolbar */
+.ip-modal-toolbar {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 1001;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: default;
+}
+.ip-zoom-level {
+  color: #fff;
+  font-size: 13px;
+  min-width: 48px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.ip-modal-close {
+  background: transparent;
+  border: none;
+  color: white;
+  font-size: 28px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+.ip-modal-close:hover { color: #ccc; }
