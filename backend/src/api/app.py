@@ -30,6 +30,7 @@ def create_app(config=None):
     app.config.update(
         # File upload settings
         MAX_CONTENT_LENGTH=50 * 1024 * 1024,  # 50MB max file size
+        MAX_RECEIPT_BATCH_SIZE = int(os.environ.get("MAX_RECEIPT_BATCH_SIZE", 50)),
         UPLOAD_FOLDER=os.getenv("UPLOAD_FOLDER", str(Path(BASE_DIR, "data", "uploads"))),
         ALLOWED_EXTENSIONS={
             "png",
@@ -46,6 +47,13 @@ def create_app(config=None):
         DATABASE_PATH=os.getenv("DATABASE_PATH", str(Path(BASE_DIR, "data", "financial_data.db"))),
         # JSON settings
         JSON_SORT_KEYS=False,
+        # OCR settings
+        RECEIPT_EXTRACTION_METHOD=os.getenv("RECEIPT_EXTRACTION_METHOD", "ocr"),
+        OCR_METHOD=os.getenv("OCR_METHOD", "paddle"),
+        MAX_WORKERS=os.getenv("MAX_WORKERS", 2), # You can push this higher if using tesseract
+        # LLM settings
+        GEMINI_MODEL=os.getenv("GEMINI_MODEL", "gemini-3.5-flash"),
+        GEMINI_MAX_CONCURRENCY=os.getenv("GEMINI_MAX_CONCURRENCY", 4)
     )
 
     if config:
@@ -56,7 +64,8 @@ def create_app(config=None):
         f"Config: upload_folder={app.config['UPLOAD_FOLDER']}, "
         f"db_path={app.config['DATABASE_PATH']}, "
         f"max_content_length={app.config['MAX_CONTENT_LENGTH']}, "
-        f"allowed_extensions={app.config['ALLOWED_EXTENSIONS']}"
+        f"allowed_extensions={app.config['ALLOWED_EXTENSIONS']}, "
+        f"max_workers={app.config['MAX_WORKERS']}"
     )
 
     # Enable CORS

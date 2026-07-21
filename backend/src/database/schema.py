@@ -84,11 +84,19 @@ class SchemaManager:
             self._create_accounts_table()
             self._create_transactions_table()
             self._create_statement_format_table()
+            self._set_timeouts()
 
             logger.info("Database schema initialized successfully")
         except Exception as e:
             logger.error(f"Schema initialization failed: {e}")
             raise
+
+    def _set_timeouts(self):
+        with self.db.get_connection() as conn:
+            conn.execute("PRAGMA busy_timeout = 5000")
+            conn.execute("PRAGMA journal_mode = WAL")
+            conn.commit()
+            logger.debug("Busy timeout set to 5000 and journal mode to WAL")
 
     def _create_categories_table(self):
         """Create the `categories` table and name index.

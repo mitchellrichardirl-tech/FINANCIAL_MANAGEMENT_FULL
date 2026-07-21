@@ -9,8 +9,7 @@ fi
 
 # System dependencies
 sudo apt-get update
-sudo apt-get install -y tesseract-ocr poppler-utils keychain
-
+sudo apt-get install -y tesseract-ocr poppler-utils keychain curl ca-certificates libgl1 libglib2.0-0 ccache
 # Install uv
 curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.cargo/bin:$PATH"

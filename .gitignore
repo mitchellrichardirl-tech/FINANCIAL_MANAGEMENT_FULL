@@ -4,6 +4,7 @@ data/
 # Environment
 .env
 .env.local
+devcontainer.env
 
 # Python
 __pycache__/
@@ -50,6 +51,7 @@ htmlcov/
 .tox/
 .hypothesis/
 notebooks/
+benchmark_dumps/
 
 # OS
 .DS_Store
@@ -69,6 +71,7 @@ data/
 notebooks
 tree.txt
 .worktrees/
+approach
 
 # Temporary files
 tmp/

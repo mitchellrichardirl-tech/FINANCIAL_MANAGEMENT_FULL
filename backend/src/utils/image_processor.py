@@ -66,8 +66,7 @@ class ImageProcessor:
         """
         self.config = config or ProcessingConfig()
         self.original_image = image
-        image = self._resize_if_needed(image, self.config)
-        self.gray_image = self._convert_to_grayscale(image)
+        self.resized_image = self._resize_if_needed(image, self.config)
 
         self.available_methods = {
             "denoise": self._denoise,
@@ -130,7 +129,11 @@ class ImageProcessor:
                 image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         return image
 
-    def process(self, methods: Optional[list[str] | str] = None) -> Dict[str, np.ndarray]:
+    def process(self,
+                *,
+                methods: Optional[list[str] | str] = None,
+                apply_methods: Optional[bool]=True
+                ) -> Dict[str, np.ndarray]:
         """Apply the specified processing methods and return all results.
 
         Each method is applied independently to a fresh copy of the
@@ -146,14 +149,18 @@ class ImageProcessor:
             Dict mapping each successfully-applied method name to its
             processed image. May be empty if all methods fail.
         """
-        if isinstance(methods, str):
-            methods = [methods]
-        elif methods is None:
-            methods = list(self.available_methods.keys())
+        if not apply_methods:
+            methods = []
+        else:
+            self.grayscale_image = self._convert_to_grayscale(self.resized_image)
+            if isinstance(methods, str):
+                methods = [methods]
+            elif methods is None:
+                methods = list(self.available_methods.keys())
 
         logger.debug(f"Processing image with methods: {methods}")
 
-        processed_images = {}
+        processed_images = {"unprocessed": self.resized_image.copy()}
         successful = 0
         failed = 0
 
@@ -164,7 +171,7 @@ class ImageProcessor:
 
             process_method = self.available_methods[method]
             try:
-                processed_images[method] = process_method(self.gray_image.copy())
+                processed_images[method] = process_method(self.grayscale_image.copy())
                 successful += 1
             except Exception as e:
                 logger.error(f"Processing method '{method}' failed: {e}")
