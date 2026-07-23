@@ -21,6 +21,9 @@
   --color-warning-bg:    #fff3cd;
   --color-warning-border:#ffc107;
   --color-warning-text:  #856404;
+  --color-warning-divider: #f0e0b0;
+  --color-warning-muted: #8a7a4a;
+  --color-warning-chip-border: #e8d9a8;
   --color-muted:         #6c757d;
 
   --color-info-bg:     #e7f3ff;

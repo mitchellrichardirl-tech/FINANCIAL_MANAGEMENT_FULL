@@ -160,7 +160,12 @@ Migrating the frontend from individual CSS files to Tailwind CSS v4. Note: this 
       (mobile-first, md/lg). 992px→lg is +32px shift.
       ⚠️ Account-group switched from flex-row to flex-col (likely
       original bug — format-warning had margin-top in a horizontal flex).
-
+- [x] `ProcessingWarningsPanel.jsx` — migrated + CSS deleted.
+      SHARED component: importers are UploadStatement + StepPreview, both
+      verified clear. Restored `list-disc pl-5` on samples <ul> (Preflight).
+      `pwp-code-*` dynamic class was dead → converted to data-warning-code;
+      ⚠️ grep for `pwp-code` before merging.
+		
 ## Next Steps (statementFormats)
 - [ ] Revisit `DeleteFormatDialog` `<ul>` + body spacing once `ConfirmDialog` is done.
 
@@ -193,3 +198,9 @@ Migration order is leaf/page first, then shared components. Shared components fl
 - **Warning color tokens:** #fff3cd / #ffc107 / #856404 (Bootstrap warning
   palette) now appear as arbitrary values. Promote to @theme alongside
   the existing danger/info token pattern.
+- **TWO warning palettes (resolve during token sweep):**
+  UploadStatement `.format-warning` uses Bootstrap (#fff3cd/#ffc107/#856404);
+  ProcessingWarningsPanel uses a bespoke warmer family
+  (#fef9e7/#f0c36d/#6b5a2a + divider/muted/chip shades). Both render on the
+  same page. Pick one — the PWP family is more complete — and promote to
+  @theme, then retrofit .format-warning.
