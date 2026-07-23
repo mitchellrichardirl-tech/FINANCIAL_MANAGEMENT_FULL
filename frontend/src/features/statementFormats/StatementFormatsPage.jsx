@@ -67,7 +67,7 @@ export default function StatementFormatsPage() {
       {/* .sfp__error */}
       {error && (
         <div
-          className="flex items-center justify-between gap-4 rounded border border-[#f5c2c7] bg-[#f8d7da] px-4 py-3.5 text-[#842029]"
+          className="flex items-center justify-between gap-4 rounded border border-danger-border bg-danger-bg px-4 py-3.5 text-danger-text"
           role="alert"
         >
           <p>{error.userMessage || error.message || 'Failed to load formats.'}</p>

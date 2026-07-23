@@ -22,7 +22,6 @@ import { createLogger } from '@/lib/logger';
 import { fetchFormat, fetchFormatSchema } from '../api';
 import { emptyDraft, fromApiShape } from '../configModel';
 import FormatEditor from './FormatEditor';
-import './FormatEditorPage.css';
 
 const logger = createLogger('statementFormats:FormatEditorPage');
 
@@ -115,21 +114,29 @@ export default function FormatEditorPage({ mode }) {
         : 'New statement format';
 
   return (
-    <div className="format-editor-page">
-      <header className="format-editor-page__header">
+    <div className="mx-auto flex h-full w-full max-w-[960px] flex-col overflow-hidden px-5 py-6">
+      {/* .format-editor-page__header */}
+      <header className="mb-5 shrink-0">
         <div>
-          <h1>{title}</h1>
-          <p className="format-editor-page__sub">
+          {/* .format-editor-page__header h1 — preflight zeroes margin */}
+          <h1 className="mb-1">{title}</h1>
+          {/* .format-editor-page__sub */}
+          <p className="m-0 text-sm text-gray-500">
             Describe how this bank&apos;s export maps to transactions, then test it
             against a sample file.
           </p>
         </div>
       </header>
 
-      {state.loading && <p className="format-editor-page__status">Loading…</p>}
+      {/* .format-editor-page__status */}
+      {state.loading && <p className="text-gray-500">Loading…</p>}
 
+      {/* .format-editor-page__error */}
       {state.error && (
-        <div className="format-editor-page__error" role="alert">
+        <div
+          className="flex items-center justify-between gap-4 rounded border border-[#f5c2c7] bg-[#f8d7da] px-4 py-3.5 text-[#842029]"
+          role="alert"
+        >
           <p>{state.error}</p>
           <Button variant="secondary" onClick={() => navigate('/statement-formats')}>
             Back to formats
