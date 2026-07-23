@@ -21,6 +21,9 @@
   --color-info-bg:     #e7f3ff;
   --color-info-border: #4a90e2;
   --color-info-text:   #1c4d7a;
+
+  --color-success: #28a745;
+  --color-primary: #007bff;
 }
 
 @layer base {

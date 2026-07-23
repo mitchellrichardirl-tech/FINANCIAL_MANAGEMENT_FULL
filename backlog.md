@@ -143,6 +143,10 @@ Migrating the frontend from individual CSS files to Tailwind CSS v4. Note: this 
 - [x] `StepDefaults` — was already on Tailwind; CSS deleted.
 - [x] `StepPreview` — was already on Tailwind; CSS deleted.
       Fixed info banner to use @theme tokens instead of hardcoded hex.
+- [x] `editor/Stepper.jsx` — migrated + CSS deleted. shrink-0 now lives on
+      the Stepper's own <ol>; removed the temporary wrapper div in
+      FormatEditor. ⚠️ needs browser verify — connector line geometry uses
+      calc() arbitrary values, check alignment at narrow widths.
 
 ## Next Steps (statementFormats)
 - [ ] Revisit `DeleteFormatDialog` `<ul>` + body spacing once `ConfirmDialog` is done.
@@ -161,3 +165,8 @@ Migration order is leaf/page first, then shared components. Shared components fl
 - **Stepper component:** Still un-migrated. Currently wrapped in a
   `shrink-0` div inside FormatEditor. When migrating Stepper, put
   `shrink-0` on its own root and remove the wrapper.
+- **Preflight button cursor:** v4 dropped `cursor: pointer` on buttons.
+  Any migrated component with a bare <button> needs it added explicitly.
+- **New hardcoded hex:** `#28a745` (success) and `#007bff` (primary) now
+  appear as arbitrary values in Stepper. Grep both before migrating
+  `Button` — promote to @theme tokens at that point.

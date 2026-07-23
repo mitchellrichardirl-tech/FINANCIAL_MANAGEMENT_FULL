@@ -44,15 +44,12 @@ export default function FormatEditor({ mode, initialDraft, numericId, schema }) 
   };
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      {/* shrink-0 wrapper keeps stepper pinned while body scrolls */}
-      <div className="shrink-0">
-        <Stepper
-          labels={STEP_LABELS}
-          current={step}
-          maxReachable={maxStepReached}
-          onStepClick={goToStep}
-        />
-      </div>
+      <Stepper
+        labels={STEP_LABELS}
+        current={step}
+        maxReachable={maxStepReached}
+        onStepClick={goToStep}
+      />
       <div className="flex-1 min-h-0 overflow-y-auto pt-2 px-1 pb-6">
         {step === STEP.SAMPLE && <StepSampleFile editor={editor} />}
         {step === STEP.IDENTITY && <StepIdentity editor={editor} />}
