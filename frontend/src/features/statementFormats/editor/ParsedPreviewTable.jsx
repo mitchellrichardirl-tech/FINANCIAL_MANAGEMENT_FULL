@@ -5,8 +5,11 @@
  * sign, description came through.
  */
 
-import './ParsedPreviewTable.css';
-
+/* Cell bases deliberately omit text-align — each cell sets its own, so
+   there's no same-property utility conflict to reason about. */
+const TH = 'sticky top-0 border-b-2 border-gray-300 bg-gray-50 px-3 py-2 font-semibold';
+const TD = 'border-b border-gray-100 px-3 py-2';
+const NUM = 'text-right tabular-nums whitespace-nowrap';
 /**
  * @component
  * @param {Object} props
@@ -16,42 +19,49 @@ import './ParsedPreviewTable.css';
 export default function ParsedPreviewTable({ rows, total }) {
   if (!rows?.length) {
     return (
-      <div className="ppt-empty">
+      <div className="rounded-md border border-dashed border-gray-300 bg-gray-50 p-6 text-center text-muted">
         No transactions were produced. Check the column mapping and any exclude
         patterns.
       </div>
     );
   }
-
   const capped = total > rows.length;
-
   return (
-    <div className="ppt">
-      <div className="ppt__summary">
+    <div>
+      <div className="mb-2.5 text-sm text-gray-700">
         <strong>{total}</strong> transaction{total === 1 ? '' : 's'} parsed
         {capped && <> — showing the first {rows.length}</>}.
       </div>
-
-      <div className="ppt__scroll">
-        <table className="ppt__table">
+      <div className="max-h-[45vh] overflow-auto rounded border border-gray-300">
+        <table className="w-full bg-white text-[13px]">
           <thead>
             <tr>
-              <th>Date</th>
-              <th>Description</th>
-              <th className="ppt__num">Amount</th>
-              <th></th>
+              <th className={`${TH} text-left`}>Date</th>
+              <th className={`${TH} text-left`}>Description</th>
+              <th className={`${TH} ${NUM}`}>Amount</th>
+              <th className={`${TH} text-left`}></th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r, i) => (
               <tr key={i}>
-                <td className="ppt__date">{fmtDate(r.transaction_date)}</td>
-                <td className="ppt__desc">{r.description}</td>
-                <td className={`ppt__num ${r.is_credit ? 'ppt__credit' : 'ppt__debit'}`}>
+                <td className={`${TD} text-left whitespace-nowrap text-gray-600`}>
+                  {fmtDate(r.transaction_date)}
+                </td>
+                <td className={`${TD} text-left break-words`}>{r.description}</td>
+                <td
+                  className={`${TD} ${NUM} ${r.is_credit ? 'text-green-800' : 'text-red-800'}`}
+                >
                   {fmtAmount(r.amount)}
                 </td>
-                <td>
-                  <span className={`ppt__badge ${r.is_credit ? 'ppt__badge--cr' : 'ppt__badge--dr'}`}>
+                <td className={`${TD} text-left`}>
+                  <span
+                    className={`inline-block rounded-[3px] px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.04em] ${
+                      r.is_credit
+                        ? 'bg-green-50 text-green-800'
+                        : 'bg-red-50 text-red-800'
+                    }`}
+                  >
                     {r.is_credit ? 'CR' : 'DR'}
                   </span>
                 </td>
@@ -63,14 +73,12 @@ export default function ParsedPreviewTable({ rows, total }) {
     </div>
   );
 }
-
 function fmtDate(v) {
   if (!v) return '';
   // Backend may send ISO strings or already-formatted dates; be lenient.
   const d = new Date(v);
   return Number.isNaN(d.getTime()) ? String(v) : d.toISOString().slice(0, 10);
 }
-
 function fmtAmount(v) {
   const n = Number(v);
   if (!Number.isFinite(n)) return String(v ?? '');

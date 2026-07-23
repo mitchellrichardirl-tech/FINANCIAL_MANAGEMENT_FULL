@@ -147,6 +147,10 @@ Migrating the frontend from individual CSS files to Tailwind CSS v4. Note: this 
       the Stepper's own <ol>; removed the temporary wrapper div in
       FormatEditor. ⚠️ needs browser verify — connector line geometry uses
       calc() arbitrary values, check alignment at narrow widths.
+- [x] `editor/ParsedPreviewTable.jsx` — migrated + CSS deleted.
+      Credit/debit colors were already exact Tailwind palette values
+      (green-800/red-800/green-50/red-50) — no approximation needed.
+      ⚠️ browser verify: sticky thead border under border-collapse.
 
 ## Next Steps (statementFormats)
 - [ ] Revisit `DeleteFormatDialog` `<ul>` + body spacing once `ConfirmDialog` is done.
@@ -170,3 +174,7 @@ Migration order is leaf/page first, then shared components. Shared components fl
 - **New hardcoded hex:** `#28a745` (success) and `#007bff` (primary) now
   appear as arbitrary values in Stepper. Grep both before migrating
   `Button` — promote to @theme tokens at that point.
+- **Duplicated dashed placeholder:** same empty-state recipe now appears in
+  StepDefaults (p-10, #868e96) and ParsedPreviewTable (p-6, text-muted).
+  Fold into the <ErrorBanner>/<Alert> extraction work as an <EmptyState>,
+  and standardise on text-muted.
