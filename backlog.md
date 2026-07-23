@@ -152,6 +152,15 @@ Migrating the frontend from individual CSS files to Tailwind CSS v4. Note: this 
       (green-800/red-800/green-50/red-50) — no approximation needed.
       ⚠️ browser verify: sticky thead border under border-collapse.
 
+### statements feature
+- [x] `UploadStatement.jsx` — migrated + CSS deleted.
+      ⚠️ Behavioral change: preview-table-wrapper inline styles removed,
+      now uses correct flex-fill. Height will differ — browser verify.
+      ⚠️ Responsive breakpoints simplified from 3 (desktop-first) to 2
+      (mobile-first, md/lg). 992px→lg is +32px shift.
+      ⚠️ Account-group switched from flex-row to flex-col (likely
+      original bug — format-warning had margin-top in a horizontal flex).
+
 ## Next Steps (statementFormats)
 - [ ] Revisit `DeleteFormatDialog` `<ul>` + body spacing once `ConfirmDialog` is done.
 
@@ -178,3 +187,9 @@ Migration order is leaf/page first, then shared components. Shared components fl
   StepDefaults (p-10, #868e96) and ParsedPreviewTable (p-6, text-muted).
   Fold into the <ErrorBanner>/<Alert> extraction work as an <EmptyState>,
   and standardise on text-muted.
+- **Raw buttons in UploadStatement:** btn-remove and btn-import are styled
+  <button> elements, not <Button>. Swap to <Button variant="danger/success">
+  when Button is migrated.
+- **Warning color tokens:** #fff3cd / #ffc107 / #856404 (Bootstrap warning
+  palette) now appear as arbitrary values. Promote to @theme alongside
+  the existing danger/info token pattern.

@@ -13,9 +13,14 @@
 @theme {
   --font-sans: 'Inter', sans-serif;
 
+  --color-danger:        #dc3545;
+  --color-danger-hover:  #c82333;
   --color-danger-bg:     #f8d7da;
   --color-danger-border: #f5c2c7;
   --color-danger-text:   #842029;
+  --color-warning-bg:    #fff3cd;
+  --color-warning-border:#ffc107;
+  --color-warning-text:  #856404;
   --color-muted:         #6c757d;
 
   --color-info-bg:     #e7f3ff;
@@ -23,6 +28,7 @@
   --color-info-text:   #1c4d7a;
 
   --color-success: #28a745;
+  --color-success-hover: #218838;
   --color-primary: #007bff;
 }
 
