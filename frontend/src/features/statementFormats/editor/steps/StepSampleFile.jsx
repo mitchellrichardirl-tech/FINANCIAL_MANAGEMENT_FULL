@@ -9,7 +9,6 @@ import FileDropzone from '@/components/FileDropzone';
 import FormField from '@/components/FormField';
 import NumberInput from '@/components/NumberInput';
 import PreviewTable from '@/features/statements/PreviewTable';
-// ❌ removed: import './StepSampleFile.css'
 
 /* Reused class strings */
 const infoBanner =
@@ -33,9 +32,9 @@ export default function StepSampleFile({ editor }) {
   };
 
   return (
-    <div className="fe-step">
-      <h2>Sample file</h2>
-      <p className="fe-step__sub">
+    <div>
+      <h2 className="text-xl mb-1.5">Sample file</h2>
+      <p className="mb-5 text-sm text-muted">
         Upload a real export from this bank so we can read its column headers and
         test the format against actual rows. The file is only used for preview —
         nothing is imported.

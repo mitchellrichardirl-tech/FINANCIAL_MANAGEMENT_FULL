@@ -29,16 +29,18 @@ export default function StepDefaults({ editor, schema }) {
   const fields = schema?.allowed_defaults ?? [];
 
   return (
-    <div className="fe-step">
-      <h2>Defaults</h2>
-      <p className="fe-step__sub">
+    <div>
+      <h2 className="text-xl mb-1.5">Defaults</h2>
+      <p className="mb-5 text-sm text-muted">
         Optional. Values set here are applied to <em>every</em> transaction imported with
         this format. Use this for accounts that are always one category — e.g. a
         kids&apos; savings account.
       </p>
 
       {fields.length === 0 ? (
-        <p className="fe-step__placeholder">No defaultable fields are configured.</p>
+        <p className="p-10 text-center text-[#868e96] bg-gray-50 border border-dashed border-gray-300 rounded-md">
+          No defaultable fields are configured.
+        </p>
       ) : (
         <div className="flex flex-col gap-3.5 rounded-md border border-gray-200 bg-[#fcfcfd] p-4">
           {fields.map(({ name, type }) => {

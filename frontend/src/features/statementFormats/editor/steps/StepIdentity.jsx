@@ -21,9 +21,9 @@ export default function StepIdentity({ editor }) {
       : '';
 
   return (
-    <div className="fe-step">
-      <h2>Name</h2>
-      <p className="fe-step__sub">
+    <div>
+      <h2 className="text-xl mb-1.5">Columns</h2>
+      <p className="mb-5 text-sm text-muted">
         How this format appears in the format list and the account settings picker.
       </p>
 

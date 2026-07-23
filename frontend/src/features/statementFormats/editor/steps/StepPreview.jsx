@@ -29,12 +29,12 @@ export default function StepPreview({ editor }) {
   }, []);
 
   return (
-    <div className="fe-step">
+    <div>
       {/* ── Header ── */}
       <div className="mb-4 flex items-start justify-between gap-4">
         <div>
-          <h2>Preview &amp; save</h2>
-          <p className="fe-step__sub">
+          <h2 className="text-xl mb-1.5">Preview &amp; save</h2>
+          <p className="mb-5 text-sm text-muted">
             This is what the import pipeline would produce from your sample file. Check
             dates, signs and descriptions, then save.
           </p>
@@ -48,8 +48,8 @@ export default function StepPreview({ editor }) {
 
       {/* ── No sample ── */}
       {!hasSample && (
-        <div className="flex items-center justify-between gap-4 rounded border-l-4 border-l-[#4a90e2] bg-[#e7f3ff] p-5">
-          <p className="m-0 text-sm text-[#1c4d7a]">
+        <div className="flex items-center justify-between gap-4 rounded border-l-4 border-l-info-border bg-info-bg p-5">
+          <p className="m-0 text-sm text-info-text">
             No sample file loaded — preview isn&apos;t available. You can still save the
             format, or go back and upload a sample to test it first.
           </p>
