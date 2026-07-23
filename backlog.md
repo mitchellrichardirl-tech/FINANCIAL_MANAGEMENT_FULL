@@ -133,10 +133,18 @@ Migrating the frontend from individual CSS files to Tailwind CSS v4. Note: this 
 - [x] `FormatList.jsx` — migrated, `FormatList.css` deleted.
 - [x] `FormatEditorPage.jsx` — migrated, `FormatEditorPage.css` deleted.
 - [~] `DeleteFormatDialog.jsx` — no dedicated CSS. Only remaining tweak: add `list-disc pl-5` to the linked-accounts `<ul>` (Preflight strips bullets/indent). Decide whether body spacing lives here or in `ConfirmDialog`'s body — **deferred until ConfirmDialog is migrated** (see below).
+- [x] `FormatEditor.jsx` — migrated + CSS deleted. Stepper wrapped in
+      shrink-0 div (Stepper itself not yet migrated).
+- [x] Shared step scaffolding (`fe-step`, `fe-step__sub`,
+      `fe-step__placeholder`) — inlined into all 5 step components,
+      rules removed from FormatEditor.css.
+- [x] `StepSampleFile` — was already on Tailwind; CSS deleted.
+- [x] `StepColumns` — was already on Tailwind; CSS deleted.
+- [x] `StepDefaults` — was already on Tailwind; CSS deleted.
+- [x] `StepPreview` — was already on Tailwind; CSS deleted.
+      Fixed info banner to use @theme tokens instead of hardcoded hex.
 
 ## Next Steps (statementFormats)
-- [ ] `editor/FormatEditor.jsx` — in progress next. Watch the scroll/overflow contract (see watch-out #3).
-- [ ] Remaining editor subcomponents (TBD — enumerate as we open them).
 - [ ] Revisit `DeleteFormatDialog` `<ul>` + body spacing once `ConfirmDialog` is done.
 
 ## Deferred: shared components
@@ -150,3 +158,6 @@ Migration order is leaf/page first, then shared components. Shared components fl
 - **Muted color consistency:** `#6c757d` is the `--color-muted` token but has been rendered as `text-gray-500` (actually `#6b7280`) in `StatementFormatsPage`, `FormatList`, and `FormatEditorPage` for now. **TODO (token sweep):** switch these to `text-muted` for exact + consistent color.
 - **Shared color tokens:** `--border-color` (`#e0e0e0`) and `--sidebar-bg` (`#fafafa`) are used by shared components but were hardcoded as arbitrary values in Hierarchy. When migrating shared components, consider promoting these (and the muted/danger usages above) to `@theme` tokens, then retrofit Hierarchy + statementFormats pages for consistency.
 - **Editor scroll contract:** `FormatEditorPage` is `flex flex-col overflow-hidden`; the header is `shrink-0`. `FormatEditor` is expected to own its internal scroll region. When migrating it, ensure the scrollable child has `min-h-0` + `overflow-y-auto` (flex children won't shrink below content size without `min-h-0`), or content will clip instead of scroll. Related: the `__table` region uses `h-[50vh] min-h-[320px] overflow-hidden`.
+- **Stepper component:** Still un-migrated. Currently wrapped in a
+  `shrink-0` div inside FormatEditor. When migrating Stepper, put
+  `shrink-0` on its own root and remove the wrapper.
