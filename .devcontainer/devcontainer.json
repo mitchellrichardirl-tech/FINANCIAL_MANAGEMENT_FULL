@@ -5,13 +5,19 @@
     "ghcr.io/devcontainers/features/node:1": {
       "version": "20"
     },
-    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {},
+    "ghcr.io/devcontainers/features/common-utils:2": {}
   },
   "postCreateCommand": "bash .devcontainer/postCreate.sh",
   "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
   "containerEnv": {
     "DATABASE_PATH": "${containerWorkspaceFolder}/backend/data-dev/financial_data.db",
-    "UPLOAD_FOLDER": "${containerWorkspaceFolder}/backend/data-dev/uploads"
+    "UPLOAD_FOLDER": "${containerWorkspaceFolder}/backend/data-dev/uploads",
+    "LLM_GATEWAY_URL": "http://llm_gateway-api-1:8000"
+  },
+  "remoteEnv": {
+    "CCACHE_DIR": "/workspaces/FINANCIAL_MANAGEMENT_FULL/.ccache",
+    "CCACHE_MAXSIZE": "2G"
   },
   "remoteUser": "vscode",
   "customizations": {
@@ -27,7 +33,26 @@
       ],
       "settings": {
         "python.defaultInterpreterPath": "${workspaceFolder}/backend/.venv/bin/python",
+        "python.analysis.exclude": [
+          "**/node_modules",
+          "**/.venv",
+          "**/venv",
+          "**/__pycache__",
+          "**/dist",
+          "**/build"
+        ],
+        "files.watcherExclude": {
+          "**/node_modules/**": true,
+          "**/.venv/**": true,
+          "**/venv/**": true,
+          "**/__pycache__/**": true,
+          "**/.git/objects/**": true,
+          "**/.git/subtree-cache/**": true,
+          "**/dist/**": true,
+          "**/build/**": true
+        },
         "python.analysis.typeCheckingMode": "basic",
+        "python.formatting.provider": "none",
         "[python]": {
           "editor.defaultFormatter": "charliermarsh.ruff",
           "editor.formatOnSave": true,
@@ -41,5 +66,10 @@
   "forwardPorts": [5000, 5173, 8888],
   "mounts": [
     "source=C:/Users/User/OneDrive/Receipts,target=/workspace/receipts,type=bind"
+  ],
+  "runArgs": [
+    "--network=financial-management-network",
+    "--add-host=host.docker.internal:host-gateway",
+    "--env-file",".devcontainer/devcontainer.env"
   ]
 }

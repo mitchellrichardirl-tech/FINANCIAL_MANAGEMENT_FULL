@@ -40,7 +40,7 @@ import {
   createParty,
 } from '@/features/transactions/api';
 import GenerateCashFromReceiptModal from './GenerateCashFromReceiptModal';
-import { ErrorCode } from '@/lib/apiErrors';
+import { ErrorCode, parseApiError } from '@/lib/apiErrors';
 import { useToast } from '@/components/ToastContext';
 import BulkUploadReceipts from './BulkUploadReceipts';
 import SelectableReceiptTable from './SelectableReceiptTable';
@@ -759,7 +759,7 @@ function ProcessReceipts() {
               onProcessingComplete={handleProcessingComplete}
               onError={(err) =>
                 addToast({
-                  message: err.userMessage || err.message || 'Upload failed',
+                  message: err,
                   type: 'error',
                 })
               }

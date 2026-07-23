@@ -16,14 +16,20 @@
  *  - `onReceiptProcessed(result)` — one receipt succeeded.
  *  - `onProcessingComplete({succeeded, failed, failures})` — batch done.
  *  - `onError(message)` — transport-level failure (non-2xx, network).
+ * 
+ * Sends an `extraction_method` form field (`'ocr'` | `'multimodal'`)
+ *  - controlled by the "AI extraction" checkbox, selecting the backend
+ *  - extraction engine per batch.
  */
 
 import { useState, useRef } from 'react';
 import FilePreview from '@/components/FilePreview';
+import Checkbox from '@/components/Checkbox';
 import './BulkUploadReceipts.css';
 import { API_BASE_URL } from '@/lib/apiClient';
 import { createLogger } from '@/lib/logger';
 import { AppError } from '@/lib/errors';
+import { getErrorMessage } from '@/lib/apiErrors';
 
 /** @type {import('@/lib/logger').Logger} */
 const logger = createLogger('BulkUploadReceipts');
@@ -66,13 +72,10 @@ function BulkUploadReceipts({
 
   /** Ref to the hidden `<input type="file">` so we can reset its value. */
   const fileInputRef = useRef(null);
-  /**
-   * Tracks `receipt_id`s already emitted, so duplicate SSE lines (or
-   * multi-page PDFs that echo the same id) don't double-count.
-   */
-  const processedIdsRef = useRef(new Set());
   /** Collects stream events whose `status !== 'success'`. */
   const failedRef = useRef([]);
+  /** When true, the backend uses the multimodal (LLM) extractor instead of OCR. */
+  const [useMultimodal, setUseMultimodal] = useState(false);  
 
   // ── File selection ────────────────────────────────────────────────
 
@@ -119,13 +122,37 @@ function BulkUploadReceipts({
 
   // ── Upload + stream parse ─────────────────────────────────────────
 
+  /** Indices of tasks that have reached a terminal state (success or failure). */
+  const completedIndicesRef = useRef(new Set());
+  /**
+   * Handle one parsed stream event. Terminal events (success/error) drive
+   * progress, keyed by task `index` -- present on every event, unlike
+   * `receipt_id`, which failures lack.
+   */
+  const handleStreamEvent = (result, totalFiles) => {
+    const isTerminal = result.status === 'success' || result.status === 'error';
+    if (!isTerminal || result.file_index == null) return;
+    if (completedIndicesRef.current.has(result.file_index)) return;
+    completedIndicesRef.current.add(result.file_index);
+    if (result.status === 'success') {
+      onReceiptProcessed?.(result);
+    } else {
+      failedRef.current.push(result);
+      logger.warn(`Receipt ${result.identifier ?? result.file_index} failed to process:`, result);
+    }
+    setProgress((prev) => ({
+      ...prev,
+      current: Math.min(completedIndicesRef.current.size, totalFiles),
+    }));
+  };
+
   /**
    * POST all queued files to `/receipts/upload-stream` and parse the
    * streamed response line-by-line.
    *
    * The server sends SSE-style lines: `data: {json}\n`. Each JSON
    * object has at least `{ receipt_id, status }`. We:
-   *  - De-duplicate by `receipt_id` via `processedIdsRef`.
+   *  - De-duplicate by `receipt_id` via `completedIndicesRef`.
    *  - Call `onReceiptProcessed` for successes.
    *  - Collect failures into `failedRef` for the summary callback.
    *  - Update the progress bar as unique ids arrive.
@@ -140,7 +167,7 @@ function BulkUploadReceipts({
     failedRef.current = [];
     setIsProcessing(true);
     setProgress({ current: 0, total: totalFiles });
-    processedIdsRef.current = new Set();
+    completedIndicesRef.current = new Set();
     onProcessingStart?.();
 
     const formData = new FormData();
@@ -148,6 +175,8 @@ function BulkUploadReceipts({
       logger.debug(`Adding file ${file.name} to payload`);
       formData.append('files', file);
     });
+    formData.append('extraction_method', useMultimodal ? 'multimodal' : 'ocr');
+    logger.debug(`Extraction method: ${useMultimodal ? 'multimodal' : 'ocr'}`);
 
     try {
       const response = await fetch(
@@ -156,12 +185,13 @@ function BulkUploadReceipts({
       );
 
       if (!response.ok) {
-        const errorBody = await response.json().catch(() => null);
-        throw new AppError({
-          message: `Upload failed: ${response.status} ${response.statusText}`,
-          userMessage: errorBody?.user_message, // falls back to STATUS_MESSAGES via AppError
-          status: response.status,
-        });
+        throw response;
+        // const errorBody = await response.json().catch(() => null);
+        // throw new AppError({
+        //   message: `Upload failed: ${response.status} ${response.statusText}`,
+        //   userMessage: errorBody?.user_message, // falls back to STATUS_MESSAGES via AppError
+        //   status: response.status,
+        // });
       }
 
       const reader = response.body.getReader();
@@ -185,22 +215,7 @@ function BulkUploadReceipts({
               const jsonStr = trimmedLine.slice(6);
               const result = JSON.parse(jsonStr);
               logger.debug('Receipt result:', result);
-
-              if (result.receipt_id && !processedIdsRef.current.has(result.receipt_id)) {
-                processedIdsRef.current.add(result.receipt_id);
-
-                if (result.status === 'success') {
-                  onReceiptProcessed?.(result);
-                } else {
-                  failedRef.current.push(result);
-                  logger.warn(`Receipt ${result.receipt_id} failed to process:`, result);
-                }
-
-                setProgress((prev) => ({
-                  ...prev,
-                  current: Math.min(processedIdsRef.current.size, totalFiles),
-                }));
-              }
+              handleStreamEvent(result, totalFiles)
             } catch (parseError) {
               logger.error('Failed to parse SSE data:', parseError, trimmedLine);
             }
@@ -213,30 +228,27 @@ function BulkUploadReceipts({
         try {
           const jsonStr = buffer.trim().slice(6);
           const result = JSON.parse(jsonStr);
-          if (result.receipt_id && !processedIdsRef.current.has(result.receipt_id)) {
-            processedIdsRef.current.add(result.receipt_id);
-            if (result.status === 'success') {
-              onReceiptProcessed?.(result);
-            }
-          }
+          logger.debug('Receipt result:', result);
+          handleStreamEvent(result, totalFiles);
         } catch (parseError) {
           logger.error('Failed to parse final SSE data:', parseError);
         }
       }
 
       onProcessingComplete?.({
-        succeeded: processedIdsRef.current.size - failedRef.current.length,
+        succeeded: completedIndicesRef.current.size - failedRef.current.length,
         failed: failedRef.current.length,
         failures: failedRef.current,
       });
       clearFiles();
     } catch (error) {
       logger.error('Bulk upload error:', error);
-      onError?.(error.userMessage || error.message || 'Failed to process receipts');
+      const message = await getErrorMessage(error, 'Receipt upload')
+      onError?.(message);
     } finally {
       setIsProcessing(false);
       setProgress({ current: 0, total: 0 });
-      processedIdsRef.current = new Set();
+      completedIndicesRef.current = new Set();
     }
   };
 
@@ -282,15 +294,23 @@ function BulkUploadReceipts({
 
           {!compact && <FilePreview files={files} onRemove={removeFile} disabled={isProcessing} />}
 
-          <button
-            onClick={processReceipts}
-            disabled={isProcessing || files.length === 0}
-            className="btn-process"
-          >
-            {isProcessing
-              ? `Processing ${progress.current}/${progress.total}...`
-              : `Process ${files.length} Receipt${files.length !== 1 ? 's' : ''}`}
-          </button>
+          <div className="process-controls">
+            <Checkbox
+              checked={useMultimodal}
+              onChange={setUseMultimodal}
+              disabled={isProcessing}
+              label="AI extraction"
+            />
+            <button
+              onClick={processReceipts}
+              disabled={isProcessing || files.length === 0}
+              className="btn-process"
+            >
+              {isProcessing
+                ? `Processing ${progress.current}/${progress.total}...`
+                : `Process ${files.length} Receipt${files.length !== 1 ? 's' : ''}`}
+            </button>
+          </div>
         </div>
       )}
 

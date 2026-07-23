@@ -116,7 +116,7 @@ class ImageLoader:
 
             # Fallback to PIL
             logger.debug(f"OpenCV failed for {path.name}, trying PIL")
-            pil_image = Image.open(path)
+            pil_image = Image.open(path).convert('RGB')
             image = np.array(pil_image)
             logger.debug(f"Loaded image via PIL: {path.name} ({image.shape})")
             return [image]
@@ -151,7 +151,7 @@ class ImageLoader:
 
             images = []
             for i, pil_image in enumerate(pil_images):
-                image = np.array(pil_image)
+                image = np.array(pil_image.convert('RGB'))
                 images.append(image)
 
             logger.debug(

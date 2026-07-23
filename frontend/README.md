@@ -38,8 +38,9 @@ Defined in `App.jsx`.
 - **`/categorize`** — Review transactions, assign/edit party categorization;
   generate Cash-account counterparts from selected rows or enter cash
   transactions manually
-- **`/process-receipts`** — Bulk-upload receipt images, match to transactions,
-  or generate a Cash-account transaction directly from a receipt
+- **`/process-receipts`** — Bulk-upload receipt images with a choice of
+  extraction engine (OCR or AI/multimodal), match to transactions, or
+  generate a Cash-account transaction directly from a receipt
 
 ---
 
@@ -84,7 +85,13 @@ hide the URL/method details from the page.
 
 **Exception:** bulk receipt upload streams progress via SSE and talks to
 `fetch` directly (using the exported `API_BASE_URL`) rather than going
-through `apiCall`.
+through `apiCall`. The request is a `multipart/form-data` POST carrying
+the queued files plus an `extraction_method` field — `'ocr'` or
+`'multimodal'` — set by the "AI extraction" checkbox in
+`BulkUploadReceipts` (unchecked ⇒ `'ocr'`; the choice persists for the
+session, not per batch). The field is always sent explicitly; the backend
+defaults to OCR if it's absent. The SSE event stream is identical for both
+engines, so the stream-parsing code has no engine-specific branches.
 
 ### Response envelopes
 
@@ -131,6 +138,9 @@ response not OK          → ApiError (parsed)  ──┤
                                                 ├─→ page catch → inline or toast
 render throws            → ErrorBoundary       ─┘
 ```
+Extraction-engine failures (including multimodal/LLM API errors) surface as
+per-receipt failure events in the SSE stream, reported through
+`onProcessingComplete({failures})` — not as transport errors.
 
 ---
 

@@ -57,7 +57,8 @@ class ReceiptLoader:
     def process_file(
         self,
         file_path: Union[str, Path],
-        yield_pages: bool = False
+        yield_pages: bool = False,
+        apply_methods: Optional[bool] = True,
     ) -> Union[List[Receipt], Iterator[Receipt]]:
         """Load and pre-process a single receipt file.
 
@@ -77,10 +78,20 @@ class ReceiptLoader:
         file_path = Path(file_path)
 
         if yield_pages:
-            return self._process_file_lazy(file_path)
-        return list(self._process_file_lazy(file_path))
+            return self._process_file_lazy(
+                file_path,
+                apply_methods=apply_methods
+                )
+        return list(self._process_file_lazy(
+            file_path,
+            apply_methods=apply_methods
+            ))
 
-    def _process_file_lazy(self, file_path: Path) -> Iterator[Receipt]:
+    def _process_file_lazy(
+            self,
+            file_path: Path,
+            apply_methods: Optional[bool]=True
+            ) -> Iterator[Receipt]:
         """Process a single file lazily, yielding one `Receipt` per page.
 
         Loads all pages into memory via `ImageLoader`, then processes
@@ -110,7 +121,7 @@ class ReceiptLoader:
                     f"Processing image {i + 1}/{n_images}: {file_path.name}"
                 )
                 processor = ImageProcessor(img, config=self.processing_config)
-                processed_imgs = processor.process()
+                processed_imgs = processor.process(apply_methods=apply_methods)
                 processed += 1
 
                 yield Receipt(
@@ -136,7 +147,8 @@ class ReceiptLoader:
     def process_files(
         self,
         file_paths: Union[str, Path, List[Union[str, Path]]],
-        yield_pages: bool = False
+        yield_pages: bool = False,
+        apply_methods: Optional[bool] = True,
     ) -> Union[List[Receipt], Iterator[Receipt]]:
         """Load and pre-process one or more receipt files.
 
@@ -161,13 +173,22 @@ class ReceiptLoader:
         logger.info(f"Processing {n_files} receipt file(s)")
 
         if yield_pages:
-            return self._process_files_lazy(file_paths, n_files)
-        return list(self._process_files_lazy(file_paths, n_files))
+            return self._process_files_lazy(
+                file_paths,
+                n_files,
+                apply_methods=apply_methods
+                )
+        return list(self._process_files_lazy(
+            file_paths,
+            n_files,
+            apply_methods=apply_methods
+            ))
 
     def _process_files_lazy(
         self,
         file_paths: List[Union[str, Path]],
-        n_files: int
+        n_files: int,
+        apply_methods: Optional[bool]=True,
     ) -> Iterator[Receipt]:
         """Process multiple files lazily, yielding `Receipt` objects.
 
@@ -188,7 +209,10 @@ class ReceiptLoader:
             logger.debug(f"Processing file {i + 1}/{n_files}: {file_path.name}")
 
             try:
-                yield from self._process_file_lazy(file_path)
+                yield from self._process_file_lazy(
+                    file_path,
+                    apply_methods=apply_methods
+                    )
             except Exception as e:
                 logger.error(
                     f"Skipping file {i + 1}/{n_files} ({file_path.name}): {e}"

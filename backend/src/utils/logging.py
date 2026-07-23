@@ -19,12 +19,21 @@ Log output format (set by `setup_logging()`):
     2024-01-15 10:30:45 | INFO     | src.api.routes.accounts | [AccountRepository.get_all] Retrieved 5 accounts
 """
 
+import sys
 import inspect
 import logging
 from logging.handlers import RotatingFileHandler
 import functools
 import time
+from typing import Optional
 
+LEVELS = {
+    'DEBUG': logging.DEBUG,
+    'INFO': logging.INFO,
+    'WARNING': logging.WARNING,
+    'ERROR': logging.ERROR,
+    'CRITICAL': logging.CRITICAL,
+}
 
 class ContextLogger:
     """Logger wrapper that auto-prefixes messages with caller context.
@@ -43,7 +52,7 @@ class ContextLogger:
         Module function: [migrate]
     """
 
-    def __init__(self, module_name: str):
+    def __init__(self, module_name: str, level: str = 'DEBUG'):
         """Create a context logger for the given module.
 
         Args:
@@ -53,6 +62,7 @@ class ContextLogger:
         """
         self._logger = logging.getLogger(module_name)
         self._module = module_name
+        self._level = level.upper()
 
     def _get_context(self) -> str:
         """Walk the call stack to find the calling class and method.
@@ -90,7 +100,7 @@ class ContextLogger:
             del frame
 
     @staticmethod
-    def setup_logging():
+    def setup_logging(level: Optional[str] = 'DEBUG'):
         """Configure root logger with console and rotating file handlers.
 
         Call once at application startup. Sets up:
@@ -102,7 +112,7 @@ class ContextLogger:
             `timestamp | LEVEL | module.name | message`
         """
         # Console output
-        console = logging.StreamHandler()
+        console = logging.StreamHandler(sys.stdout)
         console.setFormatter(logging.Formatter(
             "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
         ))
@@ -114,9 +124,14 @@ class ContextLogger:
         file_handler.setFormatter(logging.Formatter(
             "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
         ))
-
+        if level:
+            if level.upper() in LEVELS:
+                logging_level = LEVELS[level.upper()]
+            else:
+                logging.warning(f"Invalid logging level '{level}', defaulting to DEBUG")
+                logging_level = logging.DEBUG
         logging.basicConfig(
-            level=logging.DEBUG,
+            level=logging_level,
             handlers=[console, file_handler]
         )
 
@@ -148,6 +163,12 @@ class ContextLogger:
         """
         self._logger.exception(f"{self._get_context()} {msg}", *args, **kwargs)
 
+    def set_level(self, level: str):
+        """Set the logger's level by name (e.g., 'DEBUG', 'INFO')."""
+        if level.upper() not in LEVELS:
+            raise ValueError(f"Invalid logging level: {level}")
+        self._logger.setLevel(LEVELS[level.upper()])
+        self._logger.info(f"Logging level set to {level.upper()}")
 
 def _extract_status_code(result) -> int:
     """Extract an HTTP status code from a Flask route return value.
