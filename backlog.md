@@ -306,7 +306,18 @@ Migrating the frontend from individual CSS files to Tailwind CSS v4. Note: this 
       text-* utilities drive the SVG stroke including on hover.
       Material green pair (#4caf50/#388e3c) matches TransactionRow's
       btn-save, so the transactions feature is internally consistent.
-
+- [x] `ReceiptViewModal.jsx` — migrated + CSS deleted. Clean file: fully
+      namespaced (receipt-view-*), generic-looking .btn-unlink/.btn-close
+      were scoped behind descendant selectors so no collisions. No dead
+      rules, no !important.
+      Colours already consistent with the rest of the app: #f44336/#d32f2f
+      matches TransactionRow btn-cancel; #e0e0e0/#d0d0d0 matches
+      M.BTN_SECONDARY.
+      NOTE: min-h-[200px] on the image region is doing double duty — it
+      overrides the flex automatic-minimum (enabling overflow-auto) as well
+      as setting a floor. Don't simplify.
+      h3 kept at font-bold (UA inherited) vs M.TITLE's font-semibold —
+      normalise if/when <Modal> is extracted.
 
 
 		
@@ -431,4 +442,10 @@ Migration order is leaf/page first, then shared components. Shared components fl
   on frequency (3 files); #2563eb (blue-600) wins on being an actual
   Tailwind value; #2196f3 wins on being the modal/action-button standard.
   Pick one.
+- **THREE modal implementations now catalogued**, with drifting dimensions:
+  modalClasses.js (500px / bg-black-50 / shadow-25 / px-6 / gap-3),
+  BulkEditModal (600px / bg-black-70 / shadow-6 / gap-4),
+  ReceiptViewModal (640px / bg-black-50+p-4 / shadow-40 / px-5 / gap-2).
+  A <Modal size="sm|md|lg"> component would collapse all three and settle
+  the arbitrary padding/shadow/title-weight drift.
 

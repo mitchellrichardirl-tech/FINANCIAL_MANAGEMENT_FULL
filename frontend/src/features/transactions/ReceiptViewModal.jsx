@@ -25,14 +25,11 @@ import { API_BASE_URL } from '@/lib/apiClient';
 import { unlinkReceipt } from './api';
 import { useToast } from '@/components/ToastContext';
 import { createLogger } from '@/lib/logger';
-import './ReceiptViewModal.css';
-
 /** @type {import('@/lib/logger').Logger} */
 const logger = createLogger('ReceiptViewModal');
-
 /** True if the filename looks like a PDF. */
 const isPdf = (filename) => !!filename && filename.toLowerCase().endsWith('.pdf');
-
+const FOOTER_BTN = 'cursor-pointer rounded px-4 py-2';
 export default function ReceiptViewModal({
   isOpen,
   onClose,
@@ -46,7 +43,6 @@ export default function ReceiptViewModal({
 }) {
   const { addToast } = useToast();
   const [isUnlinking, setIsUnlinking] = useState(false);
-
   // Close on Escape.
   useEffect(() => {
     if (!isOpen) return;
@@ -56,11 +52,8 @@ export default function ReceiptViewModal({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [isOpen, onClose]);
-
   if (!isOpen) return null;
-
   const imageUrl = `${API_BASE_URL}/receipts/${receiptId}/image`;
-
   const handleUnlink = async () => {
     setIsUnlinking(true);
     try {
@@ -78,22 +71,23 @@ export default function ReceiptViewModal({
       setIsUnlinking(false);
     }
   };
-
   const formatAmount = (a) => (a == null ? '—' : parseFloat(a).toFixed(2));
   const formatDate = (d) => (d ? new Date(d).toISOString().split('T')[0] : '—');
-
   return (
-    <div className="receipt-view-overlay" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50 p-4"
+      onClick={onClose}
+    >
       <div
-        className="receipt-view-modal"
+        className="flex max-h-[90vh] w-full max-w-[640px] flex-col rounded-lg bg-white shadow-[0_10px_40px_rgba(0,0,0,0.2)]"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
       >
-        <div className="receipt-view-header">
-          <h3>Receipt</h3>
+        <div className="flex items-center justify-between border-b border-[#eee] px-5 py-4">
+          <h3 className="text-lg font-bold">Receipt</h3>
           <button
-            className="receipt-view-close"
+            className="cursor-pointer text-[1.1rem] leading-none text-gray-500 hover:text-black"
             onClick={onClose}
             aria-label="Close"
             type="button"
@@ -101,41 +95,47 @@ export default function ReceiptViewModal({
             ✕
           </button>
         </div>
-
-        <div className="receipt-view-meta">
+        <div className="flex flex-wrap gap-6 border-b border-[#f0f0f0] px-5 py-3 text-sm">
           <div>
-            <span className="meta-label">Vendor:</span> {receiptVendor || '—'}
+            <span className="mr-1 text-[#888]">Vendor:</span> {receiptVendor || '—'}
           </div>
           <div>
-            <span className="meta-label">Amount:</span> {formatAmount(receiptAmount)}
+            <span className="mr-1 text-[#888]">Amount:</span> {formatAmount(receiptAmount)}
           </div>
           <div>
-            <span className="meta-label">Date:</span> {formatDate(receiptDate)}
+            <span className="mr-1 text-[#888]">Date:</span> {formatDate(receiptDate)}
           </div>
         </div>
-
-        <div className="receipt-view-image">
+        {/* min-h-[200px] is a floor AND the flex minimum — see note */}
+        <div className="flex min-h-[200px] flex-1 items-center justify-center overflow-auto bg-gray-50 px-5 py-4">
           {isPdf(receiptFilename) ? (
             <iframe
               src={imageUrl}
               title={receiptFilename || 'Receipt PDF'}
-              className="receipt-view-pdf"
+              className="h-[60vh] w-full"
             />
           ) : (
-            <img src={imageUrl} alt={receiptFilename || 'Receipt'} />
+            <img
+              src={imageUrl}
+              alt={receiptFilename || 'Receipt'}
+              className="max-h-[60vh] max-w-full object-contain"
+            />
           )}
         </div>
-
-        <div className="receipt-view-actions">
+        <div className="flex justify-end gap-2 border-t border-[#eee] px-5 py-4">
           <button
-            className="btn-unlink"
+            className={`${FOOTER_BTN} bg-[#f44336] text-white hover:bg-[#d32f2f] disabled:cursor-not-allowed disabled:opacity-60`}
             onClick={handleUnlink}
             disabled={isUnlinking}
             type="button"
           >
             {isUnlinking ? 'Unlinking…' : 'Unlink receipt'}
           </button>
-          <button className="btn-close" onClick={onClose} type="button">
+          <button
+            className={`${FOOTER_BTN} bg-[#e0e0e0] hover:bg-[#d0d0d0]`}
+            onClick={onClose}
+            type="button"
+          >
             Close
           </button>
         </div>
