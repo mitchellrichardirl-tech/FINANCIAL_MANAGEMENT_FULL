@@ -70,7 +70,7 @@ export default function ColumnMismatchPanel({ error, onDismiss, actions = [] }) 
           ×
         </button>
       </div>
-      <div className="my-4 grid grid-cols-2 gap-6 rounded bg-white p-3">
+      <div className="my-4 grid grid-cols-1 gap-6 rounded bg-white p-3 sm:grid-cols-2">
         <div>
           <h4 className={H4}>
             Expected by <em>{formatName || 'this format'}</em>

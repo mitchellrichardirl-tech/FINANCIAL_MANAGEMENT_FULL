@@ -177,6 +177,13 @@ Migrating the frontend from individual CSS files to Tailwind CSS v4. Note: this 
       Known limitation: warnings panel is shrink-0, so many expanded
       warnings squeeze the table. Cap with max-h + overflow-y-auto if it
       becomes a problem.
+- [x] `components/ColumnMismatchPanel.jsx` — migrated + CSS deleted.
+      SHARED component: importers are UploadStatement + StepPreview.
+      ⚠️ grep for `cmp-` / `column-mismatch-panel` before merging.
+      Notable: all 12 colors were already exact Tailwind palette values —
+      zero arbitrary values required.
+      <ul> needed NO Preflight restoration (list-style:none was already
+      the intent) — contrast with ProcessingWarningsPanel.
 		
 ## Next Steps (statementFormats)
 - [ ] Revisit `DeleteFormatDialog` `<ul>` + body spacing once `ConfirmDialog` is done.
@@ -231,3 +238,10 @@ Migration order is leaf/page first, then shared components. Shared components fl
   It's a guess at app chrome + padding + h1. If the nav/header height
   changes it'll silently drift. Longer-term fix is a proper app-shell flex
   layout so pages inherit height instead of computing it from 100vh.
+- **House palette = Tailwind defaults (decided):** ColumnMismatchPanel and
+  ParsedPreviewTable independently use the identical green-800/red-800 on
+  green-50/red-50 recipe for positive/negative status. Standardise on this.
+  Retire the Bootstrap hexes in ImportResult's amount cells + summary stats
+  (#28a745/#dc3545 → green-800/red-800). Keep Bootstrap only where it's UI
+  chrome not status (Stepper done-state, remove button) and promote those
+  to --color-success / --color-danger.
