@@ -169,7 +169,7 @@ export default function ImportResult({ result, onUploadAnother, showHeader = tru
                     </td>
                     <td
                       className={`${TD} w-[100px] whitespace-nowrap text-right font-semibold ${
-                        txn.amount > 0 ? 'text-[#28a745]' : 'text-[#dc3545]'
+                        txn.amount > 0 ? 'text-green-800' : 'text-red-800'
                       }`}
                     >
                       €{Math.abs(parseFloat(txn.amount)).toFixed(2)}
@@ -203,13 +203,13 @@ export default function ImportResult({ result, onUploadAnother, showHeader = tru
             <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-5">
               <div className="flex flex-col gap-1">
                 <span className="text-xs font-medium text-muted">Total Income</span>
-                <span className="text-lg font-bold text-[#28a745]">
+                <span className="text-lg font-bold text-green-800">
                   €{totalIncome.toFixed(2)}
                 </span>
               </div>
               <div className="flex flex-col gap-1">
                 <span className="text-xs font-medium text-muted">Total Expenses</span>
-                <span className="text-lg font-bold text-[#dc3545]">
+                <span className="text-lg font-bold text-red-800">
                   €{totalExpenses.toFixed(2)}
                 </span>
               </div>

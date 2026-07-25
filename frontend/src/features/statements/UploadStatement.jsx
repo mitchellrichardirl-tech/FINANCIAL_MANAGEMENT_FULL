@@ -217,7 +217,7 @@ export default function UploadStatement() {
                       <td className={TD_VAL}>{previewData.total_rows}</td>
                       <td className={TD_ACT}>
                         <button
-                          className={`${CONTROL_H} cursor-pointer rounded bg-[#dc3545] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#c82333]`}
+                          className={`${CONTROL_H} cursor-pointer rounded bg-red-800 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#c82333]`}
                           onClick={reset}
                         >
                           Remove File
@@ -280,7 +280,7 @@ export default function UploadStatement() {
                 {/* Import button */}
                 <div className="w-full lg:ml-auto lg:w-auto">
                   <button
-                    className={`${CONTROL_H} w-full cursor-pointer whitespace-nowrap rounded bg-[#28a745] px-6 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#218838] disabled:cursor-not-allowed disabled:bg-[#6c757d] disabled:opacity-60 lg:w-auto`}
+                    className={`${CONTROL_H} w-full cursor-pointer whitespace-nowrap rounded bg-green-800 px-6 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#218838] disabled:cursor-not-allowed disabled:bg-[#6c757d] disabled:opacity-60 lg:w-auto`}
                     onClick={handleImport}
                     disabled={!canImport}
                   >

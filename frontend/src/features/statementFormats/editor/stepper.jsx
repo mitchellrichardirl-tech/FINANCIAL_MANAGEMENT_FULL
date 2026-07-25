@@ -15,7 +15,7 @@ const INDEX_BASE =
   'inline-flex h-7 w-7 items-center justify-center rounded-full border-2 ' +
   'text-[13px] font-semibold';
 const INDEX_STATE = {
-  done: 'border-[#28a745] bg-[#28a745] text-white',
+  done: 'border-green-800 bg-green-800 text-white',
   current: 'border-[#007bff] bg-white text-[#007bff]',
   pending: 'border-gray-300 bg-white text-muted',
 };
@@ -47,7 +47,7 @@ export default function Stepper({ labels, current, maxReachable, onStepClick }) 
               'relative flex-1',
               // connector is suppressed on the last item
               isLast ? '' : CONNECTOR,
-              isLast ? '' : state === 'done' ? 'after:bg-[#28a745]' : 'after:bg-gray-300',
+              isLast ? '' : state === 'done' ? 'after:bg-green-800' : 'after:bg-gray-300',
             ].join(' ')}
           >
             <button
