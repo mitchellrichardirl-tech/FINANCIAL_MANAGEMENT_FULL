@@ -201,6 +201,17 @@ Migrating the frontend from individual CSS files to Tailwind CSS v4. Note: this 
       CSS. Browser-verify drag highlight still works.
       Note: the `.compact .dropzone-text` override (0.875rem vs 0.9rem)
       was imperceptible — collapsed to a single `text-sm`.
+- [x] `SelectableReceiptTable.jsx` — migrated + CSS deleted.
+      Row-state cascade (7 overlapping rules) replaced with explicit
+      `rowCls()` function. Thumbnail styling moved from descendant
+      selector to a wrapper div. Scrollbar same pattern as ProcessReceipts.
+- [x] `ImagePreview.jsx` — migrated + CSS deleted. Kept react-pdf vendor
+      CSS imports.
+      ⚠️ BEHAVIOUR CHANGE: the old CSS had `.image-preview-img`
+      (display:block) defined after `.hidden` (display:none), so
+      hiding-the-image-while-loading never worked. Now explicit
+      `isLoading ? 'hidden' : 'block'`. Image is genuinely hidden during
+      load — verify this is desired.
 		
 ## Next Steps (statementFormats)
 - [ ] Revisit `DeleteFormatDialog` `<ul>` + body spacing once `ConfirmDialog` is done.
@@ -266,3 +277,8 @@ Migration order is leaf/page first, then shared components. Shared components fl
   BulkUploadReceipts. BulkUploadReceipts also gives the hover shade
   (#0056b3). Promote both as --color-primary / --color-primary-hover when
   migrating Button; retire #4a90e2 and #2196f3/#1976d2.
+- **`.hidden` collision resolved:** ImagePreview.css defined its own
+  `.hidden { display: none }`, duplicating Tailwind's utility. Harmless
+  (identical declaration) but it masked a source-order bug. If other
+  components rely on a locally-defined `.hidden`, Tailwind's utility now
+  covers them — but check for the same block/hidden ordering trap.
