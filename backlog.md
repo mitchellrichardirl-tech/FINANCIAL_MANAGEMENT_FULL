@@ -301,6 +301,11 @@ Migrating the frontend from individual CSS files to Tailwind CSS v4. Note: this 
       form styling. Focus ring uses blue-600 (the file's own --color-primary
       fallback — a 6th primary blue, see notes).
       Delete CreateCategoryModal.css.
+- [x] `ReceiptIcon.jsx` — migrated + CSS deleted. Clean file: no dead rules,
+      no !important, no collisions. `currentColor` pattern preserved —
+      text-* utilities drive the SVG stroke including on hover.
+      Material green pair (#4caf50/#388e3c) matches TransactionRow's
+      btn-save, so the transactions feature is internally consistent.
 
 
 
