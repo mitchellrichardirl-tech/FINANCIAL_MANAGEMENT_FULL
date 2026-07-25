@@ -15,14 +15,13 @@
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
+// ⚠️ Third-party stylesheets — NOT part of the Tailwind migration, keep.
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
-import './ImagePreview.css';
 import { createLogger } from '@/lib/logger';
 import { parseApiError, isNotFound } from '@/lib/apiErrors';
 /** @type {import('@/lib/logger').Logger} */
 const logger = createLogger('ImagePreview');
-// Point pdf.js at a CDN-hosted worker matching the bundled version.
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 const ZOOM_MIN = 1;
 const ZOOM_MAX = 6;
@@ -30,6 +29,22 @@ const ZOOM_STEP = 0.25;
 /** Fraction of the viewport the content fills at zoom = 1 ("Fit"). */
 const MODAL_FIT = 0.92;
 const clampZoom = (z) => Math.min(Math.max(z, ZOOM_MIN), ZOOM_MAX);
+/* ── Reused class strings ──────────────────────────────────────────── */
+const BTN_BASE =
+  'cursor-pointer rounded border border-gray-300 bg-white transition-colors ' +
+  'hover:bg-[#f0f0f0] disabled:cursor-not-allowed disabled:opacity-50';
+/** Inline pagination + modal toolbar buttons. */
+const BTN_SM = `${BTN_BASE} px-2.5 py-[5px]`;
+/** Modal pagination buttons (larger hit area). */
+const BTN_MD = `${BTN_BASE} px-4 py-2`;
+const PAGINATION_ROW = 'mt-2.5 flex items-center justify-center gap-2.5';
+/**
+ * Safety net for react-pdf's canvas, which receives inline width/height.
+ * `!important` is genuinely required to beat inline styles.
+ * Targets the element rather than react-pdf's class names, which vary
+ * by version.
+ */
+const CANVAS_GUARD = '[&_canvas]:max-w-full! [&_canvas]:h-auto!';
 /**
  * Image/PDF preview with a zooming, pannable fullscreen modal.
  *
@@ -53,27 +68,14 @@ function ImagePreview({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  /** `'image' | 'pdf' | null` — discovered via `HEAD`. */
   const [fileType, setFileType] = useState(null);
-  /** Total page count reported by react-pdf on load. */
   const [numPages, setNumPages] = useState(null);
-  /** 1-based current page for multi-page PDFs. */
   const [pageNumber, setPageNumber] = useState(1);
-  /** Zoom multiplier in the modal. 1 = fit-to-screen. */
   const [zoom, setZoom] = useState(1);
-  /**
-   * Natural size of the current content — image pixels, or PDF page
-   * points at scale 1 (rotation applied). Everything else is derived
-   * from this, so if it's null we're flying blind and fall back to
-   * width-binding.
-   */
   const [natural, setNatural] = useState(null); // { w, h } | null
-  /** The inline frame, measured so PDFs can be fitted into it. */
   const frameRef = useRef(null);
   const [frameWidth, setFrameWidth] = useState(0);
-  /** The modal's scroll container — we drive scrollLeft/Top for panning. */
   const scrollRef = useRef(null);
-  /** Held PDFDocumentProxy, so we can query page sizes ourselves. */
   const pdfRef = useRef(null);
   // ── Viewport size (modal fitting depends on it) ────────────────────
   const [viewport, setViewport] = useState(() => ({
@@ -132,14 +134,6 @@ function ImagePreview({
       });
   }, [src]);
   // ── PDF page measurement ──────────────────────────────────────────
-  /**
-   * Ask pdf.js directly for a page's size at scale 1. Doing this from
-   * the PDFDocumentProxy rather than react-pdf's <Page onLoadSuccess>
-   * keeps us independent of react-pdf's callback shape across versions.
-   *
-   * @param {Object} pdf - PDFDocumentProxy
-   * @param {number} pageNum - 1-based page number
-   */
   const measurePdfPage = useCallback(async (pdf, pageNum) => {
     try {
       const page = await pdf.getPage(pageNum);
@@ -151,7 +145,6 @@ function ImagePreview({
       setNatural(null);
     }
   }, []);
-  /** @param {Object} pdf - PDFDocumentProxy */
   const onDocumentLoadSuccess = useCallback(
     (pdf) => {
       pdfRef.current = pdf;
@@ -166,8 +159,6 @@ function ImagePreview({
     setError('Failed to load PDF');
     setIsLoading(false);
   };
-  // Re-measure when paging. Deliberately does NOT null `natural` first,
-  // so the previous page's size is held until the new one resolves.
   useEffect(() => {
     if (fileType !== 'pdf') return;
     const pdf = pdfRef.current;
@@ -216,8 +207,6 @@ function ImagePreview({
     };
   }, [isModalOpen]);
   // ── Ctrl/⌘ + wheel to zoom ────────────────────────────────────────
-  // React attaches `wheel` passively at the root, so preventDefault() in
-  // an onWheel prop is ignored. This needs a native, non-passive listener.
   useEffect(() => {
     if (!isModalOpen) return;
     const el = scrollRef.current;
@@ -254,8 +243,6 @@ function ImagePreview({
     if (!d || !el) return;
     const dx = e.clientX - d.x;
     const dy = e.clientY - d.y;
-    // Only treat it as a drag past a small threshold, so a sloppy click
-    // still closes the modal.
     if (!didDragRef.current && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) {
       didDragRef.current = true;
       el.setPointerCapture?.(d.pointerId);
@@ -269,7 +256,6 @@ function ImagePreview({
     dragRef.current = null;
     setIsDragging(false);
   };
-  /** Backdrop click closes — unless the click concluded a pan gesture. */
   const onOverlayClick = () => {
     if (didDragRef.current) {
       didDragRef.current = false;
@@ -279,7 +265,11 @@ function ImagePreview({
   };
   // ── Early returns ─────────────────────────────────────────────────
   if (error) {
-    return <div className="image-preview-error">{error}</div>;
+    return (
+      <div className="rounded-lg bg-danger-bg p-5 text-center text-danger-text">
+        {error}
+      </div>
+    );
   }
   if (!previewUrl && !isLoading) {
     return null;
@@ -287,42 +277,43 @@ function ImagePreview({
   // ── Derived sizing ────────────────────────────────────────────────
   const showPagination = fileType === 'pdf' && numPages > 1;
   const maxH = parseInt(maxHeight, 10) || 400;
-  /**
-   * Inline: bind whichever axis runs out first, so content can never
-   * exceed the frame in either direction. `null` = not measured yet.
-   */
   const inlineFit = (() => {
     if (!frameWidth) return null;
     if (!natural) return { width: frameWidth };
     const aspect = natural.w / natural.h;
     return frameWidth / aspect <= maxH ? { width: frameWidth } : { height: maxH };
   })();
-  /**
-   * Modal: scale-to-fit at zoom 1, then multiply. These are explicit
-   * pixel sizes, so content genuinely grows past the viewport — which is
-   * what gives the scroll container something to scroll.
-   */
   const fitScale = natural
     ? Math.min((viewport.w * MODAL_FIT) / natural.w, (viewport.h * MODAL_FIT) / natural.h)
     : 1;
   const displayW = natural
     ? Math.round(natural.w * fitScale * zoom)
-    : Math.round(viewport.w * MODAL_FIT * zoom); // fallback: bind width only
+    : Math.round(viewport.w * MODAL_FIT * zoom);
   const displayH = natural ? Math.round(natural.h * fitScale * zoom) : 0;
   console.log('[IP] render', { fileType, zoom, natural, fitScale, displayW, displayH }); // TEMP
-  /** Only size the <img> once we know its natural dimensions. */
   const modalImgStyle = natural
     ? { width: `${displayW}px`, height: `${displayH}px` }
     : undefined;
+  // ── Derived cursors (replaces .is-zoomed / .is-dragging) ──────────
+  const modalCursor = isDragging
+    ? 'cursor-grabbing'
+    : zoom > 1
+      ? 'cursor-grab'
+      : 'cursor-zoom-out';
+  /** `.image-preview-modal.is-zoomed .ip-modal-figure { cursor: inherit }` */
+  const figureCursor = zoom > 1 ? 'cursor-[inherit]' : 'cursor-default';
+  const stopProp = (e) => e.stopPropagation();
   return (
     <>
       {/* ── Inline preview ── */}
       <div
         ref={frameRef}
-        className={`image-preview-container ${enableZoom ? 'zoomable' : ''}`}
+        className={`relative w-full overflow-hidden ${CANVAS_GUARD} ${
+          enableZoom ? 'cursor-zoom-in' : ''
+        }`}
         style={{ maxWidth }}
       >
-        {isLoading && <div className="image-preview-loading">Loading...</div>}
+        {isLoading && <div className="p-10 text-center text-muted">Loading...</div>}
         {fileType === 'image' && previewUrl && (
           <img
             src={previewUrl}
@@ -330,7 +321,12 @@ function ImagePreview({
             onLoad={handleImageLoad}
             onError={handleImageError}
             onClick={openModal}
-            className={`image-preview-img ${isLoading ? 'hidden' : ''}`}
+            /* Explicit block/hidden — avoids relying on utility ordering.
+               NOTE: the old CSS had `.image-preview-img { display: block }`
+               overriding `.hidden`, so hiding-while-loading never worked. */
+            className={`mx-auto h-auto max-w-full rounded-lg shadow-[0_2px_8px_rgba(0,0,0,0.1)] ${
+              isLoading ? 'hidden' : 'block'
+            }`}
             style={{ maxHeight }}
           />
         )}
@@ -350,8 +346,8 @@ function ImagePreview({
               />
             </Document>
             {showPagination && (
-              <div className="image-preview-pagination">
-                <button onClick={goToPrevPage} disabled={pageNumber <= 1} className="pagination-btn">
+              <div className={PAGINATION_ROW}>
+                <button onClick={goToPrevPage} disabled={pageNumber <= 1} className={BTN_SM}>
                   Previous
                 </button>
                 <span>
@@ -360,7 +356,7 @@ function ImagePreview({
                 <button
                   onClick={goToNextPage}
                   disabled={pageNumber >= numPages}
-                  className="pagination-btn"
+                  className={BTN_SM}
                 >
                   Next
                 </button>
@@ -371,7 +367,9 @@ function ImagePreview({
         {enableZoom && !isLoading && previewUrl && (
           <div
             onClick={openModal}
-            className={`image-preview-zoom-hint ${showPagination ? 'with-pagination' : ''}`}
+            className={`absolute right-2 cursor-pointer rounded bg-black/60 px-2 py-1 text-xs text-white ${
+              showPagination ? 'bottom-[50px]' : 'bottom-2'
+            }`}
           >
             Click to enlarge
           </div>
@@ -379,49 +377,72 @@ function ImagePreview({
       </div>
       {/* ── Fullscreen modal ── */}
       {isModalOpen && (
+        /* Scroll container. Plain block — NOT flex. Centring here would
+           trap overflow past the top/left edge. */
         <div
           ref={scrollRef}
-          className={`image-preview-modal ${zoom > 1 ? 'is-zoomed' : ''} ${
-            isDragging ? 'is-dragging' : ''
-          }`}
+          className={`fixed inset-0 z-[1000] overflow-auto overscroll-contain bg-black/90 ${modalCursor}`}
           onClick={onOverlayClick}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
         >
-          <div className="ip-modal-toolbar" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="fixed top-4 right-4 z-[1001] flex cursor-default items-center gap-2 rounded-md bg-black/55 px-2.5 py-1.5"
+            onClick={stopProp}
+          >
             <button
-              className="pagination-btn"
+              className={BTN_SM}
               onClick={() => setZoom((z) => clampZoom(z - ZOOM_STEP))}
               disabled={zoom <= ZOOM_MIN}
               aria-label="Zoom out"
             >
               −
             </button>
-            <button className="pagination-btn" onClick={() => setZoom(1)} disabled={zoom === 1}>
+            <button className={BTN_SM} onClick={() => setZoom(1)} disabled={zoom === 1}>
               Fit
             </button>
-            <span className="ip-zoom-level">{Math.round(zoom * 100)}%</span>
+            <span className="min-w-12 text-center text-[13px] tabular-nums text-white">
+              {Math.round(zoom * 100)}%
+            </span>
             <button
-              className="pagination-btn"
+              className={BTN_SM}
               onClick={() => setZoom((z) => clampZoom(z + ZOOM_STEP))}
               disabled={zoom >= ZOOM_MAX}
               aria-label="Zoom in"
             >
               +
             </button>
-            <button className="ip-modal-close" onClick={closeModal} aria-label="Close">
+            <button
+              className="cursor-pointer border-none bg-transparent px-1 text-[28px] leading-none text-white hover:text-gray-300"
+              onClick={closeModal}
+              aria-label="Close"
+            >
               ×
             </button>
           </div>
-          <div className="ip-modal-stage">
-            <div className="ip-modal-figure" onClick={(e) => e.stopPropagation()}>
+          {/* max(viewport, content) in both axes. Because the stage is never
+              smaller than its content, free space is never negative, so
+              centring here cannot push anything out of scroll reach. */}
+          <div className="flex min-h-full w-max min-w-full items-center justify-center">
+            {/*
+             * Explicit size/overflow resets are belt-and-braces against
+             * app-wide styles leaking in (a generic `.modal-content` with
+             * `width: 560px; overflow: hidden` previously clipped the
+             * zoomed canvas and killed all scrolling). Nothing in this
+             * subtree may be size-constrained or clipped.
+             */}
+            <div
+              className={`flex h-auto max-h-none w-auto max-w-none flex-col items-center overflow-visible px-6 pt-18 pb-6 ${figureCursor}`}
+              onClick={stopProp}
+            >
               {fileType === 'image' ? (
                 <img
                   src={previewUrl}
                   alt={alt}
-                  className="ip-modal-image"
+                  /* Size comes from JS — see modalImgStyle. */
+                  className="block max-h-none max-w-none select-none [-webkit-user-drag:none]"
                   onLoad={handleImageLoad}
                   onError={handleImageError}
                   style={modalImgStyle}
@@ -443,11 +464,11 @@ function ImagePreview({
                     />
                   </Document>
                   {showPagination && (
-                    <div className="image-preview-pagination ip-modal-pagination">
+                    <div className="mt-5 flex items-center justify-center gap-2.5 text-white">
                       <button
                         onClick={goToPrevPage}
                         disabled={pageNumber <= 1}
-                        className="pagination-btn"
+                        className={BTN_MD}
                       >
                         Previous
                       </button>
@@ -457,7 +478,7 @@ function ImagePreview({
                       <button
                         onClick={goToNextPage}
                         disabled={pageNumber >= numPages}
-                        className="pagination-btn"
+                        className={BTN_MD}
                       >
                         Next
                       </button>

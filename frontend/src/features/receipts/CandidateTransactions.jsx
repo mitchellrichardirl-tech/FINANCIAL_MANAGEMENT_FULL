@@ -6,98 +6,123 @@
  * Purely presentational — the parent supplies `transactions` (already
  * fetched) and handles persistence via `onSelectTransaction`.
  */
-
-import './CandidateTransactions.css';
-
+/* ── Reused class strings ──────────────────────────────────────────── */
+/** Cell bases omit text-align — each cell sets its own. */
+const TH =
+  'border-b-2 border-gray-300 p-2 text-[13px] font-semibold text-gray-600 md:p-3 md:text-sm';
+const TD = 'p-2 text-[13px] text-gray-800 md:px-3 md:py-2.5 md:text-sm';
+/** `.view-value` */
+const VIEW = 'block py-1';
+const BTN_SELECT =
+  'cursor-pointer rounded border-none bg-[#2196f3] px-2 py-1 text-xs text-white ' +
+  'transition-[background-color,opacity] hover:bg-[#1976d2] active:translate-y-px ' +
+  'disabled:cursor-not-allowed disabled:bg-[#6c757d] disabled:opacity-50 ' +
+  'disabled:hover:bg-[#6c757d] md:px-3 md:py-1.5 md:text-sm';
+const SCROLLBAR = [
+  '[&::-webkit-scrollbar]:w-2',
+  '[&::-webkit-scrollbar-track]:rounded [&::-webkit-scrollbar-track]:bg-gray-100',
+  '[&::-webkit-scrollbar-thumb]:rounded [&::-webkit-scrollbar-thumb]:bg-[#c1c1c1]',
+  '[&::-webkit-scrollbar-thumb:hover]:bg-[#a1a1a1]',
+].join(' ');
+/**
+ * Panel header — extracted because both the empty and populated
+ * branches render it identically.
+ */
+function PanelHeader({ count }) {
+  return (
+    <div className="mb-3 flex shrink-0 items-center justify-between">
+      <h2 className="text-[1.1rem] font-semibold text-gray-800">Candidate Transactions</h2>
+      <span className="text-sm text-muted">
+        {count} transaction{count !== 1 ? 's' : ''}
+      </span>
+    </div>
+  );
+}
 /**
  * Candidate transaction list for the receipt-linking panel.
- *
- * Rows show date, description, party, and amount. The row for
- * `linkedTransactionId` is highlighted and shows "✓ Linked" instead of
- * the button; all other buttons are disabled once a link exists.
  *
  * @component
  * @param {Object} props
  * @param {Array<Object>} props.transactions
- *        Candidate transactions. Each should have `id`,
- *        `transaction_date`, `description`, `party_name`, `amount`.
  * @param {(tx: Object) => void} props.onSelectTransaction
- *        Called with the chosen transaction when "Select" is clicked.
  * @param {?number} [props.linkedTransactionId]
- *        Id of the transaction already linked (if any). When set, the
- *        matching row shows "✓ Linked" and all other buttons disable.
  * @param {boolean} [props.disabled]
- *        Disable all "Select" buttons (e.g. while a save is in flight).
  * @returns {JSX.Element}
  */
-function CandidateTransactions({ transactions, onSelectTransaction, linkedTransactionId, disabled }) {
+function CandidateTransactions({
+  transactions,
+  onSelectTransaction,
+  linkedTransactionId,
+  disabled,
+}) {
   if (!transactions || transactions.length === 0) {
     return (
-      <div className="candidate-transactions-container">
-        <div className="table-header">
-          <h2>Candidate Transactions</h2>
-          <span className="transaction-count">0 transactions</span>
+      <div className="flex h-full min-h-0 flex-col overflow-hidden">
+        <PanelHeader count={0} />
+        <div className="p-5 text-center italic text-muted">
+          No candidate transactions available.
         </div>
-        <div className="no-transactions">No candidate transactions available.</div>
       </div>
     );
   }
-
   /** Format an ISO date as `YYYY-MM-DD`. */
   const formatDate = (dateString) => {
     if (!dateString) return '';
     return new Date(dateString).toISOString().split('T')[0];
   };
-
   /** Format an amount to two decimals. */
   const formatAmount = (amount) => {
     if (amount == null) return '';
     return parseFloat(amount).toFixed(2);
   };
-
   return (
-    <div className="candidate-transactions-container">
-      <div className="table-header">
-        <h2>Candidate Transactions</h2>
-        <span className="transaction-count">
-          {transactions.length} transaction{transactions.length !== 1 ? 's' : ''}
-        </span>
-      </div>
-      <div className="table-wrapper">
-        <table className="candidate-transactions-table">
-          <thead>
+    /* min-h-0 is what lets the table-wrapper actually scroll */
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <PanelHeader count={transactions.length} />
+      <div className={`min-h-0 flex-1 overflow-y-auto ${SCROLLBAR}`}>
+        <table className="w-full bg-white">
+          <thead className="sticky top-0 z-[1] bg-gray-50">
             <tr>
-              <th>Date</th>
-              <th>Description</th>
-              <th>Party</th>
-              <th className="amount-header">Amount</th>
-              <th className="actions-header">Select</th>
+              <th className={`${TH} text-left`}>Date</th>
+              <th className={`${TH} text-left`}>Description</th>
+              <th className={`${TH} text-left`}>Party</th>
+              <th className={`${TH} text-right`}>Amount</th>
+              <th className={`${TH} text-center`}>Select</th>
             </tr>
           </thead>
           <tbody>
             {transactions.map((tx) => {
               const isLinked = linkedTransactionId === tx.id;
-
               return (
-                <tr key={tx.id} className={`transaction-row ${isLinked ? 'linked' : ''}`}>
-                  <td className="date-cell">
-                    <span className="view-value">{formatDate(tx.transaction_date)}</span>
+                <tr
+                  key={tx.id}
+                  className={
+                    isLinked
+                      ? 'animate-highlight-pulse border-b border-gray-300 bg-[#d4edda] transition-colors duration-200 hover:bg-[#c3e6cb]'
+                      : 'animate-fade-in border-b border-gray-300 transition-colors duration-200 hover:bg-gray-50'
+                  }
+                >
+                  <td className={`${TD} min-w-[100px] truncate text-left font-medium`}>
+                    <span className={VIEW}>{formatDate(tx.transaction_date)}</span>
                   </td>
-                  <td className="description-cell">
-                    <span className="view-value">{tx.description}</span>
+                  {/* Description wraps instead of truncating */}
+                  <td className={`${TD} max-w-[150px] text-left leading-[1.4] md:max-w-[300px]`}>
+                    <span className={VIEW}>{tx.description}</span>
                   </td>
-                  <td className="party-cell">
-                    <span className="view-value">{tx.party_name || 'Unknown'}</span>
+                  <td className={`${TD} min-w-[120px] truncate text-left font-medium`}>
+                    <span className={VIEW}>{tx.party_name || 'Unknown'}</span>
                   </td>
-                  <td className="amount-cell">
-                    <span className="view-value">{formatAmount(tx.amount)}</span>
+                  <td className={`${TD} min-w-[80px] truncate text-right`}>
+                    <span className={VIEW}>{formatAmount(tx.amount)}</span>
                   </td>
-                  <td className="actions-cell">
+                  <td className={`${TD} truncate text-center`}>
                     {isLinked ? (
-                      <span className="linked-indicator">✓ Linked</span>
+                      <span className="inline-flex items-center gap-1 rounded bg-[#28a745] px-3 py-1.5 text-sm font-medium text-white">
+                        ✓ Linked
+                      </span>
                     ) : (
                       <button
-                        className="btn-select"
+                        className={BTN_SELECT}
                         onClick={() => onSelectTransaction && onSelectTransaction(tx)}
                         title="Select this transaction"
                         disabled={disabled || linkedTransactionId !== null}
@@ -115,5 +140,4 @@ function CandidateTransactions({ transactions, onSelectTransaction, linkedTransa
     </div>
   );
 }
-
 export default CandidateTransactions;

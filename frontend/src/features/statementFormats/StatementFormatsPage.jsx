@@ -13,14 +13,13 @@ import { useToast } from '@/components/ToastContext';
 import { useStatementFormats } from './useStatementFormats';
 import FormatList from './FormatList';
 import DeleteFormatDialog from './DeleteFormatDialog';
-import './StatementFormatsPage.css';
+// ❌ removed: import './StatementFormatsPage.css'
 
 export default function StatementFormatsPage() {
   const navigate = useNavigate();
   const { addToast } = useToast();
   const { formats, loading, error, refetch } = useStatementFormats();
 
-  // Format pending deletion — null when dialog closed.
   const [deleting, setDeleting] = useState(null);
 
   const { userFormats, builtinFormats } = useMemo(() => {
@@ -44,11 +43,16 @@ export default function StatementFormatsPage() {
   };
 
   return (
-    <div className="sfp">
-      <header className="sfp__header">
+
+    <div className="mx-auto h-full w-full max-w-[960px] overflow-y-auto px-5 pt-6 pb-15">
+
+      {/* .sfp__header */}
+      <header className="mb-7 flex items-start justify-between gap-5">
         <div>
-          <h1>Statement Formats</h1>
-          <p className="sfp__sub">
+          {/* .sfp__header h1 — preflight already zeroes margins */}
+          <h1 className="mb-1">Statement Formats</h1>
+          {/* .sfp__sub */}
+          <p className="m-0 text-sm text-gray-500">
             Define how each bank&apos;s CSV/Excel export maps to transactions.
           </p>
         </div>
@@ -57,10 +61,15 @@ export default function StatementFormatsPage() {
         </Button>
       </header>
 
-      {loading && <p className="sfp__status">Loading formats…</p>}
+      {/* .sfp__status */}
+      {loading && <p className="text-gray-500">Loading formats…</p>}
 
+      {/* .sfp__error */}
       {error && (
-        <div className="sfp__error" role="alert">
+        <div
+          className="flex items-center justify-between gap-4 rounded border border-danger-border bg-danger-bg px-4 py-3.5 text-danger-text"
+          role="alert"
+        >
           <p>{error.userMessage || error.message || 'Failed to load formats.'}</p>
           <Button variant="secondary" onClick={refetch}>Retry</Button>
         </div>

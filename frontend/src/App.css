@@ -1,3 +1,65 @@
+@import "tailwindcss";
+
+@import "./styles/Modal.css";
+
+:root {
+  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@theme {
+  --font-sans: 'Inter', sans-serif;
+
+  --color-danger:        #dc3545;
+  --color-danger-hover:  #c82333;
+  --color-danger-bg:     #f8d7da;
+  --color-danger-border: #f5c2c7;
+  --color-danger-text:   #842029;
+  --color-warning-bg:    #fff3cd;
+  --color-warning-border:#ffc107;
+  --color-warning-text:  #856404;
+  --color-warning-divider: #f0e0b0;
+  --color-warning-muted: #8a7a4a;
+  --color-warning-chip-border: #e8d9a8;
+  --color-muted:         #6c757d;
+
+  --color-info-bg:     #e7f3ff;
+  --color-info-border: #4a90e2;
+  --color-info-text:   #1c4d7a;
+
+  --color-success: #28a745;
+  --color-success-hover: #218838;
+  --color-primary: #007bff;
+  --color-primary-hover: #0056b3;
+
+  --animate-fade-in: fade-in 0.3s ease-in;
+  --animate-highlight-pulse: highlight-pulse 1s ease-in-out;
+
+  --spacing-page-body: calc(100vh - 200px);
+
+  @keyframes fade-in {
+    from { opacity: 0; transform: translateY(-5px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes highlight-pulse {
+    0%   { background-color: #28a745; }
+    50%  { background-color: #d4edda; }
+    100% { background-color: #d4edda; }
+  }
+}
+
+@layer base {
+  html, body, #root {
+    height: 100%;
+  }
+}
+
 html, body {
   margin: 0;
   padding: 0;
@@ -58,4 +120,18 @@ html, body {
   overflow: auto;
   height: 100%;
   box-sizing: border-box;
+}
+
+/* TODO delete this after migrating dropdown with select component */
+/* Dropdowns in edit mode */
+.transaction-row.editing select,
+.dropdown-with-create select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  font-family: inherit;
+  text-align: left;
+  background-color: white;
 }

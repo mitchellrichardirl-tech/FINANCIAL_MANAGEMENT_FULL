@@ -25,7 +25,6 @@ import HierarchyDetailPanel from './components/HierarchyDetailPanel';
 import EditNodeModal from './components/EditNodeModal';
 import { LEVEL_LABELS } from './constants';
 import { createLogger } from '@/lib/logger';
-import './CategoryHierarchyPage.css';
 
 /** @type {import('@/lib/logger').Logger} */
 const logger = createLogger('CategoryHierarchyPage');
@@ -193,13 +192,13 @@ export default function CategoryHierarchyPage() {
   }, [addToast]);
 
   return (
-    <div className="hierarchy-page">
-      <div className="hierarchy-page__header">
-        <h1>Category Hierarchy</h1>
+    <div className="flex flex-col h-full min-h-0">
+      <div className="pt-4 px-6 pb-2 border-b border-[#e0e0e0]">
+        <h1 className="m-0 text-2xl">Category Hierarchy</h1>
       </div>
 
-      <div className="hierarchy-page__body">
-        <aside className="hierarchy-page__sidebar">
+      <div className="flex-1 flex min-h-0 overflow-hidden">
+        <aside className="w-80 min-w-60 max-w-[400px] border-r border-[#e0e0e0] overflow-y-auto bg-[#fafafa]">
           <HierarchyTree
             tree={tree}
             loading={treeLoading}
@@ -208,7 +207,7 @@ export default function CategoryHierarchyPage() {
           />
         </aside>
 
-        <section className="hierarchy-page__detail">
+        <section className="flex-1 overflow-y-auto p-6 min-w-0">
           <HierarchyDetailPanel
             detail={detail}
             loading={detailLoading}

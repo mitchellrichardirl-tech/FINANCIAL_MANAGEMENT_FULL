@@ -6,7 +6,6 @@
  */
 
 import { AMOUNT_MODE, AMOUNT_MODE_LABELS } from '../../constants';
-import './AmountModeRadio.css';
 
 const DESCRIPTIONS = {
   [AMOUNT_MODE.SPLIT]:
@@ -25,32 +24,41 @@ const DESCRIPTIONS = {
  */
 export default function AmountModeRadio({ value, onChange }) {
   return (
-    <fieldset className="amount-mode-radio">
-      <legend className="amount-mode-radio__legend">
+    <fieldset className="m-0 mb-5 border-none p-0">
+      <legend className="mb-2.5 p-0 text-[13px] font-semibold text-gray-700">
         How does this bank report amounts?
       </legend>
-      {Object.values(AMOUNT_MODE).map((mode) => (
-        <label
-          key={mode}
-          className={`amount-mode-radio__option ${
-            value === mode ? 'amount-mode-radio__option--selected' : ''
-          }`}
-        >
-          <input
-            type="radio"
-            name="amountMode"
-            value={mode}
-            checked={value === mode}
-            onChange={() => onChange(mode)}
-          />
-          <div>
-            <div className="amount-mode-radio__label">
-              {AMOUNT_MODE_LABELS[mode]}
+
+      {Object.values(AMOUNT_MODE).map((mode) => {
+        const selected = value === mode;
+        return (
+          <label
+            key={mode}
+            className={`mb-2 flex cursor-pointer items-start gap-2.5 rounded border px-3.5 py-3 transition-colors duration-[120ms] ${
+              selected
+                ? 'border-blue-500 bg-[#f0f8ff]'
+                : 'border-gray-300 hover:border-gray-400'
+            }`}
+          >
+            <input
+              type="radio"
+              name="amountMode"
+              value={mode}
+              checked={selected}
+              onChange={() => onChange(mode)}
+              className="mt-0.5 shrink-0"
+            />
+            <div>
+              <div className="text-sm font-medium">
+                {AMOUNT_MODE_LABELS[mode]}
+              </div>
+              <div className="mt-0.5 text-xs text-gray-500">
+                {DESCRIPTIONS[mode]}
+              </div>
             </div>
-            <div className="amount-mode-radio__desc">{DESCRIPTIONS[mode]}</div>
-          </div>
-        </label>
-      ))}
+          </label>
+        );
+      })}
     </fieldset>
   );
 }

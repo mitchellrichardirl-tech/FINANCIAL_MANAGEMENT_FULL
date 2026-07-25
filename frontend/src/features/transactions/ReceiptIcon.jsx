@@ -11,13 +11,18 @@
  * @param {boolean} props.hasReceipt - Whether a receipt is linked.
  * @param {Function} [props.onClick] - Click handler (wired in commits 3/4).
  */
-
-import './ReceiptIcon.css';
-
+/** Shared chrome. Colour is supplied per-state and drives the SVG via `currentColor`. */
+const BASE =
+  'inline-flex cursor-pointer items-center justify-center rounded p-0.5 leading-none ' +
+  'transition-[transform,color] duration-150 hover:scale-115';
 export default function ReceiptIcon({ hasReceipt, onClick }) {
   return (
     <button
-      className={`receipt-icon ${hasReceipt ? 'receipt-icon--attached' : 'receipt-icon--empty'}`}
+      className={`${BASE} ${
+        hasReceipt
+          ? 'text-[#4caf50] hover:text-[#388e3c]'
+          : 'text-[#bdbdbd] hover:text-[#9e9e9e]'
+      }`}
       onClick={onClick}
       title={hasReceipt ? 'View receipt' : 'Attach receipt'}
       type="button"

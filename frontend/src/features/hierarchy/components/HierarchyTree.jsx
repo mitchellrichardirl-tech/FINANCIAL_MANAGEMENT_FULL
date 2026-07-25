@@ -12,7 +12,6 @@
  */
 
 import { useState, useEffect } from 'react';
-import './HierarchyTree.css';
 
 /**
  * Build a stable key for a node so we can track expanded state across
@@ -75,18 +74,12 @@ export default function HierarchyTree({ tree, loading, selected, onSelect }) {
   }, [tree]);
 
   // Auto-expand ancestors of the selected node so it's visible.
-  // Parties aren't in the tree, so for a party selection we expand to
-  // its parent type — but we don't have that info here; the detail
-  // panel's breadcrumb handles party navigation. For levels in the
-  // tree, expand the path.
   useEffect(() => {
     if (!selected || tree.length === 0) return;
     const path = findPath(tree, selected.level, selected.id);
     if (!path) return;
     setExpanded((prev) => {
       const next = new Set(prev);
-      // Expand every ancestor (everything except the last entry — the
-      // node itself). Also fine to include the node; harmless if leaf.
       for (const key of path) next.add(key);
       return next;
     });
@@ -102,15 +95,15 @@ export default function HierarchyTree({ tree, loading, selected, onSelect }) {
   };
 
   if (loading) {
-    return <div className="hierarchy-tree__status">Loading…</div>;
+    return <div className="p-4 text-[#888] text-[0.9rem]">Loading…</div>;
   }
 
   if (tree.length === 0) {
-    return <div className="hierarchy-tree__status">No categories yet.</div>;
+    return <div className="p-4 text-[#888] text-[0.9rem]">No categories yet.</div>;
   }
 
   return (
-    <div className="hierarchy-tree" role="tree">
+    <div className="text-[0.9rem] select-none py-2" role="tree">
       {tree.map((node) => (
         <TreeNode
           key={nodeKey(node.level, node.id)}
@@ -156,33 +149,40 @@ function TreeNode({ node, depth, expanded, selected, onToggle, onSelect }) {
   };
 
   return (
-    <div className="hierarchy-tree__node" role="treeitem" aria-expanded={hasChildren ? isExpanded : undefined}>
+    <div role="treeitem" aria-expanded={hasChildren ? isExpanded : undefined}>
       <div
-        className={
-          'hierarchy-tree__row' +
-          (isSelected ? ' hierarchy-tree__row--selected' : '') +
-          (isUnknown ? ' hierarchy-tree__row--unknown' : '')
-        }
+        className={[
+          'flex items-center gap-[0.35rem] py-1 pr-3 cursor-pointer border-l-[3px] whitespace-nowrap',
+          isSelected
+            ? 'bg-[#dceaf9] border-l-[#2b7de9] font-medium hover:bg-[#dceaf9]'
+            : 'border-transparent hover:bg-[#eef3f8]',
+        ].join(' ')}
         style={{ paddingLeft: `${0.5 + depth * 1.25}rem` }}
         onClick={handleLabelClick}
       >
         <span
-          className={
-            'hierarchy-tree__toggle' +
-            (hasChildren ? '' : ' hierarchy-tree__toggle--leaf')
-          }
+          className={[
+            'inline-flex w-4 justify-center text-[#888] text-xs shrink-0',
+            hasChildren ? 'hover:text-[#222]' : 'cursor-default opacity-40',
+          ].join(' ')}
           onClick={handleToggleClick}
           aria-hidden="true"
         >
           {hasChildren ? (isExpanded ? '▾' : '▸') : '·'}
         </span>
-        <span className="hierarchy-tree__label" title={node.name}>
+        <span
+          className={[
+            'truncate',
+            isUnknown ? 'text-[#888] italic' : '',
+          ].join(' ')}
+          title={node.name}
+        >
           {node.name}
         </span>
       </div>
 
       {hasChildren && isExpanded && (
-        <div className="hierarchy-tree__children" role="group">
+        <div role="group">
           {node.children.map((child) => (
             <TreeNode
               key={nodeKey(child.level, child.id)}

@@ -5,7 +5,6 @@
 
 import { CHILD_LEVEL_LABELS } from '../constants';
 import { formatCurrency, formatCount } from '../format';
-import './NodeStats.css';
 
 /**
  * @component
@@ -18,7 +17,7 @@ import './NodeStats.css';
  */
 export default function NodeStats({ transactionCount, totalValue, childCount, childLevel }) {
   return (
-    <div className="node-stats">
+    <div className="flex gap-4 mt-4 mb-6 flex-wrap">
       <StatCard label="Transactions" value={formatCount(transactionCount)} />
       <StatCard
         label="Total value"
@@ -34,12 +33,17 @@ export default function NodeStats({ transactionCount, totalValue, childCount, ch
 
 function StatCard({ label, value, modifier }) {
   return (
-    <div className="node-stats__card">
-      <div className="node-stats__label">{label}</div>
+    <div className="flex-1 min-w-[140px] px-[1.1rem] py-[0.9rem] bg-white border border-[#e0e0e0] rounded-lg">
+      <div className="text-xs uppercase tracking-[0.04em] text-[#888] mb-[0.35rem]">
+        {label}
+      </div>
       <div
-        className={
-          'node-stats__value' + (modifier ? ` node-stats__value--${modifier}` : '')
-        }
+        className={[
+          'text-[1.4rem] font-semibold',
+          modifier === 'negative' ? 'text-[#c0392b]' :
+          modifier === 'positive' ? 'text-[#27ae60]' :
+          'text-[#222]',
+        ].join(' ')}
       >
         {value}
       </div>

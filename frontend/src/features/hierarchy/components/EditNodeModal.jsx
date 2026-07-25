@@ -15,7 +15,6 @@ import { ErrorCode } from '@/lib/apiErrors';
 import { createLogger } from '@/lib/logger';
 import { LEVEL_LABELS } from '../constants';
 import '@/styles/Modal.css';
-import './EditNodeModal.css';
 
 /** @type {import('@/lib/logger').Logger} */
 const logger = createLogger('EditNodeModal');
@@ -93,15 +92,12 @@ export default function EditNodeModal({ isOpen, onClose, onSave, node, level }) 
     setError(null);
     setNameError(null);
 
-    // Build a minimal payload so we don't trip UNIQUE checks on
-    // unchanged fields.
     const payload = {};
     if (nameChanged) payload.name = trimmedName;
     if (descChanged) payload.description = trimmedDesc || null;
 
     try {
       await onSave(payload);
-      // Parent closes the modal on success.
     } catch (err) {
       logger.error('Error updating node:', err);
       const message = err.userMessage || err.message || 'Failed to update item';
@@ -136,7 +132,7 @@ export default function EditNodeModal({ isOpen, onClose, onSave, node, level }) 
 
   return createPortal(
     <div className="modal-backdrop" onClick={handleBackdropClick}>
-      <div className="modal-content edit-modal">
+      <div className="modal-content max-w-[480px]">
         <div className="modal-header">
           <h2>Edit {levelLabel}</h2>
           <button
