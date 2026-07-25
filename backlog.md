@@ -184,6 +184,16 @@ Migrating the frontend from individual CSS files to Tailwind CSS v4. Note: this 
       zero arbitrary values required.
       <ul> needed NO Preflight restoration (list-style:none was already
       the intent) — contrast with ProcessingWarningsPanel.
+
+### receipts feature
+- [x] `ProcessReceipts.jsx` — migrated. CSS deletion BLOCKED on
+      .radio-row / .radio-option / .checkbox-option — grep child
+      components before removing file.
+      Dead CSS dropped: .receipt-error, .receipt-success (unused),
+      .has-error (classname with no rule), .form-error/.field-error
+      (no rule in this file — replaced with Tailwind).
+      4 responsive grid breakpoints preserved via min-[] arbitrary values.
+      Webkit scrollbar kept via [&::-webkit-scrollbar*] arbitrary variants.
 		
 ## Next Steps (statementFormats)
 - [ ] Revisit `DeleteFormatDialog` `<ul>` + body spacing once `ConfirmDialog` is done.

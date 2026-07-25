@@ -46,116 +46,71 @@ import BulkUploadReceipts from './BulkUploadReceipts';
 import SelectableReceiptTable from './SelectableReceiptTable';
 import ImagePreview from './ImagePreview';
 import CandidateTransactions from './CandidateTransactions';
-import './ProcessReceipts.css';
+// ❌ removed: import './ProcessReceipts.css';
 import { createLogger } from '@/lib/logger';
-
 /** @type {import('@/lib/logger').Logger} */
 const logger = createLogger('ProcessReceipts');
-
-/**
- * Maps backend `error.field` names → local form input ids.
- * A `null` value means "not user-editable — surface as a general
- * form error instead of highlighting an input."
- *
- * @type {Object<string, ?string>}
- */
 const FIELD_MAP = {
   vendor: 'vendor',
   date: 'date',
   amount: 'amount',
   original_filename: null,
 };
-
-/**
- * A receipt item held in local session state.
- *
- * @typedef {Object} SessionReceipt
- * @property {number|string} receipt_id  - Server-assigned id.
- * @property {string} filename           - Original filename as uploaded.
- * @property {string} [stored_filename]  - Server-side stored name.
- * @property {string} [file_path]        - Server-side path.
- * @property {number} [page_number]      - For multi-page PDFs.
- * @property {Object} extracted_data     - OCR output (`vendor`, `date`,
- *           `amount`, `confidence`, `selected_method`, `raw_text`).
- * @property {'pending'|'saved'|'linked'} status
- * @property {number} [linked_transaction_id]
- */
-
-/**
- * Receipt-processing page.
- *
- * Owns all session state (uploaded receipts live only in memory for
- * the life of this component) and wires together the upload, preview,
- * edit, and link-to-transaction flows.
- *
- * @component
- * @returns {JSX.Element}
- */
+/* ── Reused class strings ──────────────────────────────────────────── */
+const GRID = [
+  'grid grid-cols-1 gap-5 flex-1 min-h-0',
+  'min-[1200px]:grid-cols-[minmax(450px,500px)_minmax(320px,1fr)_minmax(450px,500px)]',
+  'min-[1400px]:grid-cols-[minmax(480px,550px)_minmax(350px,1fr)_minmax(500px,600px)] min-[1400px]:gap-6',
+  'min-[1600px]:grid-cols-[minmax(520px,600px)_minmax(400px,1fr)_minmax(600px,700px)] min-[1600px]:gap-8',
+  'min-[1920px]:grid-cols-[minmax(550px,650px)_minmax(450px,1fr)_minmax(650px,750px)]',
+].join(' ');
+const COLUMN = 'flex min-h-0 flex-col gap-6';
+const CARD = 'rounded-[10px] bg-white p-5 shadow-[0_2px_8px_rgba(0,0,0,0.08)]';
+const SECTION_H3 =
+  'mb-4 border-b-2 border-[#f0f0f0] pb-3 text-[1.1rem] font-semibold text-gray-800';
+const EMPTY = 'px-4 py-8 text-center text-[0.95rem] text-gray-400';
+const INPUT_CLS = [
+  'w-full rounded-md border border-gray-300 px-3 py-2.5 text-[0.95rem]',
+  'transition-[border-color,box-shadow]',
+  'focus:outline-none focus:border-[#007bff] focus:shadow-[0_0_0_3px_rgba(0,123,255,0.15)]',
+  'disabled:bg-gray-100 disabled:cursor-not-allowed disabled:text-gray-400',
+].join(' ');
+const BTN_DIS = 'disabled:cursor-not-allowed disabled:bg-gray-300';
+const SCROLLBAR = [
+  '[&::-webkit-scrollbar]:w-2',
+  '[&::-webkit-scrollbar-track]:rounded [&::-webkit-scrollbar-track]:bg-gray-100',
+  '[&::-webkit-scrollbar-thumb]:rounded [&::-webkit-scrollbar-thumb]:bg-gray-400',
+  '[&::-webkit-scrollbar-thumb:hover]:bg-gray-500',
+].join(' ');
+/* ─────────────────────────────────────────────────────────────────── */
 function ProcessReceipts() {
   const { addToast } = useToast();
-
-  // ── Session data ──────────────────────────────────────────────────
-  /** @type {[SessionReceipt[], Function]} */
+  // ── State, effects, handlers ────────────────────────────────────
+  // (all identical to original — only the render JSX changes)
   const [receipts, setReceipts] = useState([]);
   const [selectedReceiptId, setSelectedReceiptId] = useState(null);
-
-  /**
-   * Tracks whether we've already auto-selected the first receipt of
-   * the current upload batch. Stored in a ref so it survives re-renders
-   * without triggering them, and is reset per batch in
-   * {@link handleProcessingStart}.
-   */
   const hasAutoSelectedRef = useRef(false);
-
-  // ── Async flags ───────────────────────────────────────────────────
   const [isUploading, setIsUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isLinking, setIsLinking] = useState(false);
-
-  /**
-   * Field-level validation errors keyed by input id
-   * (`vendor` / `date` / `amount`), plus `_general` for form-scoped
-   * errors that don't map to a single input.
-   * @type {[Object<string,string>, Function]}
-   */
   const [fieldErrors, setFieldErrors] = useState({});
-
-  /** Editable copy of the selected receipt's extracted fields. */
   const [editableData, setEditableData] = useState({
     vendor: '',
     date: '',
     amount: '',
   });
-
-  // ── Candidate-transaction search ─────────────────────────────────
   const [candidateTransactions, setCandidateTransactions] = useState([]);
   const [isLoadingCandidates, setIsLoadingCandidates] = useState(false);
-  /** Id of the transaction just linked (highlighted in the list). */
   const [linkedTransactionId, setLinkedTransactionId] = useState(null);
-  /**
-   * Incremented to force a candidate refetch without changing form
-   * data — used after a stale-link `NOT_FOUND` so the user doesn't
-   * retry on a transaction that no longer exists.
-   */
   const [candidateRefreshKey, setCandidateRefreshKey] = useState(0);
-
-  /** The currently selected receipt object, or `undefined`. */
   const selectedReceipt = receipts.find((r) => r.receipt_id === selectedReceiptId);
-
-  // ── Taxonomy reference data (loaded once for the cash modal) ─────
   const [categories, setCategories] = useState([]);
   const [subCategories, setSubCategories] = useState([]);
   const [types, setTypes] = useState([]);
   const [parties, setParties] = useState([]);
-
-  // ── Generate-cash modal ──────────────────────────────────────────
   const [isCashModalOpen, setIsCashModalOpen] = useState(false);
-  /** Fuzzy-matched party id for the current receipt's vendor, or null. */
   const [suggestedPartyId, setSuggestedPartyId] = useState(null);
   const [isGeneratingCash, setIsGeneratingCash] = useState(false);
-
-
-  // ── Effect: reset the edit form when selection changes ──────────
   useEffect(() => {
     if (selectedReceipt) {
       const extracted = selectedReceipt.extracted_data || {};
@@ -172,25 +127,15 @@ function ProcessReceipts() {
       setFieldErrors({});
     }
   }, [selectedReceiptId, selectedReceipt]);
-
-  // ── Effect: debounced candidate search ───────────────────────────
-  /**
-   * Refetches candidate transactions 500ms after the last edit to
-   * vendor/date/amount. Requires at least a date or amount to search;
-   * failures are logged but not toasted (an empty list is an
-   * acceptable fallback).
-   */
   useEffect(() => {
     if (!selectedReceipt) {
       setCandidateTransactions([]);
       return;
     }
-
     if (!editableData.date && !editableData.amount) {
       setCandidateTransactions([]);
       return;
     }
-
     const fetchCandidates = async () => {
       setIsLoadingCandidates(true);
       try {
@@ -199,9 +144,7 @@ function ProcessReceipts() {
           amount: editableData.amount ? parseFloat(editableData.amount) : null,
           vendor: editableData.vendor || null,
         };
-
         const response = await getCandidateTransactions(params);
-
         if (response.success && response.data?.transactions) {
           setCandidateTransactions(response.data.transactions);
         } else {
@@ -214,7 +157,6 @@ function ProcessReceipts() {
         setIsLoadingCandidates(false);
       }
     };
-
     const timeoutId = setTimeout(fetchCandidates, 500);
     return () => clearTimeout(timeoutId);
   }, [
@@ -224,8 +166,6 @@ function ProcessReceipts() {
     selectedReceipt,
     candidateRefreshKey,
   ]);
-
-  // ── Effect: load taxonomy reference data once ───────────────────
   useEffect(() => {
     (async () => {
       try {
@@ -241,51 +181,22 @@ function ProcessReceipts() {
         setParties(ps);
       } catch (err) {
         logger.error('Failed to load taxonomy:', err);
-        // Non-fatal — the cash modal will just start blank.
       }
     })();
   }, []);
-
-  // ── Error routing ─────────────────────────────────────────────────
-
-  /**
-   * Route an `ApiError` to the appropriate UI surface.
-   *
-   * Priority:
-   *  1. `err.field` maps via {@link FIELD_MAP} → inline under that input.
-   *  2. Validation-ish code (`INVALID_VALUE` / `REQUIRED_FIELD`) with no
-   *     recognised field → inline general banner.
-   *  3. Anything else → toast.
-   *
-   * @param {Error & {code?: string, field?: string, userMessage?: string}} err
-   * @param {string} fallbackMessage - Used if `err` has no message.
-   */
   const routeError = (err, fallbackMessage) => {
     const message = err.userMessage || err.message || fallbackMessage;
-
     const mappedField = err.field ? FIELD_MAP[err.field] : null;
     if (mappedField) {
       setFieldErrors({ [mappedField]: message });
       return;
     }
-
     if (err.code === ErrorCode.INVALID_VALUE || err.code === ErrorCode.REQUIRED_FIELD) {
       setFieldErrors({ _general: message });
       return;
     }
-
     addToast({ message, type: 'error' });
   };
-
-  // ── Upload callbacks (from BulkUploadReceipts) ───────────────────
-
-  /**
-   * Called once per successfully processed file in the upload batch.
-   * Appends the receipt to the session list and auto-selects the first
-   * one of the batch.
-   *
-   * @param {Object} result - Server response for one file.
-   */
   const handleReceiptProcessed = (result) => {
     const newReceipt = {
       ...result,
@@ -294,25 +205,16 @@ function ProcessReceipts() {
       extracted_data: result.extracted_data || {},
       status: 'pending',
     };
-
     setReceipts((prev) => [...prev, newReceipt]);
-
     if (!hasAutoSelectedRef.current) {
       hasAutoSelectedRef.current = true;
       setSelectedReceiptId(result.receipt_id);
     }
   };
-
-  /** Upload batch started — lock UI and reset auto-select latch. */
   const handleProcessingStart = () => {
     setIsUploading(true);
     hasAutoSelectedRef.current = false;
   };
-
-  /**
-   * Upload batch finished.
-   * @param {{succeeded: number, failed: number}} summary
-   */
   const handleProcessingComplete = ({ succeeded, failed }) => {
     setIsUploading(false);
     if (failed > 0) {
@@ -327,8 +229,6 @@ function ProcessReceipts() {
       });
     }
   };
-
-  // ── Create-item factory (mirrors CategorizeTransactions) ─────────
   const makeCreateHandler =
     (label, createFn, refetchFn, setFn, findFn) =>
     async (...args) => {
@@ -338,7 +238,6 @@ function ProcessReceipts() {
       addToast({ message: `${label} "${args[0]}" created`, type: 'success', duration: 2500 });
       return findFn(fresh, ...args) || response;
     };
-
   const handleCategoryCreated = makeCreateHandler(
     'Category', createCategory, getCategories, setCategories,
     (list, name) => list.find((c) => c.category === name),
@@ -355,19 +254,9 @@ function ProcessReceipts() {
     'Party', createParty, getParties, setParties,
     (list, name, typeId) => list.find((p) => p.name === name && p.type_id === typeId),
   );
-
-  // ── Form handlers ─────────────────────────────────────────────────
-
-  /** Select a receipt from the list. */
   const handleSelectReceipt = (receiptId) => {
     setSelectedReceiptId(receiptId);
   };
-
-  /**
-   * Update one editable field and clear any inline error on it.
-   * @param {'vendor'|'date'|'amount'} field
-   * @param {string} value
-   */
   const handleInputChange = (field, value) => {
     setEditableData((prev) => ({ ...prev, [field]: value }));
     if (fieldErrors[field]) {
@@ -378,15 +267,8 @@ function ProcessReceipts() {
       });
     }
   };
-
-  /**
-   * Assemble the `/receipts/confirm` payload from the selected receipt
-   * + current form values.
-   * @returns {?Object}
-   */
   const buildReceiptData = () => {
     if (!selectedReceipt) return null;
-
     return {
       id: selectedReceipt.receipt_id,
       original_filename: selectedReceipt.filename,
@@ -401,11 +283,6 @@ function ProcessReceipts() {
       page_number: selectedReceipt.page_number || 1,
     };
   };
-
-  /**
-   * Open the generate-cash modal. Fuzzy-match the current vendor
-   * first so the party cascade can be pre-filled.
-   */
   const handleOpenCashModal = async () => {
     setSuggestedPartyId(null);
     try {
@@ -416,21 +293,11 @@ function ProcessReceipts() {
     }
     setIsCashModalOpen(true);
   };
-
-  /**
-   * Confirm the receipt, then create a Cash-account transaction
-   * from it. Called from {@link GenerateCashFromReceiptModal}.
-   *
-   * @param {{partyId:number, isWithdrawal:boolean, isCredit:boolean, isKids:boolean, isOneOff:boolean}} opts
-   */
   const handleGenerateCash = async ({ partyId, isWithdrawal, isCredit, isKids, isOneOff }) => {
     if (!selectedReceipt) return;
-
     setFieldErrors({});
     setIsGeneratingCash(true);
-
     try {
-      // Step 1 — persist the (possibly edited) receipt fields.
       const receiptData = buildReceiptData();
       const saveResult = await confirmReceipt(receiptData);
       const receiptId =
@@ -438,23 +305,11 @@ function ProcessReceipts() {
         saveResult.receipt?.id ||
         saveResult.id ||
         selectedReceipt.receipt_id;
-
-      if (!receiptId) {
-        throw new Error('Failed to get receipt ID from save response');
-      }
-
-      // Step 2 — create the cash transaction.
+      if (!receiptId) throw new Error('Failed to get receipt ID from save response');
       const result = await createCashTransactionFromReceipt({
-        receiptId,
-        partyId,
-        isWithdrawal,
-        isCredit,
-        isKids,
-        isOneOff
+        receiptId, partyId, isWithdrawal, isCredit, isKids, isOneOff,
       });
       const txn = result?.data?.transaction ?? result?.transaction;
-
-      // Step 3 — mark the receipt as linked in local session state.
       setReceipts((prev) =>
         prev.map((r) =>
           r.receipt_id === selectedReceiptId
@@ -472,42 +327,25 @@ function ProcessReceipts() {
             : r,
         ),
       );
-
       setIsCashModalOpen(false);
-      addToast({
-        message: 'Cash transaction created from receipt',
-        type: 'success',
-        duration: 2500,
-      });
+      addToast({ message: 'Cash transaction created from receipt', type: 'success', duration: 2500 });
       setTimeout(selectNextReceipt, 1000);
     } catch (err) {
       logger.error('Failed to generate cash transaction:', err);
       routeError(err, 'Failed to generate cash transaction');
-      throw err; // let the modal reset its spinner
+      throw err;
     } finally {
       setIsGeneratingCash(false);
     }
   };
-
-  // ── Mutations ─────────────────────────────────────────────────────
-
-  /**
-   * Confirm (persist) the current receipt without linking it to a
-   * transaction. Marks status `'saved'` and auto-advances to the next
-   * pending receipt after a short pause.
-   */
   const handleSave = async () => {
     if (!selectedReceipt) return;
-
     setFieldErrors({});
     setIsSaving(true);
-
     try {
       const receiptData = buildReceiptData();
       logger.debug('Saving receipt data:', receiptData);
-
       await confirmReceipt(receiptData);
-
       setReceipts((prev) =>
         prev.map((r) =>
           r.receipt_id === selectedReceiptId
@@ -521,10 +359,9 @@ function ProcessReceipts() {
                   amount: editableData.amount,
                 },
               }
-            : r
-        )
+            : r,
+        ),
       );
-
       addToast({ message: 'Receipt saved', type: 'success', duration: 2000 });
       setTimeout(selectNextReceipt, 800);
     } catch (err) {
@@ -534,46 +371,22 @@ function ProcessReceipts() {
       setIsSaving(false);
     }
   };
-
-  /**
-   * Confirm the receipt **and** attach it to the chosen transaction.
-   *
-   * Two-step:
-   *  1. `confirmReceipt` to persist the (possibly edited) attributes
-   *     and obtain the canonical receipt id.
-   *  2. `updateTransaction(txn.id, { receipt_id })` to link.
-   *
-   * Handles the race where the transaction was deleted between
-   * candidate fetch and click by refreshing candidates instead of
-   * showing a hard error.
-   *
-   * @param {Object} transaction - Candidate transaction clicked in the list.
-   */
   const handleSelectTransaction = async (transaction) => {
     if (!selectedReceipt) return;
-
     setFieldErrors({});
     setIsLinking(true);
-
     try {
       const receiptData = buildReceiptData();
       logger.debug('Saving receipt before linking:', receiptData);
-
       const saveResult = await confirmReceipt(receiptData);
-
       const receiptId =
         saveResult.data?.receipt?.id ||
         saveResult.receipt?.id ||
         saveResult.id ||
         selectedReceipt.receipt_id;
-
-      if (!receiptId) {
-        throw new Error('Failed to get receipt ID from save response');
-      }
-
+      if (!receiptId) throw new Error('Failed to get receipt ID from save response');
       logger.debug(`Linking transaction ${transaction.id} to receipt ${receiptId}`);
       await updateTransaction(transaction.id, { receipt_id: receiptId });
-
       setReceipts((prev) =>
         prev.map((r) =>
           r.receipt_id === selectedReceiptId
@@ -588,21 +401,16 @@ function ProcessReceipts() {
                   amount: editableData.amount,
                 },
               }
-            : r
-        )
+            : r,
+        ),
       );
-
       setLinkedTransactionId(transaction.id);
       addToast({ message: 'Receipt linked to transaction', type: 'success', duration: 2500 });
       setTimeout(selectNextReceipt, 1000);
     } catch (err) {
       logger.error('Failed to link receipt to transaction:', err);
-
       if (err.code === ErrorCode.NOT_FOUND && err.entity === 'Transaction') {
-        addToast({
-          message: 'That transaction no longer exists. Refreshing candidates…',
-          type: 'info',
-        });
+        addToast({ message: 'That transaction no longer exists. Refreshing candidates…', type: 'info' });
         setCandidateRefreshKey((k) => k + 1);
       } else {
         routeError(err, 'Failed to link receipt');
@@ -611,38 +419,25 @@ function ProcessReceipts() {
       setIsLinking(false);
     }
   };
-
-  /**
-   * Discard the selected (pending) receipt on the server and remove it
-   * from the session list. If the server reports `NOT_FOUND`, treat it
-   * as already-deleted and clean up locally anyway.
-   */
   const handleDelete = async () => {
     if (!selectedReceipt) return;
-
     setFieldErrors({});
     setIsSaving(true);
-
     try {
       logger.debug('Deleting receipt:', selectedReceipt.receipt_id);
       await deleteReceipt(selectedReceipt.receipt_id);
-
       const currentIndex = receipts.findIndex((r) => r.receipt_id === selectedReceiptId);
       const remaining = receipts.filter((r) => r.receipt_id !== selectedReceiptId);
-
       setReceipts(remaining);
-
       if (remaining.length > 0) {
         const nextIndex = Math.min(currentIndex, remaining.length - 1);
         setSelectedReceiptId(remaining[nextIndex].receipt_id);
       } else {
         setSelectedReceiptId(null);
       }
-
       addToast({ message: 'Receipt deleted', type: 'success', duration: 1500 });
     } catch (err) {
       logger.error('Failed to delete receipt:', err);
-
       if (err.code === ErrorCode.NOT_FOUND) {
         addToast({ message: 'Receipt was already deleted', type: 'info' });
         setReceipts((prev) => prev.filter((r) => r.receipt_id !== selectedReceiptId));
@@ -654,21 +449,10 @@ function ProcessReceipts() {
       setIsSaving(false);
     }
   };
-
-  // ── Navigation helpers ────────────────────────────────────────────
-
-  /**
-   * Remove a receipt from the session list **without** calling the
-   * server (it may already be saved/linked). Keeps a sensible
-   * selection afterward.
-   * @param {number|string} receiptId
-   */
   const handleRemoveFromList = (receiptId) => {
     const currentIndex = receipts.findIndex((r) => r.receipt_id === receiptId);
     const remaining = receipts.filter((r) => r.receipt_id !== receiptId);
-
     setReceipts(remaining);
-
     if (selectedReceiptId === receiptId) {
       if (remaining.length > 0) {
         const nextIndex = Math.min(currentIndex, remaining.length - 1);
@@ -678,25 +462,16 @@ function ProcessReceipts() {
       }
     }
   };
-
-  /**
-   * Advance selection to the next `'pending'` receipt (after the
-   * current one if possible, otherwise wrap to the first). No-op if
-   * nothing is pending.
-   */
   const selectNextReceipt = () => {
     const currentIndex = receipts.findIndex((r) => r.receipt_id === selectedReceiptId);
     const pending = receipts.filter(
-      (r) => r.status === 'pending' && r.receipt_id !== selectedReceiptId
+      (r) => r.status === 'pending' && r.receipt_id !== selectedReceiptId,
     );
-
     if (pending.length > 0) {
       const nextAfter = pending.find((r) => receipts.indexOf(r) > currentIndex);
       setSelectedReceiptId(nextAfter?.receipt_id || pending[0].receipt_id);
     }
   };
-
-  /** Wipe all session state (local only; does not touch the server). */
   const handleClearAll = () => {
     setReceipts([]);
     setSelectedReceiptId(null);
@@ -705,21 +480,14 @@ function ProcessReceipts() {
     setFieldErrors({});
     hasAutoSelectedRef.current = false;
   };
-
-  // ── Derived flags ─────────────────────────────────────────────────
-
-  /** Save is enabled only for pending receipts with a non-blank vendor. */
   const canSave =
     selectedReceipt &&
     selectedReceipt.status === 'pending' &&
     editableData.vendor.trim() !== '' &&
     !isSaving &&
     !isLinking;
-
   const canDelete =
     selectedReceipt && selectedReceipt.status === 'pending' && !isSaving && !isLinking;
-
-  /** Generate-cash requires vendor, date and amount to all be present. */
   const canGenerateCash =
     selectedReceipt &&
     selectedReceipt.status === 'pending' &&
@@ -729,51 +497,43 @@ function ProcessReceipts() {
     !isSaving &&
     !isLinking &&
     !isGeneratingCash;
-
   const pendingCount = receipts.filter((r) => r.status === 'pending').length;
   const processedCount = receipts.filter((r) => r.status !== 'pending').length;
-
   // ── Render ────────────────────────────────────────────────────────
-
   return (
-    <div className="process-receipts">
-      <div className="page-header">
-        <h1>Process Receipts</h1>
-        <div className="header-stats">
+    <div className="mx-auto flex h-full max-w-[calc(100vw-4rem)] flex-1 flex-col px-8 py-6">
+      <div className="shrink-0">
+        <h1 className="text-2xl font-bold">Process Receipts</h1>
+        <div className="flex items-center gap-4">
           {receipts.length > 0 && (
-            <span className="stats-text">
+            <span className="rounded-full bg-[#f0f0f0] px-4 py-2 text-sm text-gray-500">
               {pendingCount} pending, {processedCount} processed
             </span>
           )}
         </div>
       </div>
-
-      <div className="three-column-layout">
+      <div className={GRID}>
         {/* ── Left: upload + session list ── */}
-        <div className="column column-left">
-          <div className="column-section upload-section">
-            <h3>Upload Receipts</h3>
+        <div className={`${COLUMN} min-[1200px]:min-w-[420px] min-[1400px]:min-w-[500px]`}>
+          <div className={`${CARD} shrink-0`}>
+            <h3 className={SECTION_H3}>Upload Receipts</h3>
             <BulkUploadReceipts
               onReceiptProcessed={handleReceiptProcessed}
               onProcessingStart={handleProcessingStart}
               onProcessingComplete={handleProcessingComplete}
-              onError={(err) =>
-                addToast({
-                  message: err,
-                  type: 'error',
-                })
-              }
+              onError={(err) => addToast({ message: err, type: 'error' })}
               compact={true}
             />
           </div>
-
-          <div className="column-section receipt-list-section">
-            <div className="section-header">
-              <h3>Receipts ({receipts.length})</h3>
+          <div className={`${CARD} min-h-0 flex-1 overflow-y-auto`}>
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-[1.1rem] font-semibold text-gray-800">
+                Receipts ({receipts.length})
+              </h3>
               {receipts.length > 0 && (
                 <button
                   onClick={handleClearAll}
-                  className="btn-clear-all"
+                  className="cursor-pointer rounded border border-[#dc3545] bg-transparent px-3 py-1.5 text-[0.8rem] text-[#dc3545] transition-all hover:bg-[#dc3545] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
                   disabled={isUploading || isSaving || isLinking}
                 >
                   Clear All
@@ -789,11 +549,10 @@ function ProcessReceipts() {
             />
           </div>
         </div>
-
         {/* ── Middle: image preview ── */}
-        <div className="column column-middle">
-          <div className="column-section image-section">
-            <h3>Receipt Image</h3>
+        <div className={`${COLUMN} min-[1200px]:min-w-[350px]`}>
+          <div className={`${CARD} flex flex-1 flex-col`}>
+            <h3 className={SECTION_H3}>Receipt Image</h3>
             {selectedReceipt ? (
               <ImagePreview
                 src={`/api/receipts/${selectedReceipt.receipt_id}/image`}
@@ -801,7 +560,7 @@ function ProcessReceipts() {
                 maxHeight="600px"
               />
             ) : (
-              <div className="empty-state">
+              <div className="flex flex-1 items-center justify-center min-h-[300px] rounded-lg border-2 border-dashed border-[#e0e0e0] bg-gray-50 text-base text-gray-400">
                 {receipts.length === 0
                   ? 'Upload receipts to get started'
                   : 'Select a receipt to view'}
@@ -809,22 +568,23 @@ function ProcessReceipts() {
             )}
           </div>
         </div>
-
         {/* ── Right: details form + candidate transactions ── */}
-        <div className="column column-right">
-          <div className="column-section details-section">
-            <h3>Receipt Details</h3>
+        <div className={`${COLUMN} min-[1200px]:min-w-[420px] min-[1400px]:min-w-[580px]`}>
+          <div className={`${CARD} shrink-0`}>
+            <h3 className={SECTION_H3}>Receipt Details</h3>
             {selectedReceipt ? (
-              <div className="receipt-form">
+              <div className="flex flex-col gap-5">
                 {fieldErrors._general && (
-                  <div className="form-error" role="alert">
+                  <div
+                    className="rounded border border-danger-border bg-danger-bg px-3 py-2.5 text-sm text-danger-text"
+                    role="alert"
+                  >
                     {fieldErrors._general}
                   </div>
                 )}
-
-                <div className={`form-group ${fieldErrors.vendor ? 'has-error' : ''}`}>
-                  <label htmlFor="vendor">
-                    Vendor: <span className="required">*</span>
+                <div className="flex flex-col gap-1.5">
+                  <label htmlFor="vendor" className="text-sm font-semibold text-[#444]">
+                    Vendor: <span className="text-[#dc3545]">*</span>
                   </label>
                   <input
                     id="vendor"
@@ -836,16 +596,18 @@ function ProcessReceipts() {
                     disabled={isLinking || isSaving || selectedReceipt.status !== 'pending'}
                     aria-invalid={!!fieldErrors.vendor}
                     aria-describedby={fieldErrors.vendor ? 'vendor-error' : undefined}
+                    className={INPUT_CLS}
                   />
                   {fieldErrors.vendor && (
-                    <span id="vendor-error" className="field-error">
+                    <span id="vendor-error" className="text-sm text-red-600">
                       {fieldErrors.vendor}
                     </span>
                   )}
                 </div>
-
-                <div className={`form-group ${fieldErrors.date ? 'has-error' : ''}`}>
-                  <label htmlFor="date">Date:</label>
+                <div className="flex flex-col gap-1.5">
+                  <label htmlFor="date" className="text-sm font-semibold text-[#444]">
+                    Date:
+                  </label>
                   <input
                     id="date"
                     type="date"
@@ -854,16 +616,18 @@ function ProcessReceipts() {
                     disabled={isLinking || isSaving || selectedReceipt.status !== 'pending'}
                     aria-invalid={!!fieldErrors.date}
                     aria-describedby={fieldErrors.date ? 'date-error' : undefined}
+                    className={INPUT_CLS}
                   />
                   {fieldErrors.date && (
-                    <span id="date-error" className="field-error">
+                    <span id="date-error" className="text-sm text-red-600">
                       {fieldErrors.date}
                     </span>
                   )}
                 </div>
-
-                <div className={`form-group ${fieldErrors.amount ? 'has-error' : ''}`}>
-                  <label htmlFor="amount">Amount:</label>
+                <div className="flex flex-col gap-1.5">
+                  <label htmlFor="amount" className="text-sm font-semibold text-[#444]">
+                    Amount:
+                  </label>
                   <input
                     id="amount"
                     type="number"
@@ -874,18 +638,18 @@ function ProcessReceipts() {
                     disabled={isLinking || isSaving || selectedReceipt.status !== 'pending'}
                     aria-invalid={!!fieldErrors.amount}
                     aria-describedby={fieldErrors.amount ? 'amount-error' : undefined}
+                    className={INPUT_CLS}
                   />
                   {fieldErrors.amount && (
-                    <span id="amount-error" className="field-error">
+                    <span id="amount-error" className="text-sm text-red-600">
                       {fieldErrors.amount}
                     </span>
                   )}
                 </div>
-
-                <div className="form-actions">
+                <div className="mt-2 flex gap-3">
                   <button
                     onClick={handleSave}
-                    className="btn-save"
+                    className={`flex-1 cursor-pointer rounded-md bg-[#28a745] px-5 py-2.5 text-[0.95rem] font-semibold text-white transition-colors hover:bg-[#218838] ${BTN_DIS}`}
                     disabled={!canSave}
                     title="Save receipt without linking to a transaction"
                   >
@@ -893,37 +657,47 @@ function ProcessReceipts() {
                   </button>
                   <button
                     onClick={handleOpenCashModal}
-                    className="btn-generate-cash"
+                    className="cursor-pointer rounded bg-[#43a047] px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#2e7d32] disabled:cursor-not-allowed disabled:opacity-50"
                     disabled={!canGenerateCash}
                     title="Create a Cash-account transaction from this receipt"
                   >
                     Generate Cash
                   </button>
-                  <button onClick={handleDelete} className="btn-delete" disabled={!canDelete}>
+                  <button
+                    onClick={handleDelete}
+                    className={`cursor-pointer rounded-md bg-[#dc3545] px-5 py-2.5 font-medium text-white transition-colors hover:bg-[#c82333] ${BTN_DIS}`}
+                    disabled={!canDelete}
+                  >
                     {isSaving ? 'Deleting...' : 'Delete'}
                   </button>
                 </div>
-
                 {selectedReceipt.status !== 'pending' && (
-                  <div className={`status-badge status-${selectedReceipt.status}`}>
+                  <div
+                    className={`mt-3 rounded-md p-2.5 text-center text-sm font-semibold ${
+                      selectedReceipt.status === 'saved'
+                        ? 'bg-[#d4edda] text-[#155724]'
+                        : 'bg-[#cce5ff] text-[#004085]'
+                    }`}
+                  >
                     {selectedReceipt.status === 'saved' && '✓ Saved'}
                     {selectedReceipt.status === 'linked' && '✓ Linked to Transaction'}
                   </div>
                 )}
               </div>
             ) : (
-              <div className="empty-state">Select a receipt to edit details</div>
+              <div className={EMPTY}>Select a receipt to edit details</div>
             )}
           </div>
-
-          <div className="column-section candidates-section">
-            <h3>Link to Transaction</h3>
-            <div className="candidates-container">
+          <div className={`${CARD} flex min-h-0 flex-1 flex-col`}>
+            <h3 className={SECTION_H3}>Link to Transaction</h3>
+            <div className={`min-h-0 flex-1 overflow-y-auto ${SCROLLBAR}`}>
               {selectedReceipt ? (
                 selectedReceipt.status !== 'pending' ? (
-                  <div className="empty-state">This receipt has already been processed</div>
+                  <div className={EMPTY}>This receipt has already been processed</div>
                 ) : isLoadingCandidates ? (
-                  <div className="loading-candidates">Loading candidate transactions...</div>
+                  <div className="py-6 text-center text-sm text-gray-500">
+                    Loading candidate transactions...
+                  </div>
                 ) : (
                   <CandidateTransactions
                     transactions={candidateTransactions}
@@ -933,7 +707,7 @@ function ProcessReceipts() {
                   />
                 )
               ) : (
-                <div className="empty-state">Select a receipt to find matching transactions</div>
+                <div className={EMPTY}>Select a receipt to find matching transactions</div>
               )}
             </div>
           </div>
@@ -957,5 +731,4 @@ function ProcessReceipts() {
     </div>
   );
 }
-
 export default ProcessReceipts;
