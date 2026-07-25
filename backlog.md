@@ -344,6 +344,18 @@ Migrating the frontend from individual CSS files to Tailwind CSS v4. Note: this 
       correct scroll contract; fully-styled buttons. Added W_SM/W_MD/W_LG/W_XL
       width variants so PANEL carries no max-width (avoids utility conflicts)
       and the five widths found are catalogued in one place.
+- [x] `RemapPartyPrompt.jsx` — migrated + CSS deleted. Clean file: fully
+      namespaced BEM, light-only, all 9 colours exact Tailwind values
+      (same authorship era as RemapPartyModal.css).
+      Dropped dead `.remap-option:hover` grey background — both instances
+      carry a variant hover that always overrode it.
+      Deliberately NOT a modalClasses.js consumer: compact inline prompt
+      with its own radius/shadow/padding and no header/body/footer. Shape is
+      closer to ConfirmDialog than to a full modal.
+      ⚠️ z-index comment says "below full modals" but 1100 > the 1000 every
+      modal uses — comment is wrong, or value should be ~900.
+      First emerald-* usage (semantically justified: blue = affects all,
+      emerald = affects one).
 
 
 		
