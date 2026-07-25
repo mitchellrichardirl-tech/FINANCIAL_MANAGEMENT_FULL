@@ -25,36 +25,22 @@
 import { useState, useRef } from 'react';
 import FilePreview from '@/components/FilePreview';
 import Checkbox from '@/components/Checkbox';
-import './BulkUploadReceipts.css';
 import { API_BASE_URL } from '@/lib/apiClient';
 import { createLogger } from '@/lib/logger';
 import { AppError } from '@/lib/errors';
 import { getErrorMessage } from '@/lib/apiErrors';
-
 /** @type {import('@/lib/logger').Logger} */
 const logger = createLogger('BulkUploadReceipts');
-
 /**
  * Bulk receipt uploader with streaming progress.
  *
  * @component
  * @param {Object} props
  * @param {(result: Object) => void} [props.onReceiptProcessed]
- *        Fired once per receipt that the server successfully parsed.
- *        `result` contains `receipt_id`, `filename`, `extracted_data`,
- *        etc., and is consumed verbatim by {@link ProcessReceipts}.
  * @param {() => void} [props.onProcessingStart]
- *        Fired when the user clicks "Process" and the request begins.
  * @param {(summary: {succeeded: number, failed: number, failures: Object[]}) => void} [props.onProcessingComplete]
- *        Fired after the stream closes. `failures` holds the raw stream
- *        events for receipts that reported a non-success status.
  * @param {(message: string) => void} [props.onError]
- *        Fired for transport-level failures (network error, non-2xx
- *        before the stream starts). Per-receipt failures are reported
- *        via `onProcessingComplete`, not here.
  * @param {boolean} [props.compact=false]
- *        Render in compact mode (hides {@link FilePreview} list and
- *        shortens copy) for use in the sidebar.
  * @returns {JSX.Element}
  */
 function BulkUploadReceipts({
@@ -69,49 +55,47 @@ function BulkUploadReceipts({
   const [isProcessing, setIsProcessing] = useState(false);
   /** Progress for the bar: `{ current, total }`. */
   const [progress, setProgress] = useState({ current: 0, total: 0 });
-
+  /**
+   * Drag-hover state. Previously handled via
+   * `currentTarget.classList.add('drag-over')`; lifted into state so the
+   * styling can live in Tailwind utilities.
+   */
+  const [isDragOver, setIsDragOver] = useState(false);
   /** Ref to the hidden `<input type="file">` so we can reset its value. */
   const fileInputRef = useRef(null);
   /** Collects stream events whose `status !== 'success'`. */
   const failedRef = useRef([]);
   /** When true, the backend uses the multimodal (LLM) extractor instead of OCR. */
-  const [useMultimodal, setUseMultimodal] = useState(false);  
-
+  const [useMultimodal, setUseMultimodal] = useState(false);
   // ── File selection ────────────────────────────────────────────────
-
   /** Append files chosen via the native picker. */
   const handleFileSelect = (event) => {
     const selectedFiles = Array.from(event.target.files);
     setFiles((prev) => [...prev, ...selectedFiles]);
   };
-
   /**
    * Handle drag-and-drop. Only image/* and PDF types are accepted;
    * others are silently ignored.
    */
   const handleDrop = (event) => {
     event.preventDefault();
-    event.currentTarget.classList.remove('drag-over');
+    setIsDragOver(false);
     const droppedFiles = Array.from(event.dataTransfer.files).filter(
       (file) => file.type.startsWith('image/') || file.type === 'application/pdf'
     );
     setFiles((prev) => [...prev, ...droppedFiles]);
   };
-
   const handleDragOver = (event) => {
     event.preventDefault();
-    event.currentTarget.classList.add('drag-over');
+    setIsDragOver(true);
   };
-
-  const handleDragLeave = (event) => {
-    event.currentTarget.classList.remove('drag-over');
+  const handleDragLeave = () => {
+    setIsDragOver(false);
   };
-
   /** Remove a single queued file by index. */
   const removeFile = (index) => {
     setFiles((prev) => prev.filter((_, i) => i !== index));
   };
-
   /** Clear the queue and reset the native input so the same file can be re-picked. */
   const clearFiles = () => {
     setFiles([]);
@@ -119,16 +103,9 @@ function BulkUploadReceipts({
       fileInputRef.current.value = '';
     }
   };
-
   // ── Upload + stream parse ─────────────────────────────────────────
-
   /** Indices of tasks that have reached a terminal state (success or failure). */
   const completedIndicesRef = useRef(new Set());
-  /**
-   * Handle one parsed stream event. Terminal events (success/error) drive
-   * progress, keyed by task `index` -- present on every event, unlike
-   * `receipt_id`, which failures lack.
-   */
   const handleStreamEvent = (result, totalFiles) => {
     const isTerminal = result.status === 'success' || result.status === 'error';
     if (!isTerminal || result.file_index == null) return;
@@ -145,31 +122,14 @@ function BulkUploadReceipts({
       current: Math.min(completedIndicesRef.current.size, totalFiles),
     }));
   };
-
-  /**
-   * POST all queued files to `/receipts/upload-stream` and parse the
-   * streamed response line-by-line.
-   *
-   * The server sends SSE-style lines: `data: {json}\n`. Each JSON
-   * object has at least `{ receipt_id, status }`. We:
-   *  - De-duplicate by `receipt_id` via `completedIndicesRef`.
-   *  - Call `onReceiptProcessed` for successes.
-   *  - Collect failures into `failedRef` for the summary callback.
-   *  - Update the progress bar as unique ids arrive.
-   *
-   * Uses raw `fetch` (not `apiClient`) because `apiClient` calls
-   * `response.json()`, which would block until the stream ends.
-   */
   const processReceipts = async () => {
     if (files.length === 0) return;
-
     const totalFiles = files.length;
     failedRef.current = [];
     setIsProcessing(true);
     setProgress({ current: 0, total: totalFiles });
     completedIndicesRef.current = new Set();
     onProcessingStart?.();
-
     const formData = new FormData();
     files.forEach((file) => {
       logger.debug(`Adding file ${file.name} to payload`);
@@ -177,13 +137,11 @@ function BulkUploadReceipts({
     });
     formData.append('extraction_method', useMultimodal ? 'multimodal' : 'ocr');
     logger.debug(`Extraction method: ${useMultimodal ? 'multimodal' : 'ocr'}`);
-
     try {
       const response = await fetch(
         `${API_BASE_URL}/receipts/upload-stream`,
         { method: 'POST', body: formData }
       );
-
       if (!response.ok) {
         throw response;
         // const errorBody = await response.json().catch(() => null);
@@ -193,21 +151,16 @@ function BulkUploadReceipts({
         //   status: response.status,
         // });
       }
-
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
-
       // Stream loop: accumulate chunks, split on newline, parse each `data:` line.
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-
         buffer += decoder.decode(value, { stream: true });
-
         const lines = buffer.split('\n');
         buffer = lines.pop() || ''; // keep the trailing partial line
-
         for (const line of lines) {
           const trimmedLine = line.trim();
           if (trimmedLine.startsWith('data: ')) {
@@ -222,7 +175,6 @@ function BulkUploadReceipts({
           }
         }
       }
-
       // Flush any trailing `data:` line left in the buffer
       if (buffer.trim().startsWith('data: ')) {
         try {
@@ -234,7 +186,6 @@ function BulkUploadReceipts({
           logger.error('Failed to parse final SSE data:', parseError);
         }
       }
-
       onProcessingComplete?.({
         succeeded: completedIndicesRef.current.size - failedRef.current.length,
         failed: failedRef.current.length,
@@ -251,11 +202,23 @@ function BulkUploadReceipts({
       completedIndicesRef.current = new Set();
     }
   };
-
+  // ── Derived class strings ─────────────────────────────────────────
+  const dropzoneCls = [
+    'rounded-lg border-2 text-center transition-all duration-200',
+    compact ? 'p-4' : 'p-6',
+    isDragOver
+      ? 'border-solid border-[#007bff] bg-[#e7f1ff]'
+      : 'border-dashed border-gray-300 bg-gray-50',
+    // hover is suppressed while dragging so drag-over styling wins
+    !isProcessing && !isDragOver && 'hover:border-[#007bff] hover:bg-[#f0f7ff]',
+    isProcessing && 'cursor-not-allowed opacity-60',
+  ]
+    .filter(Boolean)
+    .join(' ');
   return (
-    <div className={`bulk-upload-receipts ${compact ? 'compact' : ''}`}>
+    <div className="flex flex-col gap-4">
       <div
-        className={`dropzone ${isProcessing ? 'disabled' : ''}`}
+        className={dropzoneCls}
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -268,33 +231,37 @@ function BulkUploadReceipts({
           onChange={handleFileSelect}
           disabled={isProcessing}
           id="bulk-file-input"
-          className="file-input-hidden"
+          className="sr-only"
         />
-        <label htmlFor="bulk-file-input" className="dropzone-label">
-          <div className="dropzone-content">
-            <span className="dropzone-icon">{compact ? '📁' : '📁'}</span>
-            <span className="dropzone-text">
+        <label
+          htmlFor="bulk-file-input"
+          className={`block ${isProcessing ? 'cursor-not-allowed' : 'cursor-pointer'}`}
+        >
+          <div className="flex flex-col items-center gap-2">
+            <span className={compact ? 'text-[1.5rem]' : 'text-[2rem]'}>📁</span>
+            <span className="text-sm text-gray-800">
               {compact ? 'Drop files or click to select' : 'Drop files here or click to select'}
             </span>
-            {!compact && <span className="dropzone-hint">Supports JPG, PNG, PDF</span>}
+            {!compact && <span className="text-xs text-muted">Supports JPG, PNG, PDF</span>}
           </div>
         </label>
       </div>
-
       {files.length > 0 && (
-        <div className="selected-files-section">
-          <div className="selected-files-header">
-            <span className="file-count">
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[0.8rem] text-muted">
               {files.length} file{files.length !== 1 ? 's' : ''}
             </span>
-            <button onClick={clearFiles} className="btn-clear-files" disabled={isProcessing}>
+            <button
+              onClick={clearFiles}
+              className="cursor-pointer rounded-[3px] border border-gray-400 bg-transparent px-2 py-0.5 text-xs text-muted hover:border-[#dc3545] hover:text-[#dc3545] disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isProcessing}
+            >
               Clear
             </button>
           </div>
-
           {!compact && <FilePreview files={files} onRemove={removeFile} disabled={isProcessing} />}
-
-          <div className="process-controls">
+          <div className="flex items-center gap-3">
             <Checkbox
               checked={useMultimodal}
               onChange={setUseMultimodal}
@@ -304,7 +271,7 @@ function BulkUploadReceipts({
             <button
               onClick={processReceipts}
               disabled={isProcessing || files.length === 0}
-              className="btn-process"
+              className="flex-1 cursor-pointer rounded bg-[#007bff] px-4 py-2 text-sm font-medium text-white hover:bg-[#0056b3] disabled:cursor-not-allowed disabled:bg-gray-300"
             >
               {isProcessing
                 ? `Processing ${progress.current}/${progress.total}...`
@@ -313,12 +280,11 @@ function BulkUploadReceipts({
           </div>
         </div>
       )}
-
       {isProcessing && (
-        <div className="processing-progress">
-          <div className="progress-bar">
+        <div className="mt-2">
+          <div className="h-1 w-full overflow-hidden rounded-[2px] bg-[#e0e0e0]">
             <div
-              className="progress-fill"
+              className="h-full bg-[#007bff] transition-[width] duration-300 ease-out"
               style={{
                 width: `${progress.total > 0 ? (progress.current / progress.total) * 100 : 0}%`,
               }}
@@ -329,5 +295,4 @@ function BulkUploadReceipts({
     </div>
   );
 }
-
 export default BulkUploadReceipts;

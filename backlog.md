@@ -194,6 +194,13 @@ Migrating the frontend from individual CSS files to Tailwind CSS v4. Note: this 
       (no rule in this file — replaced with Tailwind).
       4 responsive grid breakpoints preserved via min-[] arbitrary values.
       Webkit scrollbar kept via [&::-webkit-scrollbar*] arbitrary variants.
+- [x] `BulkUploadReceipts.jsx` — migrated + CSS deleted.
+      ⚠️ REQUIRED refactor: drag-over state lifted from
+      `currentTarget.classList.add('drag-over')` into React state
+      (`isDragOver`). classList manipulation is incompatible with utility
+      CSS. Browser-verify drag highlight still works.
+      Note: the `.compact .dropzone-text` override (0.875rem vs 0.9rem)
+      was imperceptible — collapsed to a single `text-sm`.
 		
 ## Next Steps (statementFormats)
 - [ ] Revisit `DeleteFormatDialog` `<ul>` + body spacing once `ConfirmDialog` is done.
@@ -255,3 +262,7 @@ Migration order is leaf/page first, then shared components. Shared components fl
   (#28a745/#dc3545 → green-800/red-800). Keep Bootstrap only where it's UI
   chrome not status (Stepper done-state, remove button) and promote those
   to --color-success / --color-danger.
+- **#007bff is the winner (3 files):** Stepper, ProcessReceipts,
+  BulkUploadReceipts. BulkUploadReceipts also gives the hover shade
+  (#0056b3). Promote both as --color-primary / --color-primary-hover when
+  migrating Button; retire #4a90e2 and #2196f3/#1976d2.
