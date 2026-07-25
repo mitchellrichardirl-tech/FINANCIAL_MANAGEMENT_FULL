@@ -13,32 +13,15 @@ import { useState, useEffect, useMemo } from 'react';
 import DropdownWithCreate from '@/components/DropdownWithCreate';
 import Checkbox from '@/components/Checkbox';
 import CreateCategoryModal from './CreateCategoryModal';
-//    ⚠️ See migration notes — the generic modal classes in that file may be
-//    shared with other modals. Grep before deleting.
+import * as M from '@/styles/modalClasses';
 import { createLogger } from '@/lib/logger';
 /** @type {import('@/lib/logger').Logger} */
 const logger = createLogger('BulkEditModal');
 /* ── Reused class strings ──────────────────────────────────────────── */
-const FORM_FIELD = 'flex flex-col gap-2';
-const FIELD_LABEL = 'text-[0.9em] font-medium';
-const SECTION_H3 = 'text-[1.1em] font-bold text-[#646cff]';
-/**
- * Footer buttons. `.cancel-button`/`.save-button` previously declared only
- * padding + border-color, inheriting the rest from Vite's global `button`
- * rule — which no longer exists. Both needed real styling.
- */
-const BTN_BASE =
-  'cursor-pointer rounded-lg px-[1.5em] py-[0.6em] transition-colors ' +
-  'disabled:cursor-not-allowed disabled:opacity-50';
-const BTN_CANCEL = `${BTN_BASE} border border-[#666] bg-transparent hover:border-[#888]`;
-const BTN_SAVE = `${BTN_BASE} border border-transparent bg-[#646cff] text-white hover:bg-[#535bf2]`;
 const CLEAR_BTN =
   'cursor-pointer rounded border-none bg-[#e0e0e0] px-2 py-1 text-xs ' +
   'hover:bg-[#d0d0d0] disabled:cursor-not-allowed disabled:opacity-50';
-/**
- * Modal dialog for bulk-editing selected transactions.
- * (full docblock unchanged)
- */
+
 export default function BulkEditModal({
   isOpen,
   onClose,
@@ -351,20 +334,14 @@ export default function BulkEditModal({
     !isSaving && (updates.party_id || updates.is_kids !== null || updates.is_one_off !== null);
   return (
     <>
-      <div
-        className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/70"
-        onClick={handleBackdropClick}
-      >
-        <div
-          className="max-h-[90vh] w-[90%] max-w-[600px] overflow-y-auto rounded-lg bg-white p-8 shadow-[0_4px_6px_rgba(0,0,0,0.3)]"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="mb-4 flex items-center justify-between border-b border-gray-200 pb-4">
-            <h2 className="text-2xl font-bold">
+      <div className={M.BACKDROP} onClick={handleBackdropClick}>
+        <div className={`${M.PANEL} ${M.W_LG}`} onClick={(e) => e.stopPropagation()}>
+          <div className={M.HEADER}>
+            <h2 className={M.TITLE}>
               Bulk Edit {transactionCount} Transactions
             </h2>
             <button
-              className="cursor-pointer text-2xl leading-none text-gray-500 hover:text-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+              className={M.CLOSE_BTN}
               onClick={handleCancel}
               disabled={isSaving}
               aria-label="Close modal"
@@ -373,26 +350,26 @@ export default function BulkEditModal({
             </button>
           </div>
           {validationError && (
-            <div className="mb-4 flex items-center justify-between rounded border border-danger-border bg-danger-bg px-4 py-3 text-danger-text">
+            <div className={M.ERROR_BANNER}>
               {validationError}
               <button
                 onClick={() => setValidationError(null)}
                 aria-label="Dismiss error"
-                className="ml-3 cursor-pointer text-lg leading-none"
+                className={M.ERROR_DISMISS}
               >
                 ×
               </button>
             </div>
           )}
-          <div className="flex flex-col gap-8">
-            <div className="flex flex-col gap-4">
-              <h3 className={SECTION_H3}>Category Hierarchy</h3>
-              <p className="text-[0.85em] italic text-[#888]">
+          <div className={M.BODY}>
+            <div className={M.SECTION}>
+              <h3 className={M.SECTION_TITLE}>Category Hierarchy</h3>
+              <p className={M.HINT}>
                 Select at any level - parent levels will be set automatically. Lower levels will be
                 cleared when you change a higher level.
               </p>
-              <div className={FORM_FIELD}>
-                <label className={FIELD_LABEL}>Category</label>
+              <div className={M.FIELD}>
+                <label className={M.FIELD_LABEL}>Category</label>
                 <DropdownWithCreate
                   value={updates.category_id}
                   onChange={handleCategoryChange}
@@ -406,8 +383,8 @@ export default function BulkEditModal({
                   disabled={isSaving}
                 />
               </div>
-              <div className={FORM_FIELD}>
-                <label className={FIELD_LABEL}>Sub-Category</label>
+              <div className={M.FIELD}>
+                <label className={M.FIELD_LABEL}>Sub-Category</label>
                 <DropdownWithCreate
                   value={updates.sub_category_id}
                   onChange={handleSubCategoryChange}
@@ -421,8 +398,8 @@ export default function BulkEditModal({
                   disabled={isSaving}
                 />
               </div>
-              <div className={FORM_FIELD}>
-                <label className={FIELD_LABEL}>Type</label>
+              <div className={M.FIELD}>
+                <label className={M.FIELD_LABEL}>Type</label>
                 <DropdownWithCreate
                   value={updates.type_id}
                   onChange={handleTypeChange}
@@ -436,8 +413,8 @@ export default function BulkEditModal({
                   disabled={isSaving}
                 />
               </div>
-              <div className={FORM_FIELD}>
-                <label className={FIELD_LABEL}>Party</label>
+              <div className={M.FIELD}>
+                <label className={M.FIELD_LABEL}>Party</label>
                 <DropdownWithCreate
                   value={updates.party_id}
                   onChange={handlePartyChange}
@@ -452,8 +429,8 @@ export default function BulkEditModal({
                 />
               </div>
             </div>
-            <div className="flex flex-col gap-4">
-              <h3 className={SECTION_H3}>Flags</h3>
+            <div className={M.SECTION}>
+              <h3 className={M.SECTION_TITLE}>Flags</h3>
               {/* flex-row: `.checkbox-field` set align-items/gap but never
                   reset flex-direction, so these stacked vertically. */}
               <div className="flex flex-row items-center gap-3">
@@ -494,11 +471,11 @@ export default function BulkEditModal({
               </div>
             </div>
           </div>
-          <div className="mt-8 flex justify-end gap-4 border-t border-gray-200 pt-6">
-            <button onClick={handleCancel} className={BTN_CANCEL} disabled={isSaving} type="button">
+          <div className={M.FOOTER}>
+            <button onClick={handleCancel} className={M.BTN_SECONDARY} disabled={isSaving} type="button">
               Cancel
             </button>
-            <button onClick={handleSave} disabled={!canSave} className={BTN_SAVE} type="button">
+            <button onClick={handleSave} disabled={!canSave} className={M.BTN_PRIMARY} type="button">
               {isSaving ? 'Updating...' : `Update ${transactionCount} Transactions`}
             </button>
           </div>

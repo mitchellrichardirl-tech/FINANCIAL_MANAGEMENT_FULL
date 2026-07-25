@@ -329,6 +329,21 @@ Migrating the frontend from individual CSS files to Tailwind CSS v4. Note: this 
       Preserved two minor inconsistencies vs its ViewModal sibling:
       disabled opacity 0.6 vs 0.5, and close-button disabled state present
       here but absent there.
+- [x] `RemapPartyModal.jsx` — migrated + CSS deleted.
+      🔍 This file's `.modal-content { max-width: 560px; overflow: hidden }`
+      is the rule ImagePreview.css documented fighting. Mystery closed.
+      ⚠️ Its CSS header claimed to "share class names with BulkEditModal
+      without duplicating rules" — but both files DEFINE the same classes
+      with very different values. By import order RemapPartyModal.css was
+      winning, so BOTH modals rendered with THIS design and
+      BulkEditModal.css was effectively dead.
+      .modal-error / .modal-error button were dead here (no error banner in
+      this JSX) — they existed only to serve BulkEditModal.
+- [x] `src/styles/modalClasses.js` — REWRITTEN around this design, now
+      canonical. All 14 of its colours were exact Tailwind values; light-only;
+      correct scroll contract; fully-styled buttons. Added W_SM/W_MD/W_LG/W_XL
+      width variants so PANEL carries no max-width (avoids utility conflicts)
+      and the five widths found are catalogued in one place.
 
 
 		
