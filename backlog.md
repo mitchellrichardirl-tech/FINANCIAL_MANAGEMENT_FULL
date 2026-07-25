@@ -165,6 +165,15 @@ Migrating the frontend from individual CSS files to Tailwind CSS v4. Note: this 
       verified clear. Restored `list-disc pl-5` on samples <ul> (Preflight).
       `pwp-code-*` dynamic class was dead → converted to data-warning-code;
       ⚠️ grep for `pwp-code` before merging.
+- [x] `ImportResult.jsx` — migrated + CSS deleted.
+      `.import-error` consolidated onto existing danger tokens (text shifts
+      from #721c24 → #842029 — intentional convergence).
+      Table font-family now uses the --font-sans token.
+      #666 greys mapped to text-muted.
+      ⚠️ Latent bug preserved: h-full + internal flex-1/min-h-0/overflow-auto
+      scroll contract is inert because no ancestor has a definite height.
+      Fix requires giving UploadStatement's import-result wrapper a height —
+      separate commit.
 		
 ## Next Steps (statementFormats)
 - [ ] Revisit `DeleteFormatDialog` `<ul>` + body spacing once `ConfirmDialog` is done.
@@ -204,3 +213,13 @@ Migration order is leaf/page first, then shared components. Shared components fl
   (#fef9e7/#f0c36d/#6b5a2a + divider/muted/chip shades). Both render on the
   same page. Pick one — the PWP family is more complete — and promote to
   @theme, then retrofit .format-warning.
+- **Money in/out colors disagree:** ParsedPreviewTable uses green-800/red-800
+  (#166534/#991b1b); ImportResult uses Bootstrap #28a745/#dc3545. Same
+  semantic, two palettes. Introduce --color-money-in/out and keep them
+  distinct from --color-success/--color-danger even if hex matches.
+- **THREE primary blues:** #007bff (Stepper), #4a90e2 (UploadStatement
+  focus/info), #2196f3+#1976d2 (ImportResult button). Resolve before
+  migrating Button.
+- **Success alert family:** #d4edda / #c3e6cb / #155724 / #a3cfbb (divider)
+  in ImportResult completes the bg/border/text set alongside the existing
+  danger + info tokens. Promote as --color-success-bg/border/text/divider.
