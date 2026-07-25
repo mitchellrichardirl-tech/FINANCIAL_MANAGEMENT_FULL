@@ -287,10 +287,20 @@ Migrating the frontend from individual CSS files to Tailwind CSS v4. Note: this 
       Dropped dead `create-modal` class (empty rule).
       has-error colours were exact Tailwind (red-600/red-50).
       Fixed inert `outline-color` on error focus — ring was staying blue.
-- [ ] `src/styles/Modal.css` — NOW TOP PRIORITY. This is the app's real
-      shared modal stylesheet, imported explicitly by CreateCategoryModal
-      (and presumably the other modals). Migrating it unlocks ~7 modals +
-      ConfirmDialog and is the right moment to extract a <Modal> component.
+- [x] `src/styles/Modal.css` — MIGRATED into `src/styles/modalClasses.js`.
+      CSS file deleted. All modal chrome now lives as importable Tailwind
+      const strings: BACKDROP, PANEL, HEADER, TITLE, CLOSE_BTN, BODY,
+      FOOTER, ERROR_BANNER, BTN_PRIMARY, BTN_SECONDARY.
+      CSS custom properties (--color-surface, --color-border, --color-error,
+      --color-primary) were aspirational — never defined at :root, fallbacks
+      always won. Replaced with direct Tailwind matching the fallback values.
+      border-gray-200 ↔ border-gray-300 inconsistency within the same file
+      preserved (header/footer vs. form inputs).
+- [x] `CreateCategoryModal.jsx` — FULLY MIGRATED. Both CSS imports removed.
+      Uses shared M.* constants for modal chrome + own FIELD/FIELD_ERR for
+      form styling. Focus ring uses blue-600 (the file's own --color-primary
+      fallback — a 6th primary blue, see notes).
+      Delete CreateCategoryModal.css.
 
 
 
@@ -404,4 +414,16 @@ Migration order is leaf/page first, then shared components. Shared components fl
   which declared neither. Both now explicit. Worth assuming any
   "class used in JSX with no local rule" is being fed by another feature's
   stylesheet.
+- **SIX primary blues found.** Running tally:
+  #007bff (Stepper, BulkUpload — Bootstrap),
+  #2196f3 (ImportResult, CandidateTransactions, CategorizeTransactions,
+           Modal.css btn-primary — Material),
+  #4a90e2 (UploadStatement, CategorizeTransactions focus — bespoke),
+  #2563eb (Modal.css form focus — Tailwind blue-600),
+  #646cff (FilterBar — Vite template),
+  #1976d2 (hover shade of #2196f3).
+  The Button migration is the natural convergence point. #007bff wins
+  on frequency (3 files); #2563eb (blue-600) wins on being an actual
+  Tailwind value; #2196f3 wins on being the modal/action-button standard.
+  Pick one.
 
