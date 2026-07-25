@@ -105,390 +105,205 @@ Status: 4 of 5 commits landed, one bug fix applied mid-stream.
 - Backend required no changes for the feature — endpoints already existed.
 # Tailwind CSS Migration — Progress Note
 
+# Tailwind CSS Migration — Progress Note
+
 **Branch:** `feature/tailwind-css` (worktree: `wt-tailwind-css`)
 
 ## Context
-Migrating the frontend from individual CSS files to Tailwind CSS v4. Note: this project uses Tailwind v4, which differs from v3 in a few key ways:
-- No `tailwind.config.js` or `postcss.config.js`.
-- Setup is done via the `@tailwindcss/vite` plugin in `vite.config.js`.
-- Use a single `@import "tailwindcss";` in the CSS (instead of the older `@tailwind base/components/utilities` directives).
-- Theme customization is done in CSS via `@theme {}` rather than a JS config file.
 
-## Done
-- [x] Installed `tailwindcss` + `@tailwindcss/vite` (removed the initial incorrect install of postcss/autoprefixer).
+Migrating the frontend from individual CSS files to Tailwind CSS v4:
+- No `tailwind.config.js` or `postcss.config.js`.
+- Setup via the `@tailwindcss/vite` plugin in `vite.config.js`.
+- Single `@import "tailwindcss";` in `frontend/src/index.css`.
+- Theme customization in CSS via `@theme {}`.
+
+**App is light-mode only.** Vite's dark-mode template styles were removed from `index.css`. Several CSS files still had `prefers-color-scheme: dark` as the base with a light override — all settled as light-only during migration.
+
+## Done — Infrastructure
+
+- [x] Installed `tailwindcss` + `@tailwindcss/vite`.
 - [x] Configured `vite.config.js` with the `tailwindcss()` plugin.
-- [x] Added `@import "tailwindcss";` to `frontend/src/index.css`.
-- [x] Verified Tailwind is working (a test class rendered correctly).
-- [x] Cleaned up `index.css` — removed default Vite template styles. Kept only the `:root` font-family/rendering block above the Tailwind import. App renders white background, dark text.
-- [x] Defined `@theme` tokens so far: `--font-sans`, danger tokens (`--color-danger-bg/border/text`), `--color-muted`, info tokens (`--color-info-bg/border/text`).
+- [x] `@import "tailwindcss"` in `frontend/src/index.css`.
+- [x] `index.css` cleaned — only `:root` font-family/rendering block above the import.
+- [x] `@theme` tokens: `--font-sans`, `--color-danger-bg/border/text`, `--color-muted`, `--color-info-bg/border/text`, `--animate-fade-in`, `--animate-highlight-pulse`.
+- [x] `src/styles/modalClasses.js` — canonical shared modal chrome (Tailwind const strings). Derived from RemapPartyModal.css, which was the best-specified modal CSS (all-Tailwind palette, light-only, correct scroll contract). Width variants `W_SM`/`W_MD`/`W_LG`/`W_XL` catalogue the five widths found.
+
+## Done — Feature pages & leaf components
 
 ### Hierarchy feature
-- [x] `CategoryHierarchyPage.jsx` — migrated + CSS deleted. ⚠️ still needs a browser verify (testing was interrupted).
-- [x] `HierarchyTree` (sidebar) — migrated.
-- [x] `HierarchyDetailPanel` (breadcrumb + stats + table) — migrated.
-- [x] `EditNodeModal` — migrated. (Note: does **not** use the shared `ConfirmDialog`.)
+- [x] `CategoryHierarchyPage`, `HierarchyTree`, `HierarchyDetailPanel`, `EditNodeModal` — all migrated + CSS deleted.
 
 ### statementFormats feature
-- [x] `StatementFormatsPage.jsx` — migrated, `.sfp` CSS deleted.
-- [x] `FormatList.jsx` — migrated, `FormatList.css` deleted.
-- [x] `FormatEditorPage.jsx` — migrated, `FormatEditorPage.css` deleted.
-- [~] `DeleteFormatDialog.jsx` — no dedicated CSS. Only remaining tweak: add `list-disc pl-5` to the linked-accounts `<ul>` (Preflight strips bullets/indent). Decide whether body spacing lives here or in `ConfirmDialog`'s body — **deferred until ConfirmDialog is migrated** (see below).
-- [x] `FormatEditor.jsx` — migrated + CSS deleted. Stepper wrapped in
-      shrink-0 div (Stepper itself not yet migrated).
-- [x] Shared step scaffolding (`fe-step`, `fe-step__sub`,
-      `fe-step__placeholder`) — inlined into all 5 step components,
-      rules removed from FormatEditor.css.
-- [x] `StepSampleFile` — was already on Tailwind; CSS deleted.
-- [x] `StepColumns` — was already on Tailwind; CSS deleted.
-- [x] `StepDefaults` — was already on Tailwind; CSS deleted.
-- [x] `StepPreview` — was already on Tailwind; CSS deleted.
-      Fixed info banner to use @theme tokens instead of hardcoded hex.
-- [x] `editor/Stepper.jsx` — migrated + CSS deleted. shrink-0 now lives on
-      the Stepper's own <ol>; removed the temporary wrapper div in
-      FormatEditor. ⚠️ needs browser verify — connector line geometry uses
-      calc() arbitrary values, check alignment at narrow widths.
-- [x] `editor/ParsedPreviewTable.jsx` — migrated + CSS deleted.
-      Credit/debit colors were already exact Tailwind palette values
-      (green-800/red-800/green-50/red-50) — no approximation needed.
-      ⚠️ browser verify: sticky thead border under border-collapse.
+- [x] `StatementFormatsPage`, `FormatList`, `FormatEditorPage`, `FormatEditor`, `Stepper`, `ParsedPreviewTable` — all migrated + CSS deleted.
+- [x] Step components (`StepSampleFile`, `StepIdentity`, `StepColumns`, `StepDefaults`, `StepPreview`) — all migrated + CSS deleted. Shared `fe-step` scaffolding inlined.
+- [~] `DeleteFormatDialog` — no dedicated CSS; deferred `list-disc pl-5` fix until `ConfirmDialog` is migrated.
 
 ### statements feature
-- [x] `UploadStatement.jsx` — migrated + CSS deleted.
-      ⚠️ Behavioral change: preview-table-wrapper inline styles removed,
-      now uses correct flex-fill. Height will differ — browser verify.
-      ⚠️ Responsive breakpoints simplified from 3 (desktop-first) to 2
-      (mobile-first, md/lg). 992px→lg is +32px shift.
-      ⚠️ Account-group switched from flex-row to flex-col (likely
-      original bug — format-warning had margin-top in a horizontal flex).
-- [x] `ProcessingWarningsPanel.jsx` — migrated + CSS deleted.
-      SHARED component: importers are UploadStatement + StepPreview, both
-      verified clear. Restored `list-disc pl-5` on samples <ul> (Preflight).
-      `pwp-code-*` dynamic class was dead → converted to data-warning-code;
-      ⚠️ grep for `pwp-code` before merging.
-- [x] `ImportResult.jsx` — migrated + CSS deleted.
-      `.import-error` consolidated onto existing danger tokens (text shifts
-      #721c24 → #842029 — intentional convergence).
-      Table font-family now uses the --font-sans token. #666 → text-muted.
-- [x] FIXED latent scroll bug: ImportResult root changed h-full → flex-1
-      min-h-0, and UploadStatement's import-result wrapper given a definite
-      height via the new shared PAGE_BODY_H const (also applied to the
-      preview branch). Internal table scroll + pinned summary now work.
-      ⚠️ behaviour change — browser verify.
-      Known limitation: warnings panel is shrink-0, so many expanded
-      warnings squeeze the table. Cap with max-h + overflow-y-auto if it
-      becomes a problem.
-- [x] `components/ColumnMismatchPanel.jsx` — migrated + CSS deleted.
-      SHARED component: importers are UploadStatement + StepPreview.
-      ⚠️ grep for `cmp-` / `column-mismatch-panel` before merging.
-      Notable: all 12 colors were already exact Tailwind palette values —
-      zero arbitrary values required.
-      <ul> needed NO Preflight restoration (list-style:none was already
-      the intent) — contrast with ProcessingWarningsPanel.
+- [x] `UploadStatement` — migrated + CSS deleted. Preview-table-wrapper conflict resolved (inline styles removed → flex-fill). `PAGE_BODY_H` const shared between branches.
+- [x] `ImportResult` — migrated + CSS deleted. Scroll bug fixed (`h-full` → `flex-1 min-h-0`).
+- [x] `ProcessingWarningsPanel` (shared) — migrated + CSS deleted. `list-disc pl-5` restored on `<ul>`. `pwp-code-*` → `data-warning-code`.
+- [x] `ColumnMismatchPanel` (shared) — migrated + CSS deleted. All 12 colours were exact Tailwind values.
 
 ### receipts feature
-- [x] `ProcessReceipts.jsx` — migrated. CSS deletion BLOCKED on
-      .radio-row / .radio-option / .checkbox-option — grep child
-      components before removing file.
-      Dead CSS dropped: .receipt-error, .receipt-success (unused),
-      .has-error (classname with no rule), .form-error/.field-error
-      (no rule in this file — replaced with Tailwind).
-      4 responsive grid breakpoints preserved via min-[] arbitrary values.
-      Webkit scrollbar kept via [&::-webkit-scrollbar*] arbitrary variants.
-- [x] `BulkUploadReceipts.jsx` — migrated + CSS deleted.
-      ⚠️ REQUIRED refactor: drag-over state lifted from
-      `currentTarget.classList.add('drag-over')` into React state
-      (`isDragOver`). classList manipulation is incompatible with utility
-      CSS. Browser-verify drag highlight still works.
-      Note: the `.compact .dropzone-text` override (0.875rem vs 0.9rem)
-      was imperceptible — collapsed to a single `text-sm`.
-- [x] `SelectableReceiptTable.jsx` — migrated + CSS deleted.
-      Row-state cascade (7 overlapping rules) replaced with explicit
-      `rowCls()` function. Thumbnail styling moved from descendant
-      selector to a wrapper div. Scrollbar same pattern as ProcessReceipts.
-- [x] `ImagePreview.jsx` — migrated + CSS deleted. Kept react-pdf vendor
-      CSS imports.
-      ⚠️ BEHAVIOUR CHANGE: the old CSS had `.image-preview-img`
-      (display:block) defined after `.hidden` (display:none), so
-      hiding-the-image-while-loading never worked. Now explicit
-      `isLoading ? 'hidden' : 'block'`. Image is genuinely hidden during
-      load — verify this is desired.
-- [x] `CandidateTransactions.jsx` — migrated + CSS deleted.
-      First file requiring custom @keyframes → added --animate-fade-in and
-      --animate-highlight-pulse to @theme in index.css.
-      All 6 `!important` declarations ELIMINATED: they were defending
-      against (a) `.transaction-row td` out-specifying `.amount-cell`, and
-      (b) a global `.amount-cell` class collision with ImportResult.css.
-      Both causes gone now that cells carry utilities directly.
-      Dead CSS dropped: `.transaction-row.selected` (never applied — JSX
-      only sets `linked`).
-      Minor refactor: extracted duplicated <PanelHeader>.
+- [x] `ProcessReceipts` — migrated. **CSS deletion BLOCKED** on `.radio-row`/`.radio-option`/`.checkbox-option` — grep child components before removing.
+- [x] `BulkUploadReceipts` — migrated + CSS deleted. Drag-over state lifted from `classList` to React state.
+- [x] `SelectableReceiptTable` — migrated + CSS deleted. Row-state cascade replaced with `rowCls()`.
+- [x] `ImagePreview` — migrated + CSS deleted. Kept react-pdf vendor imports. Image-hidden-during-load bug fixed.
+- [x] `CandidateTransactions` — migrated + CSS deleted. Custom `@keyframes` added to `@theme`.
+- [x] `ReceiptIcon` — migrated + CSS deleted.
 
 ### transactions feature
-- [x] `CategorizeTransactions.jsx` — migrated + CSS deleted.
-      ⚠️ `.new-cash-button` had NO CSS rule — it was relying on native
-      button chrome, which Preflight removes. Given a neutral secondary
-      style (white + border); verify the visual intent.
-      Dead CSS dropped: `.loading` (never rendered — the `loading` state
-      is set but never consumed, so this page has no loading indicator at
-      all), `.error-message` (+ its button; errors go via toast).
-      Added `shrink-0` to .filters-section — original omitted it while
-      giving it to its siblings.
-- [x] `TransactionTable.jsx` — migrated, but CSS NOT deleted.
-      TransactionTable.css trimmed to only TransactionRow-owned rules;
-      <table> keeps `transaction-table` className as a hook.
-      Base cell rule re-scoped to `tbody` so it can't out-specify the
-      Tailwind utilities on the thead filter row.
-      .filter-cell-center !important eliminated.
-      ⚠️ Dead header classes found: .lodgment-header / .kids-header /
-      .one-off-header have no CSS — headers are left-aligned while their
-      cells are center !important. Kept faithful; fix suggested.
-      ⚠️ Sticky filter-row offset (top-11) is hardcoded to the header's
-      computed height — fragile if header padding/font changes.
-- [x] `TransactionRow.jsx` — migrated.
-- [x] `TransactionTable.css` + `TransactionRow.css` — BOTH deleted;
-      `transaction-table` hook removed. Zebra + row hover moved onto the
-      row itself (even:bg-gray-50 / hover:bg-gray-200).
-      ⚠️ BUG FIXED: table's `tbody tr:nth-child(even)` (0,2,2) was
-      overriding `.transaction-row.selected` and `.editing` (0,2,0), so
-      selection/edit highlights were invisible on every even row. Now
-      computed per-state. Hover-wins-over-state preserved.
-      ⚠️ `.description-cell` wrapping was indeterminate (load-order
-      dependent); settled as truncate + expand-on-hover.
-      Party cell restructured: flex moved from the <td> to an inner div
-      (display:flex on a td broke table layout, and text-overflow never
-      worked on a flex container).
-      All 7 remaining !important eliminated. `.amount-cell` collision
-      fully closed — all 4 declaring components now migrated.
-- [ ] `components/DropdownWithCreate` — NOW URGENT. `.dropdown-with-create
-      select` lived in TransactionRow.css; its styling is replicated for
-      TransactionRow only. BulkEditModal / RemapPartyModal /
-      CreateCashTransactionModal / GenerateCashFromReceiptModal selects
-      are currently unstyled.
-- [x] `BulkEditModal.jsx` — migrated. CSS deletion GATED on grep.
-      ⚠️ BulkEditModal.css contains the app's de-facto modal design system
-      (.modal-overlay/.modal-content/.modal-header/.modal-actions/
-      .save-button/.cancel-button/.form-field/.form-section/.modal-error).
-      ImagePreview.css already documents a conflicting `.modal-content`
-      (width:560px) elsewhere — confirmed duplication. Grep all modals
-      before deleting; if any depend on this copy, move the generic rules
-      to src/styles/legacy-modal.css imported from index.css.
-      ⚠️ BUG FIXED: dark-mode-first again (bg #1a1a1a + prefers-color-scheme
-      light override). Settled light-only.
-      ⚠️ BUG FIXED: .save-button had NO background/border/radius and
-      .cancel-button set border-color with no border-width — both depended
-      on Vite's deleted global `button` rule. Save given #646cff primary,
-      cancel an outline. Judgment call.
-      ⚠️ BUG FIXED: .checkbox-field set align-items/gap but not
-      flex-direction, so it inherited `column` from .form-field — checkbox
-      and Clear button were stacked + centred. Now a row.
-      Dead CSS dropped: .party-name-display, .party-name-value.
-- [~] `CreateCategoryModal.jsx` — PARTIAL. CreateCategoryModal.css migrated
-      + deleted; @/styles/Modal.css import retained (not yet migrated).
-      Dropped dead `create-modal` class (empty rule).
-      has-error colours were exact Tailwind (red-600/red-50).
-      Fixed inert `outline-color` on error focus — ring was staying blue.
-- [x] `src/styles/Modal.css` — MIGRATED into `src/styles/modalClasses.js`.
-      CSS file deleted. All modal chrome now lives as importable Tailwind
-      const strings: BACKDROP, PANEL, HEADER, TITLE, CLOSE_BTN, BODY,
-      FOOTER, ERROR_BANNER, BTN_PRIMARY, BTN_SECONDARY.
-      CSS custom properties (--color-surface, --color-border, --color-error,
-      --color-primary) were aspirational — never defined at :root, fallbacks
-      always won. Replaced with direct Tailwind matching the fallback values.
-      border-gray-200 ↔ border-gray-300 inconsistency within the same file
-      preserved (header/footer vs. form inputs).
-- [x] `CreateCategoryModal.jsx` — FULLY MIGRATED. Both CSS imports removed.
-      Uses shared M.* constants for modal chrome + own FIELD/FIELD_ERR for
-      form styling. Focus ring uses blue-600 (the file's own --color-primary
-      fallback — a 6th primary blue, see notes).
-      Delete CreateCategoryModal.css.
-- [x] `ReceiptIcon.jsx` — migrated + CSS deleted. Clean file: no dead rules,
-      no !important, no collisions. `currentColor` pattern preserved —
-      text-* utilities drive the SVG stroke including on hover.
-      Material green pair (#4caf50/#388e3c) matches TransactionRow's
-      btn-save, so the transactions feature is internally consistent.
-- [x] `ReceiptViewModal.jsx` — migrated + CSS deleted. Clean file: fully
-      namespaced (receipt-view-*), generic-looking .btn-unlink/.btn-close
-      were scoped behind descendant selectors so no collisions. No dead
-      rules, no !important.
-      Colours already consistent with the rest of the app: #f44336/#d32f2f
-      matches TransactionRow btn-cancel; #e0e0e0/#d0d0d0 matches
-      M.BTN_SECONDARY.
-      NOTE: min-h-[200px] on the image region is doing double duty — it
-      overrides the flex automatic-minimum (enabling overflow-auto) as well
-      as setting a floor. Don't simplify.
-      h3 kept at font-bold (UA inherited) vs M.TITLE's font-semibold —
-      normalise if/when <Modal> is extracted.
-- [x] `ReceiptUploadModal.jsx` — migrated + CSS deleted. Clean, fully
-      namespaced, scoped button selectors, no dead rules.
-      Colours already consistent: #4caf50/#388e3c matches ReceiptIcon
-      attached-state + TransactionRow btn-save; #e0e0e0/#d0d0d0 matches
-      M.BTN_SECONDARY.
-      <input type="file"> left unstyled (it was unstyled in CSS too) — only
-      raw file picker in the app; `file:` variants noted if consistency
-      wanted later.
-      Preserved two minor inconsistencies vs its ViewModal sibling:
-      disabled opacity 0.6 vs 0.5, and close-button disabled state present
-      here but absent there.
-- [x] `RemapPartyModal.jsx` — migrated + CSS deleted.
-      🔍 This file's `.modal-content { max-width: 560px; overflow: hidden }`
-      is the rule ImagePreview.css documented fighting. Mystery closed.
-      ⚠️ Its CSS header claimed to "share class names with BulkEditModal
-      without duplicating rules" — but both files DEFINE the same classes
-      with very different values. By import order RemapPartyModal.css was
-      winning, so BOTH modals rendered with THIS design and
-      BulkEditModal.css was effectively dead.
-      .modal-error / .modal-error button were dead here (no error banner in
-      this JSX) — they existed only to serve BulkEditModal.
-- [x] `src/styles/modalClasses.js` — REWRITTEN around this design, now
-      canonical. All 14 of its colours were exact Tailwind values; light-only;
-      correct scroll contract; fully-styled buttons. Added W_SM/W_MD/W_LG/W_XL
-      width variants so PANEL carries no max-width (avoids utility conflicts)
-      and the five widths found are catalogued in one place.
-- [x] `RemapPartyPrompt.jsx` — migrated + CSS deleted. Clean file: fully
-      namespaced BEM, light-only, all 9 colours exact Tailwind values
-      (same authorship era as RemapPartyModal.css).
-      Dropped dead `.remap-option:hover` grey background — both instances
-      carry a variant hover that always overrode it.
-      Deliberately NOT a modalClasses.js consumer: compact inline prompt
-      with its own radius/shadow/padding and no header/body/footer. Shape is
-      closer to ConfirmDialog than to a full modal.
-      ⚠️ z-index comment says "below full modals" but 1100 > the 1000 every
-      modal uses — comment is wrong, or value should be ~900.
-      First emerald-* usage (semantically justified: blue = affects all,
-      emerald = affects one).
+- [x] `CategorizeTransactions` — migrated + CSS deleted.
+- [x] `TransactionTable` + `TransactionRow` — both migrated, both CSS files deleted. Zebra-beats-selection specificity bug fixed. All `!important` eliminated. Party-cell flex restructured.
+- [x] `BulkEditModal` — migrated. **Needs correction** to use `M.*` constants (my initial migration used BulkEditModal.css values, but RemapPartyModal.css was winning at runtime — see modal notes). **CSS deletion GATED** on grep for generic class consumers.
+- [x] `CreateCategoryModal` — fully migrated (both its own CSS + Modal.css). Uses `M.*` + own form consts.
+- [x] `RemapPartyModal` — migrated + CSS deleted. Source of the `overflow: hidden` ImagePreview was fighting. Design promoted to canonical `modalClasses.js`.
+- [x] `RemapPartyPrompt` — migrated + CSS deleted. All 9 colours exact Tailwind. Standalone (not a `modalClasses.js` consumer).
+- [x] `ReceiptViewModal` — migrated + CSS deleted.
+- [x] `ReceiptUploadModal` — migrated + CSS deleted.
+- [?] `FilterBar` — migrated, but **may be dead code**. `CategorizeTransactions` doesn't import it; `TransactionTable` has its own inline filter row. Grep `FilterBar` — if orphaned, delete component instead.
 
+## Done — Bugs found & fixed
 
-		
-## Next Steps (statementFormats)
-- [ ] Revisit `DeleteFormatDialog` `<ul>` + body spacing once `ConfirmDialog` is done.
+| Bug | Where | Fix |
+|---|---|---|
+| Selection/edit highlights invisible on even rows | TransactionTable + TransactionRow | Zebra (specificity 0,2,2) beat `.selected`/`.editing` (0,2,0). Now computed per-state. |
+| `display:flex` on `<td>` broke table layout + killed ellipsis | TransactionRow `.party-cell` | Flex moved to inner `<div>`. |
+| Image never hidden during load | ImagePreview | `.image-preview-img { display:block }` defined after `.hidden { display:none }`, winning by source order. Now explicit `isLoading ? 'hidden' : 'block'`. |
+| ImportResult scroll contract inert | UploadStatement + ImportResult | `h-full` → `flex-1 min-h-0`; wrapper given definite height via `PAGE_BODY_H`. |
+| `.checkbox-field` stacked vertically | BulkEditModal | `flex-direction` inherited from `.form-field { column }` — never reset. Now `flex-row`. |
+| Dark inputs on light page | FilterBar, BulkEditModal | Vite template dark-mode-first CSS. Settled light-only. |
+| 4 buttons relying on deleted Vite global `button` rule | `.new-cash-button`, `.clear-filters-button`, `.save-button`, `.cancel-button` | Each given explicit styling. |
+| `.description-cell` wrapping load-order-dependent | TransactionTable | Settled as truncate + expand-on-hover. |
+| Error focus ring stayed blue | CreateCategoryModal | `outline-color` on `outline: none` was inert. Switched to red box-shadow. |
 
-## Deferred: shared components
-Migration order is leaf/page first, then shared components. Shared components flagged but intentionally **not yet migrated**:
-- [ ] `components/ConfirmDialog` (+ `ConfirmDialog.css`) — used by `DeleteFormatDialog`. Still on raw CSS. **Check blast radius** (grep other importers) before migrating/deleting its CSS, since it affects every consumer.
-- [ ] `components/Button` — used everywhere; confirm whether it's already migrated or still raw CSS.
+## CSS files not yet deletable
 
-## Notes / Watch-outs
-- **Preflight resets:** `p` margins and `ul/ol` list-style/margin/padding are zeroed. Restore intentionally where the old look relied on UA defaults (e.g. `space-y-*` between stacked `<p>`, `list-disc pl-5` on real bullet lists). This is why `DeleteFormatDialog`'s `<ul>` needs attention.
-- **Duplicated danger error box:** the same error-banner markup now appears verbatim in `.sfp__error` and `.format-editor-page__error` (border `#f5c2c7`, bg `#f8d7da`, text `#842029`, flex layout). Currently using explicit hex. **TODO:** consolidate onto the already-defined danger `@theme` tokens (`border-danger-border bg-danger-bg text-danger-text`), and consider extracting a small `<ErrorBanner>`/`<Alert>` component.
-- **Muted color consistency:** `#6c757d` is the `--color-muted` token but has been rendered as `text-gray-500` (actually `#6b7280`) in `StatementFormatsPage`, `FormatList`, and `FormatEditorPage` for now. **TODO (token sweep):** switch these to `text-muted` for exact + consistent color.
-- **Shared color tokens:** `--border-color` (`#e0e0e0`) and `--sidebar-bg` (`#fafafa`) are used by shared components but were hardcoded as arbitrary values in Hierarchy. When migrating shared components, consider promoting these (and the muted/danger usages above) to `@theme` tokens, then retrofit Hierarchy + statementFormats pages for consistency.
-- **Editor scroll contract:** `FormatEditorPage` is `flex flex-col overflow-hidden`; the header is `shrink-0`. `FormatEditor` is expected to own its internal scroll region. When migrating it, ensure the scrollable child has `min-h-0` + `overflow-y-auto` (flex children won't shrink below content size without `min-h-0`), or content will clip instead of scroll. Related: the `__table` region uses `h-[50vh] min-h-[320px] overflow-hidden`.
-- **Stepper component:** Still un-migrated. Currently wrapped in a
-  `shrink-0` div inside FormatEditor. When migrating Stepper, put
-  `shrink-0` on its own root and remove the wrapper.
-- **Preflight button cursor:** v4 dropped `cursor: pointer` on buttons.
-  Any migrated component with a bare <button> needs it added explicitly.
-- **New hardcoded hex:** `#28a745` (success) and `#007bff` (primary) now
-  appear as arbitrary values in Stepper. Grep both before migrating
-  `Button` — promote to @theme tokens at that point.
-- **Duplicated dashed placeholder:** same empty-state recipe now appears in
-  StepDefaults (p-10, #868e96) and ParsedPreviewTable (p-6, text-muted).
-  Fold into the <ErrorBanner>/<Alert> extraction work as an <EmptyState>,
-  and standardise on text-muted.
-- **Raw buttons in UploadStatement:** btn-remove and btn-import are styled
-  <button> elements, not <Button>. Swap to <Button variant="danger/success">
-  when Button is migrated.
-- **Warning color tokens:** #fff3cd / #ffc107 / #856404 (Bootstrap warning
-  palette) now appear as arbitrary values. Promote to @theme alongside
-  the existing danger/info token pattern.
-- **TWO warning palettes (resolve during token sweep):**
-  UploadStatement `.format-warning` uses Bootstrap (#fff3cd/#ffc107/#856404);
-  ProcessingWarningsPanel uses a bespoke warmer family
-  (#fef9e7/#f0c36d/#6b5a2a + divider/muted/chip shades). Both render on the
-  same page. Pick one — the PWP family is more complete — and promote to
-  @theme, then retrofit .format-warning.
-- **Money in/out colors disagree:** ParsedPreviewTable uses green-800/red-800
-  (#166534/#991b1b); ImportResult uses Bootstrap #28a745/#dc3545. Same
-  semantic, two palettes. Introduce --color-money-in/out and keep them
-  distinct from --color-success/--color-danger even if hex matches.
-- **THREE primary blues:** #007bff (Stepper), #4a90e2 (UploadStatement
-  focus/info), #2196f3+#1976d2 (ImportResult button). Resolve before
-  migrating Button.
-- **Success alert family:** #d4edda / #c3e6cb / #155724 / #a3cfbb (divider)
-  in ImportResult completes the bg/border/text set alongside the existing
-  danger + info tokens. Promote as --color-success-bg/border/text/divider.
-- **PAGE_BODY_H magic number:** `calc(100vh-200px)` is hardcoded in
-  UploadStatement and anchors every internal scroll region on the page.
-  It's a guess at app chrome + padding + h1. If the nav/header height
-  changes it'll silently drift. Longer-term fix is a proper app-shell flex
-  layout so pages inherit height instead of computing it from 100vh.
-- **House palette = Tailwind defaults (decided):** ColumnMismatchPanel and
-  ParsedPreviewTable independently use the identical green-800/red-800 on
-  green-50/red-50 recipe for positive/negative status. Standardise on this.
-  Retire the Bootstrap hexes in ImportResult's amount cells + summary stats
-  (#28a745/#dc3545 → green-800/red-800). Keep Bootstrap only where it's UI
-  chrome not status (Stepper done-state, remove button) and promote those
-  to --color-success / --color-danger.
-- **#007bff is the winner (3 files):** Stepper, ProcessReceipts,
-  BulkUploadReceipts. BulkUploadReceipts also gives the hover shade
-  (#0056b3). Promote both as --color-primary / --color-primary-hover when
-  migrating Button; retire #4a90e2 and #2196f3/#1976d2.
-- **`.hidden` collision resolved:** ImagePreview.css defined its own
-  `.hidden { display: none }`, duplicating Tailwind's utility. Harmless
-  (identical declaration) but it masked a source-order bug. If other
-  components rely on a locally-defined `.hidden`, Tailwind's utility now
-  covers them — but check for the same block/hidden ordering trap.
-- **Unscoped class names caused real collisions:** `.amount-cell` was
-  defined globally by BOTH ImportResult.css and CandidateTransactions.css
-  with conflicting font-weight, forcing !important. Worth grepping for
-  other generic names still live in unmigrated CSS (.date-cell,
-  .party-cell, .actions-cell, .table-header, .btn-remove, .empty-state,
-  .hidden) — each is a latent cross-feature collision.
-- **THREE scrollbar variants:** #888/#555 (ProcessReceipts,
-  SelectableReceiptTable) vs #c1c1c1/#a1a1a1 (CandidateTransactions).
-  Consolidate into a single `@utility scrollbar-thin` in index.css.
-- **TransactionTable owns this page's scroll region.** CategorizeTransactions
-  is `flex flex-col overflow-hidden` with shrink-0 header + filters, so
-  TransactionTable must be `flex-1 min-h-0`. It currently gets that from its
-  own CSS — when migrating it, carry those utilities over or the scroll dies
-  (same failure mode as the ImportResult bug).
-- **h1 sizes inconsistent:** 24px (UploadStatement, ProcessReceipts) vs 28px
-  (CategorizeTransactions). Candidate for --text-page-title or a shared
-  <PageHeader>.
-- **Focus ring width drift:** 3px (UploadStatement, ProcessReceipts) vs 2px
-  (CategorizeTransactions). Candidate for a single --shadow-focus-ring token.
-- **Unstyled buttons from the deleted Vite `button` rule — now 4 found:**
-  .new-cash-button, .clear-filters-button, .save-button, .cancel-button.
-  The tell is a rule that sets only padding/margin/border-color with no
-  background, border-width, or border-radius. Grep remaining CSS for
-  `border-color:` without an adjacent `border:` declaration.
-- **TWO modal systems, colliding on .modal-content + .modal-header:**
-  (a) @/styles/Modal.css — .modal-backdrop / .modal-content / .modal-header /
-      .modal-close / .modal-body / .modal-footer / .btn-primary /
-      .btn-secondary. Used by CreateCategoryModal (explicit import).
-      Likely source of the `width:560px; overflow:hidden` that ImagePreview
-      documented fighting.
-  (b) BulkEditModal.css — .modal-overlay / .modal-content / .modal-header /
-      .modal-close-btn / .modal-actions / .save-button / .cancel-button.
-      A rogue duplicate, NOT the shared system (corrects my earlier note).
-  (c)  modalClasses.js (500px / bg-black-50 / shadow-25 / px-6 / gap-3),
-      BulkEditModal (600px / bg-black-70 / shadow-6 / gap-4),
-      ReceiptViewModal (640px / bg-black-50+p-4 / shadow-40 / px-5 / gap-2).
-      A <Modal size="sm|md|lg"> component would collapse all three and settle
-      the arbitrary padding/shadow/title-weight drift.
-  (d) ReceiptUploadModal (440px / no max-h / bg-black-50+p-4 / shadow-40 /
-      px-5 / gap-2) — overlay, header, close button and actions row are
-      BYTE-IDENTICAL to ReceiptViewModal's. These two are copy-paste siblings
-      differing only in max-width, max-height, and primary button colour.
-      Four implementations now; <Modal size> would collapse all of them.
-      Resolution: migrate Modal.css into a <Modal> component, then convert
-      BulkEditModal to use it and delete its generic classes.
-- **Cross-feature CSS leakage confirmed:** CreateCategoryModal.css was
-  supplying `.field-error` and `.form-group.has-error` to ProcessReceipts,
-  which declared neither. Both now explicit. Worth assuming any
-  "class used in JSX with no local rule" is being fed by another feature's
-  stylesheet.
-- **SIX primary blues found.** Running tally:
-  #007bff (Stepper, BulkUpload — Bootstrap),
-  #2196f3 (ImportResult, CandidateTransactions, CategorizeTransactions,
-           Modal.css btn-primary — Material),
-  #4a90e2 (UploadStatement, CategorizeTransactions focus — bespoke),
-  #2563eb (Modal.css form focus — Tailwind blue-600),
-  #646cff (FilterBar — Vite template),
-  #1976d2 (hover shade of #2196f3).
-  The Button migration is the natural convergence point. #007bff wins
-  on frequency (3 files); #2563eb (blue-600) wins on being an actual
-  Tailwind value; #2196f3 wins on being the modal/action-button standard.
-  Pick one.
+| File | Blocker |
+|---|---|
+| `ProcessReceipts.css` | `.radio-row`/`.radio-option`/`.checkbox-option` may be consumed by child components (GenerateCashFromReceiptModal, etc.). Grep before deleting. |
+| `BulkEditModal.css` | Generic `.modal-overlay`/`.modal-content`/etc. may be consumed by other modals. Grep before deleting. Likely safe now that `modalClasses.js` + per-modal migrations cover the same classes. |
+
+## Next — shared components (next PR)
+
+Priority order based on blast radius and what's currently broken:
+
+| Component | Priority | Why |
+|---|---|---|
+| `DropdownWithCreate` | **P0** | `.dropdown-with-create select` styling lived in deleted TransactionRow.css. Replicated for TransactionRow only; selects in BulkEditModal / RemapPartyModal / CreateCashTransactionModal / GenerateCashFromReceiptModal are currently unstyled. |
+| `ConfirmDialog` + CSS | **P1** | Used by `DeleteFormatDialog`; still on raw CSS. Blocks the deferred `list-disc pl-5` fix. Check blast radius first. |
+| `Button` | **P1** | Used everywhere. Natural convergence point for the primary-blue decision and the `--color-success`/`--color-danger` tokens. |
+| `Pagination` | P2 | Used by CategorizeTransactions. |
+| `Dropdown` | P2 | Used by FilterBar (if not dead). |
+| `FileDropzone` | P2 | Used by UploadStatement + StepSampleFile. |
+| `FilePreview` | P3 | Used by BulkUploadReceipts. |
+| `Checkbox` | P3 | Used widely — but may already be unstyled / headless. Confirm. |
+| `FormField`, `TextInput`, `NumberInput`, `ChipInput` | P3 | Format-editor field components. |
+| `Thumbnail` | P3 | Used by SelectableReceiptTable. |
+| Remaining modals: `GenerateCashModal`, `CreateCashTransactionModal`, `GenerateCashFromReceiptModal` | P2 | Swap `import '@/styles/Modal.css'` → `import * as M from '@/styles/modalClasses'`. Mechanical — follow the consumer migration guide in the RemapPartyModal notes. |
+
+### Also pending
+- [~] `DeleteFormatDialog` `<ul>` + body spacing — deferred until `ConfirmDialog` migrated.
+- [ ] Correct `BulkEditModal.jsx` to use `M.*` constants (diff provided in RemapPartyModal session).
+- [ ] Delete `ProcessReceipts.css` and `BulkEditModal.css` once greps pass.
+- [ ] Verify `FilterBar` is still imported; if not, delete the component.
+
+## Token sweep (do alongside or after shared components)
+
+These are deliberate decisions deferred to avoid blocking leaf migrations. Resolve in one pass.
+
+### Primary blue — pick one
+
+| Hex | Source | Files |
+|---|---|---|
+| `#007bff` / `#0056b3` | Bootstrap | Stepper, ProcessReceipts, BulkUploadReceipts |
+| `#2196f3` / `#1976d2` | Material | ImportResult, CandidateTransactions, CategorizeTransactions, old Modal.css |
+| `#4a90e2` | Bespoke | UploadStatement focus, CategorizeTransactions focus |
+| `#2563eb` / `#1d4ed8` | Tailwind blue-600/700 | modalClasses.js (canonical), CreateCategoryModal focus, RemapPartyModal |
+| `#646cff` | Vite template | FilterBar (possibly dead) |
+
+**Recommendation:** `#2563eb` (blue-600). It's the canonical modal standard now, it's an actual Tailwind value (no arbitrary hex needed), and it has a natural hover shade (`blue-700`). Promote as `--color-primary` / `--color-primary-hover`. The `Button` migration is the right moment.
+
+### Status greens — pick one
+
+| Hex | Source | Usage |
+|---|---|---|
+| `green-800` / `green-50` | Tailwind | ParsedPreviewTable credit, ColumnMismatchPanel present (2 files, byte-identical) |
+| `#28a745` / `#218838` | Bootstrap | Stepper done, UploadStatement import-btn, TransactionRow save-btn |
+| `#4caf50` / `#388e3c` | Material | TransactionRow save-btn, ReceiptIcon attached, ReceiptUploadModal upload-btn |
+| `#43a047` / `#2e7d32` | Material (darker) | ProcessReceipts generate-cash-btn, CategorizeTransactions generate-cash-btn |
+| `emerald-600` / `emerald-50` | Tailwind | RemapPartyPrompt "this txn only" (semantically distinct) |
+
+**Recommendation:** Tailwind defaults (`green-800`/`green-50`) for *semantic* status; promote Bootstrap `#28a745` as `--color-success` for *UI chrome* (buttons, badges). Keep emerald separate (it's contextual, not status).
+
+### Status reds — already mostly converged
+
+- Danger tokens (`--color-danger-bg/border/text`) use the Bootstrap family.
+- ColumnMismatchPanel, TransactionRow, and the canonical modal error use Tailwind `red-*` values.
+- **Action:** add `--color-error: theme(colors.red.600)` and `--color-error-bg: theme(colors.red.50)` for the Tailwind-native family. Keep danger tokens for the heavier Bootstrap-style alert banners. Or consolidate onto one family — but the two serve different visual weights.
+
+### Warning palettes — pick one
+
+| Family | Files |
+|---|---|
+| Bootstrap (`#fff3cd`/`#ffc107`/`#856404`) | UploadStatement `.format-warning` |
+| Bespoke warm (`#fef9e7`/`#f0c36d`/`#6b5a2a` + divider/muted/chip) | ProcessingWarningsPanel |
+
+**Recommendation:** the PWP family is more complete. Promote as `--color-warning-bg/border/text/divider/muted/chip-border`.
+
+### Other token candidates
+
+| Token | Value | Used in |
+|---|---|---|
+| `--color-success` | `#28a745` | Stepper, UploadStatement, btn-save |
+| `--color-success-hover` | `#218838` | hover shades of above |
+| `--color-success-bg/border/text` | `#d4edda`/`#c3e6cb`/`#155724` | ImportResult success banner |
+| `--color-money-in` | `green-800` | ParsedPreviewTable, ColumnMismatchPanel |
+| `--color-money-out` | `red-800` | ParsedPreviewTable, ColumnMismatchPanel |
+| `--spacing-page-body` | `calc(100vh - 200px)` | UploadStatement (`PAGE_BODY_H`), TransactionTable container |
+| `--text-page-title` | `text-2xl` (24px) or `text-[28px]` | UploadStatement/ProcessReceipts (24) vs CategorizeTransactions (28) |
+| `--shadow-focus-ring` | `0 0 0 3px …` | UploadStatement (3px), CategorizeTransactions (2px) |
+
+### Muted grey — one sweep
+
+`#6c757d` is the `--color-muted` token. Several files still use `text-gray-500` (`#6b7280`). One pass to replace with `text-muted` for exact consistency.
+
+## Watch-outs — still active
+
+### Preflight
+- **`p` margins / `ul` list-style zeroed.** Restore with `space-y-*` / `list-disc pl-5` where the old look relied on UA defaults.
+- **`cursor: pointer` removed from buttons in v4.** Must be explicit on every `<button>`.
+- **Heading size + weight zeroed.** Every `<h1>`–`<h6>` needs explicit classes.
+
+### Scroll contracts
+- **`min-h-0` (or `overflow-*`) is required on every flex child that should shrink below content.** Missing it silently kills scrolling. This caused the ImportResult bug and is the reason `ReceiptViewModal`'s `min-h-[200px]` is load-bearing.
+- **`PAGE_BODY_H` (`calc(100vh - 200px)`)** is a hardcoded guess at app-chrome height, used in UploadStatement and TransactionTable container. A proper app-shell flex layout would eliminate it.
+
+### Sticky thead + `border-collapse`
+- Borders on sticky `<th>` cells can visually detach in Chromium because collapsed borders aren't owned by the cell. `ParsedPreviewTable` offered a `shadow-[inset_…]` fix; not yet applied anywhere.
+- `TransactionTable`'s filter row offset (`top-11` = 44px) is hardcoded to the header row's computed height — fragile.
+
+### Modal system
+- **`modalClasses.js` is the single source of truth** for modal chrome. Derived from RemapPartyModal.css (the design that was actually winning at runtime for both it and BulkEditModal).
+- **BulkEditModal needs correcting** to use `M.*` constants (diff provided).
+- **Remaining modals** (`GenerateCashModal`, `CreateCashTransactionModal`, `GenerateCashFromReceiptModal`) need mechanical `Modal.css` → `M.*` swap.
+- **`<Modal>` component extraction** would collapse five implementations into one with size variants and is the natural next step after the mechanical swaps. Also resolves the deferred `ConfirmDialog`.
+
+### Scrollbar styling
+- Three nearly-identical `SCROLLBAR` const definitions (ProcessReceipts, SelectableReceiptTable, CandidateTransactions) with slightly different thumb colours. Consolidate into a single `@utility` or shared const.
+
+### `!important` syntax
+- `ImagePreview`'s canvas guard uses v4's trailing-`!` syntax (`max-w-full!`). Verify it compiles; fall back to prefix `!max-w-full` if not.
+
+### Cross-feature CSS leakage
+- Now largely resolved, but assume any "class used in JSX with no local rule" was being fed by another feature's stylesheet. The `DropdownWithCreate` select styling (P0) is the last confirmed case.
+
+### Vite template residue
+- `#646cff` (Vite purple) appears in FilterBar. If FilterBar is dead, this disappears. Otherwise replace with `--color-primary`.
+- Grep `#1a1a1a`, `#213547`, `rgba(255,255,255,0.87)`, `#646cff` across remaining unmigrated CSS to catch more dark-mode-first files.
+
+### Generic class-name collisions
+- `.amount-cell` collision (ImportResult × CandidateTransactions × TransactionTable × TransactionRow) is **fully closed** — all four components migrated.
+- Worth grepping for other generic names still live in unmigrated CSS: `.date-cell`, `.party-cell`, `.actions-cell`, `.table-header`, `.btn-remove`, `.empty-state`.
 
 
