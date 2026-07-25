@@ -282,6 +282,15 @@ Migrating the frontend from individual CSS files to Tailwind CSS v4. Note: this 
       flex-direction, so it inherited `column` from .form-field — checkbox
       and Clear button were stacked + centred. Now a row.
       Dead CSS dropped: .party-name-display, .party-name-value.
+- [~] `CreateCategoryModal.jsx` — PARTIAL. CreateCategoryModal.css migrated
+      + deleted; @/styles/Modal.css import retained (not yet migrated).
+      Dropped dead `create-modal` class (empty rule).
+      has-error colours were exact Tailwind (red-600/red-50).
+      Fixed inert `outline-color` on error focus — ring was staying blue.
+- [ ] `src/styles/Modal.css` — NOW TOP PRIORITY. This is the app's real
+      shared modal stylesheet, imported explicitly by CreateCategoryModal
+      (and presumably the other modals). Migrating it unlocks ~7 modals +
+      ConfirmDialog and is the right moment to extract a <Modal> component.
 
 
 
@@ -379,8 +388,20 @@ Migration order is leaf/page first, then shared components. Shared components fl
   The tell is a rule that sets only padding/margin/border-color with no
   background, border-width, or border-radius. Grep remaining CSS for
   `border-color:` without an adjacent `border:` declaration.
-- **SHARED MODAL CHROME is the biggest remaining structural issue.** Six
-  unmigrated modals plus ConfirmDialog all consume generic .modal-* classes
-  with at least two conflicting .modal-content definitions. Strongly
-  consider extracting a <Modal> component before migrating them
-  individually — it also resolves the deferred ConfirmDialog item.
+- **TWO modal systems, colliding on .modal-content + .modal-header:**
+  (a) @/styles/Modal.css — .modal-backdrop / .modal-content / .modal-header /
+      .modal-close / .modal-body / .modal-footer / .btn-primary /
+      .btn-secondary. Used by CreateCategoryModal (explicit import).
+      Likely source of the `width:560px; overflow:hidden` that ImagePreview
+      documented fighting.
+  (b) BulkEditModal.css — .modal-overlay / .modal-content / .modal-header /
+      .modal-close-btn / .modal-actions / .save-button / .cancel-button.
+      A rogue duplicate, NOT the shared system (corrects my earlier note).
+  Resolution: migrate Modal.css into a <Modal> component, then convert
+  BulkEditModal to use it and delete its generic classes.
+- **Cross-feature CSS leakage confirmed:** CreateCategoryModal.css was
+  supplying `.field-error` and `.form-group.has-error` to ProcessReceipts,
+  which declared neither. Both now explicit. Worth assuming any
+  "class used in JSX with no local rule" is being fed by another feature's
+  stylesheet.
+
