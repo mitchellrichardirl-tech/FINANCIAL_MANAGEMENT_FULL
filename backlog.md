@@ -167,13 +167,16 @@ Migrating the frontend from individual CSS files to Tailwind CSS v4. Note: this 
       ⚠️ grep for `pwp-code` before merging.
 - [x] `ImportResult.jsx` — migrated + CSS deleted.
       `.import-error` consolidated onto existing danger tokens (text shifts
-      from #721c24 → #842029 — intentional convergence).
-      Table font-family now uses the --font-sans token.
-      #666 greys mapped to text-muted.
-      ⚠️ Latent bug preserved: h-full + internal flex-1/min-h-0/overflow-auto
-      scroll contract is inert because no ancestor has a definite height.
-      Fix requires giving UploadStatement's import-result wrapper a height —
-      separate commit.
+      #721c24 → #842029 — intentional convergence).
+      Table font-family now uses the --font-sans token. #666 → text-muted.
+- [x] FIXED latent scroll bug: ImportResult root changed h-full → flex-1
+      min-h-0, and UploadStatement's import-result wrapper given a definite
+      height via the new shared PAGE_BODY_H const (also applied to the
+      preview branch). Internal table scroll + pinned summary now work.
+      ⚠️ behaviour change — browser verify.
+      Known limitation: warnings panel is shrink-0, so many expanded
+      warnings squeeze the table. Cap with max-h + overflow-y-auto if it
+      becomes a problem.
 		
 ## Next Steps (statementFormats)
 - [ ] Revisit `DeleteFormatDialog` `<ul>` + body spacing once `ConfirmDialog` is done.
@@ -223,3 +226,8 @@ Migration order is leaf/page first, then shared components. Shared components fl
 - **Success alert family:** #d4edda / #c3e6cb / #155724 / #a3cfbb (divider)
   in ImportResult completes the bg/border/text set alongside the existing
   danger + info tokens. Promote as --color-success-bg/border/text/divider.
+- **PAGE_BODY_H magic number:** `calc(100vh-200px)` is hardcoded in
+  UploadStatement and anchors every internal scroll region on the page.
+  It's a guess at app chrome + padding + h1. If the nav/header height
+  changes it'll silently drift. Longer-term fix is a proper app-shell flex
+  layout so pages inherit height instead of computing it from 100vh.

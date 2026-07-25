@@ -31,8 +31,13 @@ import ImportResult from './ImportResult';
 import AccountSelector from './AccountSelector';
 import { createLogger } from '@/lib/logger';
 const logger = createLogger('UploadStatement');
-/* ── Shared control height for visual alignment ─────────────────────── */
-const CONTROL_H = 'h-[42px]';
+ /* ── Shared control height for visual alignment ─────────────────────── */
+ const CONTROL_H = 'h-[42px]';
+/* ── Page body height ────────────────────────────────────────────────
+ * Both the preview and import-result branches own an internal scroll
+ * region, so both need a definite height to anchor it. 200px accounts
+ * for app chrome + page padding + the h1.                             */
+const PAGE_BODY_H = 'h-[calc(100vh-200px)]';
 /* ── File-info table cells (mobile-first) ────────────────────────────
  * Mobile: tds are display:block (stacked).
  * md+:    tds return to table-cell layout.                            */
@@ -176,12 +181,16 @@ export default function UploadStatement() {
         <div className="p-10 text-center text-lg text-gray-500">Loading...</div>
       )}
       {importResult ? (
-        <div className="mt-5">
-          <ProcessingWarningsPanel
-            warnings={importResult.warnings}
-            heading="⚠️ Import completed with warnings"
-            context="import"
-          />
+        <div className={`mt-5 flex flex-col ${PAGE_BODY_H}`}>
+          {/* shrink-0 wrapper: panel keeps its natural height, ImportResult
+              absorbs the remainder. Renders empty when there are no warnings. */}
+          <div className="shrink-0">
+            <ProcessingWarningsPanel
+              warnings={importResult.warnings}
+              heading="⚠️ Import completed with warnings"
+              context="import"
+            />
+          </div>
           <ImportResult result={importResult} onUploadAnother={reset} showHeader />
         </div>
       ) : (
@@ -192,7 +201,7 @@ export default function UploadStatement() {
             </div>
           )}
           {selectedFile && previewData && (
-            <div className="mt-5 flex h-[calc(100vh-200px)] flex-col">
+            <div className={`mt-5 flex flex-col ${PAGE_BODY_H}`}>
               {/* ── File info summary ── */}
               <div className="shrink-0 mb-4 rounded-lg bg-gray-50 p-4">
                 <table className="w-full text-sm xl:text-base">

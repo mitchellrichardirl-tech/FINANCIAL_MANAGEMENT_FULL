@@ -5,6 +5,11 @@
  *
  * Fetches transactions by `upload_id` on mount so the user can review
  * exactly what was imported.
+ *
+ * Layout contract: renders as a flex-column child and owns an internal
+ * scroll region (the transactions table). The parent must be
+ * `flex flex-col` with a definite height, otherwise this degrades to
+ * auto-height and the page scrolls instead.
  */
 import { useState, useEffect } from 'react';
 import { getTransactions } from '@/features/transactions/api';
@@ -89,7 +94,7 @@ export default function ImportResult({ result, onUploadAnother, showHeader = tru
   const categorizedCount = transactions ? transactions.filter((t) => t.party_id).length : 0;
   // ── Render ────────────────────────────────────────────────────────
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       {showHeader && (
         <div className="shrink-0 mb-4 flex items-start justify-between gap-5">
           <div className="flex-1 rounded border border-[#c3e6cb] bg-[#d4edda] px-5 py-4">
@@ -122,12 +127,12 @@ export default function ImportResult({ result, onUploadAnother, showHeader = tru
         </div>
       )}
       {loading && (
-        <div className="p-10 text-center text-base text-[#1976d2]">
+        <div className="shrink-0 p-10 text-center text-base text-[#1976d2]">
           Loading transactions...
         </div>
       )}
       {error && (
-        <div className="mb-4 rounded border border-danger-border bg-danger-bg px-4 py-3 text-danger-text">
+        <div className="shrink-0 mb-4 rounded border border-danger-border bg-danger-bg px-4 py-3 text-danger-text">
           {error}
         </div>
       )}
