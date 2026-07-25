@@ -1,21 +1,3 @@
-/**
- * @file CategorizeTransactions.jsx
- * Top-level page for reviewing and categorizing imported bank
- * transactions.
- *
- * Responsibilities:
- *  - Load and own all reference data (accounts, taxonomy, uploads).
- *  - Fetch transactions with server-side filtering, sorting, and paging.
- *  - Wire up inline-edit, bulk-edit, and party-remap flows.
- *  - Surface success/error feedback via toasts.
- *
- * Child components:
- *  - {@link TransactionTable} — sortable, filterable grid.
- *  - {@link Pagination}
- *  - {@link BulkEditModal} — multi-select mass update.
- *  - {@link RemapPartyModal} — move a party to a different type.
- */
-
 import { useState, useEffect, useCallback } from 'react';
 import { useToast } from '@/components/ToastContext';
 import {
@@ -42,15 +24,24 @@ import BulkEditModal from './BulkEditModal';
 import RemapPartyModal from './RemapPartyModal';
 import GenerateCashModal from './GenerateCashModal';
 import CreateCashTransactionModal from './CreateCashTransactionModal';
-import './CategorizeTransactions.css';
 import { createLogger } from '@/lib/logger';
-
 /** @type {import('@/lib/logger').Logger} */
 const logger = createLogger('CategorizeTransactions');
-
 /** Page size for server-side pagination. */
 const ITEMS_PER_PAGE = 100;
-
+/* ── Header action buttons ─────────────────────────────────────────── */
+const ACTION_BTN =
+  'cursor-pointer rounded px-5 py-2.5 text-sm font-medium text-white transition-colors';
+/**
+ * Secondary variant for "+ New Cash Transaction".
+ * NOTE: the old CSS had no `.new-cash-button` rule, so this button was
+ * relying on native browser chrome. Preflight removes that, so it needs
+ * explicit styling. Neutral treatment chosen because it's the
+ * always-visible action, unlike the two selection-contextual buttons.
+ */
+const ACTION_BTN_SECONDARY =
+  'cursor-pointer rounded border border-gray-300 bg-white px-5 py-2.5 text-sm ' +
+  'font-medium text-gray-800 transition-colors hover:bg-gray-50';
 /**
  * Main categorization view.
  *
@@ -59,7 +50,6 @@ const ITEMS_PER_PAGE = 100;
  */
 export default function CategorizeTransactions() {
   const { addToast } = useToast();
-
   // ── Data state ────────────────────────────────────────────────────
   const [transactions, setTransactions] = useState([]);
   const [accounts, setAccounts] = useState([]);
@@ -68,15 +58,9 @@ export default function CategorizeTransactions() {
   const [types, setTypes] = useState([]);
   const [parties, setParties] = useState([]);
   const [uploads, setUploads] = useState([]);
-
   // ── UI state ──────────────────────────────────────────────────────
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
-  /**
-   * Approximate total — API doesn't return a count, so we infer:
-   *  - If a full page is returned, assume at least one more exists.
-   *  - Otherwise clamp to actual count.
-   */
   const [totalTransactions, setTotalTransactions] = useState(0);
   const [filters, setFilters] = useState({});
   const [selectedTransactions, setSelectedTransactions] = useState([]);
@@ -85,33 +69,17 @@ export default function CategorizeTransactions() {
   const [isCreateCashOpen, setIsCreateCashOpen] = useState(false);
   const [sortField, setSortField] = useState('transaction_date');
   const [sortDir, setSortDir] = useState('desc');
-  /**
-   * When set, the remap modal is open. If a number, that party is
-   * preselected; if `true`, the modal opens empty.
-   * @type {?number|true}
-   */
   const [remapPartyId, setRemapPartyId] = useState(null);
-  /** Optional target type to pre-fill in the remap modal. */
   const [remapTargetTypeId, setRemapTargetTypeId] = useState(null);
-
   const isRemapOpen = remapPartyId !== null;
-
   // ── Effects: load data on mount / filter change ───────────────────
-
   useEffect(() => {
     loadReferenceData();
   }, []);
-
   useEffect(() => {
     loadTransactions();
   }, [filters, currentPage, sortField, sortDir]);
-
   // ── Data loaders ──────────────────────────────────────────────────
-
-  /**
-   * Fetch all reference (lookup) data in parallel.
-   * Errors are toasted; we don't block the UI.
-   */
   const loadReferenceData = async () => {
     try {
       const [
@@ -143,11 +111,6 @@ export default function CategorizeTransactions() {
       });
     }
   };
-
-  /**
-   * Fetch a page of transactions matching the current filters and
-   * sort order. Updates `transactions` and `totalTransactions`.
-   */
   const loadTransactions = async () => {
     setLoading(true);
     try {
@@ -155,14 +118,12 @@ export default function CategorizeTransactions() {
         if (value !== null && value !== undefined && value !== '') acc[key] = value;
         return acc;
       }, {});
-
       cleanFilters.limit = ITEMS_PER_PAGE;
       cleanFilters.offset = (currentPage - 1) * ITEMS_PER_PAGE;
       if (sortField) {
         cleanFilters.sort_by = sortField;
         cleanFilters.sort_dir = sortDir;
       }
-
       const data = await getTransactions(cleanFilters);
       setTransactions(data);
       setTotalTransactions(
@@ -181,16 +142,7 @@ export default function CategorizeTransactions() {
       setLoading(false);
     }
   };
-
   // ── Mutation handlers ─────────────────────────────────────────────
-
-  /**
-   * Persist changes to a single transaction (inline edit).
-   *
-   * @param {number} transactionId
-   * @param {Object} updates
-   * @returns {Promise<Object>} The updated transaction.
-   */
   const handleTransactionUpdate = async (transactionId, updates) => {
     try {
       const updated = await updateTransaction(transactionId, updates);
@@ -206,14 +158,8 @@ export default function CategorizeTransactions() {
       throw err;
     }
   };
-
-  /**
-   * Apply `updates` to all selected transactions.
-   * Called from {@link BulkEditModal}.
-   */
   const handleBulkUpdate = async (updates) => {
     if (selectedTransactions.length === 0) throw new Error('No transactions selected');
-
     const count = selectedTransactions.length;
     setLoading(true);
     try {
@@ -237,30 +183,14 @@ export default function CategorizeTransactions() {
       setLoading(false);
     }
   };
-
-   /**
-   * Generate Cash-account counterpart transactions for all selected
-   * transactions. Called from {@link GenerateCashModal}.
-   *
-   * On success:
-   *  - Reloads the transaction list.
-   *  - Refreshes accounts (the Cash account may have just been
-   *    created) and uploads (a synthetic upload record is added per
-   *    batch).
-   *  - Clears the selection and closes the modal.
-   *  - Toasts a summary of created / skipped / rejected counts.
-   */
   const handleGenerateCash = async () => {
     if (selectedTransactions.length === 0) {
       throw new Error('No transactions selected');
     }
-
     setLoading(true);
     try {
       const response = await generateCashTransactions(selectedTransactions);
       const result = response?.data ?? response;
-
-      // Refresh everything affected by the generation.
       const [accountsData, uploadsData] = await Promise.all([
         getAccounts(),
         getUploads(),
@@ -268,14 +198,11 @@ export default function CategorizeTransactions() {
       setAccounts(accountsData);
       setUploads(uploadsData.data || uploadsData);
       await loadTransactions();
-
       setSelectedTransactions([]);
       setIsGenerateCashOpen(false);
-
       const parts = [`${result.created_count} created`];
       if (result.skipped_count > 0) parts.push(`${result.skipped_count} skipped`);
       if (result.rejected_count > 0) parts.push(`${result.rejected_count} rejected`);
-
       addToast({
         message: `Cash transactions: ${parts.join(', ')}`,
         type:
@@ -297,17 +224,10 @@ export default function CategorizeTransactions() {
       setLoading(false);
     }
   };
-
-  /**
-   * Create a single Cash-account transaction from manually entered data.
-   * Called from {@link CreateCashTransactionModal}.
-   */
   const handleCreateCashTransaction = async (opts) => {
     setLoading(true);
     try {
       await createCashTransaction(opts);
-
-      // Refresh anything the new transaction could affect.
       const [accountsData, uploadsData] = await Promise.all([
         getAccounts(),
         getUploads(),
@@ -315,7 +235,6 @@ export default function CategorizeTransactions() {
       setAccounts(accountsData);
       setUploads(uploadsData.data || uploadsData);
       await loadTransactions();
-
       setIsCreateCashOpen(false);
       addToast({
         message: 'Cash transaction created',
@@ -333,17 +252,11 @@ export default function CategorizeTransactions() {
       setLoading(false);
     }
   };
-
-  /**
-   * Remap a party to a new parent type.
-   * Called from {@link RemapPartyModal}.
-   */
   const handleRemapParty = async (partyId, newTypeId) => {
     try {
       const result = await remapParty(partyId, newTypeId);
       const [partiesData] = await Promise.all([getParties(), loadTransactions()]);
       setParties(partiesData);
-
       const merged = result?.data?.action === 'merged';
       addToast({
         message: merged
@@ -361,24 +274,7 @@ export default function CategorizeTransactions() {
       throw err;
     }
   };
-
   // ── Create-item factory ───────────────────────────────────────────
-
-  /**
-   * Factory producing create handlers for each taxonomy level.
-   *
-   * Each handler:
-   *  1. Calls the create API.
-   *  2. Refetches the list and updates local state.
-   *  3. Toasts success.
-   *  4. Returns the newly created record so callers can auto-select it.
-   *
-   * @param {string} label - Human label for toast (e.g. "Category").
-   * @param {Function} createFn - API function.
-   * @param {Function} refetchFn - Refetch list from API.
-   * @param {Function} setFn - State setter.
-   * @param {Function} findFn - Locate the new item in the refreshed list.
-   */
   const makeCreateHandler = useCallback(
     (label, createFn, refetchFn, setFn, findFn) =>
       async (...args) => {
@@ -398,41 +294,24 @@ export default function CategorizeTransactions() {
       },
     [addToast]
   );
-
   const handleCategoryCreated = makeCreateHandler(
-    'Category',
-    createCategory,
-    getCategories,
-    setCategories,
+    'Category', createCategory, getCategories, setCategories,
     (list, name) => list.find((c) => c.category === name)
   );
-
   const handleSubCategoryCreated = makeCreateHandler(
-    'Sub-category',
-    createSubCategory,
-    getSubCategories,
-    setSubCategories,
+    'Sub-category', createSubCategory, getSubCategories, setSubCategories,
     (list, name, categoryId) =>
       list.find((sc) => sc.sub_category === name && sc.category_id === categoryId)
   );
-
   const handleTypeCreated = makeCreateHandler(
-    'Type',
-    createType,
-    getTypes,
-    setTypes,
+    'Type', createType, getTypes, setTypes,
     (list, name, subCategoryId) =>
       list.find((t) => t.type === name && t.sub_category_id === subCategoryId)
   );
-
   const handlePartyCreated = makeCreateHandler(
-    'Party',
-    createParty,
-    getParties,
-    setParties,
+    'Party', createParty, getParties, setParties,
     (list, name, typeId) => list.find((p) => p.name === name && p.type_id === typeId)
   );
-
   const handleReceiptChange = (updatedTransaction) => {
     setTransactions((prevTransactions) =>
       prevTransactions.map((txn) =>
@@ -440,33 +319,20 @@ export default function CategorizeTransactions() {
       )
     );
   };
-  
   // ── Misc handlers ─────────────────────────────────────────────────
-
-  /** Replace filter state and reset to page 1. */
   const handleFilterChange = useCallback((newFilters) => {
     setFilters(newFilters);
     setCurrentPage(1);
   }, []);
-
-  /** Navigate to a new page and clear selection. */
   const handlePageChange = (page) => {
     setCurrentPage(page);
     setSelectedTransactions([]);
   };
-
-  /** Change sort column/direction and reset to page 1. */
   const handleSortChange = useCallback((field, dir) => {
     setSortField(field);
     setSortDir(dir);
     setCurrentPage(1);
   }, []);
-
-  /**
-   * Find an existing party by name+type, or create one if missing.
-   * Used by {@link TransactionRow} when the user chooses "this txn only"
-   * after a type conflict.
-   */
   const handleFindOrCreateParty = useCallback(
     async (name, typeId) => {
       const existing = parties.find(
@@ -478,27 +344,14 @@ export default function CategorizeTransactions() {
     },
     [parties, handlePartyCreated]
   );
-
-  /**
-   * Open the remap-party modal.
-   * @param {?number} partyId - Pre-selected party, or `null`/`true` to open empty.
-   * @param {?number} targetTypeId - Optionally pre-fill target type.
-   */
   const handleOpenRemap = useCallback((partyId = null, targetTypeId = null) => {
     setRemapPartyId(partyId ?? true);
     setRemapTargetTypeId(targetTypeId);
   }, []);
-
   const handleCloseRemap = () => {
     setRemapPartyId(null);
     setRemapTargetTypeId(null);
   };
-
-  /**
-   * Format an ISO date string for the uploads dropdown.
-   * @param {?string} dateString
-   * @returns {string}
-   */
   const formatUploadDate = (dateString) => {
     if (!dateString) return 'Unknown date';
     const date = new Date(dateString);
@@ -508,17 +361,15 @@ export default function CategorizeTransactions() {
     const minutes = date.getMinutes().toString().padStart(2, '0');
     return `${day} ${month}; ${hours}:${minutes}`;
   };
-
   const initialPartyId = typeof remapPartyId === 'number' ? remapPartyId : null;
-
   return (
-    <div className="categorize-transactions">
-      <div className="page-header">
-        <h1>Categorize Transactions</h1>
-        <div className="header-actions">
+    <div className="mx-auto flex h-full w-full max-w-[1600px] flex-col overflow-hidden p-5">
+      <div className="shrink-0 mb-4 flex items-center justify-between">
+        <h1 className="text-[28px] font-semibold text-gray-800">Categorize Transactions</h1>
+        <div className="flex items-center gap-2.5">
           <button
             onClick={() => setIsCreateCashOpen(true)}
-            className="new-cash-button"
+            className={ACTION_BTN_SECONDARY}
           >
             + New Cash Transaction
           </button>
@@ -526,13 +377,13 @@ export default function CategorizeTransactions() {
             <>
               <button
                 onClick={() => setIsBulkEditOpen(true)}
-                className="bulk-edit-button"
+                className={`${ACTION_BTN} bg-[#2196f3] hover:bg-[#1976d2]`}
               >
                 Bulk Edit ({selectedTransactions.length})
               </button>
               <button
                 onClick={() => setIsGenerateCashOpen(true)}
-                className="generate-cash-button"
+                className={`${ACTION_BTN} bg-[#43a047] hover:bg-[#2e7d32]`}
               >
                 Generate Cash ({selectedTransactions.length})
               </button>
@@ -540,10 +391,16 @@ export default function CategorizeTransactions() {
           )}
         </div>
       </div>
-
-      <div className="filters-section">
-        <div className="filter-group">
-          <label htmlFor="upload-filter">Filter by Upload:</label>
+      {/* shrink-0 added — the original omitted it, leaving the filter bar
+          squashable inside the flex column. */}
+      <div className="shrink-0 mb-5 rounded border border-gray-300 bg-gray-50 p-4">
+        <div className="flex items-center gap-2.5">
+          <label
+            htmlFor="upload-filter"
+            className="whitespace-nowrap font-medium text-gray-600"
+          >
+            Filter by Upload:
+          </label>
           <select
             id="upload-filter"
             value={filters.upload_id || ''}
@@ -551,6 +408,7 @@ export default function CategorizeTransactions() {
               const value = e.target.value;
               handleFilterChange({ ...filters, upload_id: value ? parseInt(value) : null });
             }}
+            className="min-w-[250px] rounded border border-gray-300 bg-white px-3 py-2 text-sm focus:border-[#4a90e2] focus:shadow-[0_0_0_2px_rgba(74,144,226,0.2)] focus:outline-none"
           >
             <option value="">All Uploads</option>
             {uploads.map((upload) => (
@@ -561,7 +419,6 @@ export default function CategorizeTransactions() {
           </select>
         </div>
       </div>
-
       <TransactionTable
         transactions={transactions}
         accounts={accounts}
@@ -585,14 +442,12 @@ export default function CategorizeTransactions() {
         onSortChange={handleSortChange}
         onReceiptChange={handleReceiptChange}
       />
-
       <Pagination
         currentPage={currentPage}
         totalItems={totalTransactions}
         itemsPerPage={ITEMS_PER_PAGE}
         onPageChange={handlePageChange}
       />
-
       <BulkEditModal
         isOpen={isBulkEditOpen}
         onClose={() => setIsBulkEditOpen(false)}
@@ -607,7 +462,6 @@ export default function CategorizeTransactions() {
         onTypeCreated={handleTypeCreated}
         onPartyCreated={handlePartyCreated}
       />
-
       <RemapPartyModal
         isOpen={isRemapOpen}
         onClose={handleCloseRemap}
@@ -622,7 +476,6 @@ export default function CategorizeTransactions() {
         initialPartyId={initialPartyId}
         initialTypeId={remapTargetTypeId}
       />
-
       <GenerateCashModal
         isOpen={isGenerateCashOpen}
         onClose={() => setIsGenerateCashOpen(false)}

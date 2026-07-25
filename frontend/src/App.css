@@ -38,11 +38,13 @@
   --animate-fade-in: fade-in 0.3s ease-in;
   --animate-highlight-pulse: highlight-pulse 1s ease-in-out;
 
+  --spacing-page-body: calc(100vh - 200px);
+
   @keyframes fade-in {
     from { opacity: 0; transform: translateY(-5px); }
     to   { opacity: 1; transform: translateY(0); }
   }
-  
+
   @keyframes highlight-pulse {
     0%   { background-color: #28a745; }
     50%  { background-color: #d4edda; }
@@ -116,4 +118,18 @@ html, body {
   overflow: auto;
   height: 100%;
   box-sizing: border-box;
+}
+
+/* TODO delete this after migrating dropdown with select component */
+/* Dropdowns in edit mode */
+.transaction-row.editing select,
+.dropdown-with-create select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  font-family: inherit;
+  text-align: left;
+  background-color: white;
 }

@@ -222,6 +222,51 @@ Migrating the frontend from individual CSS files to Tailwind CSS v4. Note: this 
       Dead CSS dropped: `.transaction-row.selected` (never applied — JSX
       only sets `linked`).
       Minor refactor: extracted duplicated <PanelHeader>.
+
+### transactions feature
+- [x] `CategorizeTransactions.jsx` — migrated + CSS deleted.
+      ⚠️ `.new-cash-button` had NO CSS rule — it was relying on native
+      button chrome, which Preflight removes. Given a neutral secondary
+      style (white + border); verify the visual intent.
+      Dead CSS dropped: `.loading` (never rendered — the `loading` state
+      is set but never consumed, so this page has no loading indicator at
+      all), `.error-message` (+ its button; errors go via toast).
+      Added `shrink-0` to .filters-section — original omitted it while
+      giving it to its siblings.
+- [x] `TransactionTable.jsx` — migrated, but CSS NOT deleted.
+      TransactionTable.css trimmed to only TransactionRow-owned rules;
+      <table> keeps `transaction-table` className as a hook.
+      Base cell rule re-scoped to `tbody` so it can't out-specify the
+      Tailwind utilities on the thead filter row.
+      .filter-cell-center !important eliminated.
+      ⚠️ Dead header classes found: .lodgment-header / .kids-header /
+      .one-off-header have no CSS — headers are left-aligned while their
+      cells are center !important. Kept faithful; fix suggested.
+      ⚠️ Sticky filter-row offset (top-11) is hardcoded to the header's
+      computed height — fragile if header padding/font changes.
+- [x] `TransactionRow.jsx` — migrated.
+- [x] `TransactionTable.css` + `TransactionRow.css` — BOTH deleted;
+      `transaction-table` hook removed. Zebra + row hover moved onto the
+      row itself (even:bg-gray-50 / hover:bg-gray-200).
+      ⚠️ BUG FIXED: table's `tbody tr:nth-child(even)` (0,2,2) was
+      overriding `.transaction-row.selected` and `.editing` (0,2,0), so
+      selection/edit highlights were invisible on every even row. Now
+      computed per-state. Hover-wins-over-state preserved.
+      ⚠️ `.description-cell` wrapping was indeterminate (load-order
+      dependent); settled as truncate + expand-on-hover.
+      Party cell restructured: flex moved from the <td> to an inner div
+      (display:flex on a td broke table layout, and text-overflow never
+      worked on a flex container).
+      All 7 remaining !important eliminated. `.amount-cell` collision
+      fully closed — all 4 declaring components now migrated.
+- [ ] `components/DropdownWithCreate` — NOW URGENT. `.dropdown-with-create
+      select` lived in TransactionRow.css; its styling is replicated for
+      TransactionRow only. BulkEditModal / RemapPartyModal /
+      CreateCashTransactionModal / GenerateCashFromReceiptModal selects
+      are currently unstyled.
+
+
+
 		
 ## Next Steps (statementFormats)
 - [ ] Revisit `DeleteFormatDialog` `<ul>` + body spacing once `ConfirmDialog` is done.
@@ -301,3 +346,13 @@ Migration order is leaf/page first, then shared components. Shared components fl
 - **THREE scrollbar variants:** #888/#555 (ProcessReceipts,
   SelectableReceiptTable) vs #c1c1c1/#a1a1a1 (CandidateTransactions).
   Consolidate into a single `@utility scrollbar-thin` in index.css.
+- **TransactionTable owns this page's scroll region.** CategorizeTransactions
+  is `flex flex-col overflow-hidden` with shrink-0 header + filters, so
+  TransactionTable must be `flex-1 min-h-0`. It currently gets that from its
+  own CSS — when migrating it, carry those utilities over or the scroll dies
+  (same failure mode as the ImportResult bug).
+- **h1 sizes inconsistent:** 24px (UploadStatement, ProcessReceipts) vs 28px
+  (CategorizeTransactions). Candidate for --text-page-title or a shared
+  <PageHeader>.
+- **Focus ring width drift:** 3px (UploadStatement, ProcessReceipts) vs 2px
+  (CategorizeTransactions). Candidate for a single --shadow-focus-ring token.

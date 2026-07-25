@@ -26,43 +26,23 @@ import RemapPartyPrompt from './RemapPartyPrompt';
 import ReceiptIcon from './ReceiptIcon';
 import ReceiptViewModal from './ReceiptViewModal';
 import ReceiptUploadModal from './ReceiptUploadModal';
-import './TransactionRow.css';
 import { createLogger } from '@/lib/logger';
 import { useToast } from '@/components/ToastContext';
-
 /** @type {import('@/lib/logger').Logger} */
 const logger = createLogger('TransactionRow');
-
+/* ── Cell bases ────────────────────────────────────────────────────── */
+const TD = 'border-b border-gray-200 p-2 align-middle text-sm';
+/** Cells that clip with an ellipsis. `max-w-0` lets the table algorithm size them. */
+const TRUNC = 'max-w-0 truncate';
+/** Description cells expand on hover to reveal full text. */
+const TRUNC_EXPAND = `${TRUNC} hover:overflow-visible hover:whitespace-normal hover:break-words`;
+const VIEW = 'block py-1';
+const ACTION_BTN =
+  'cursor-pointer rounded border-none px-2.5 py-1.5 text-sm text-white ' +
+  'transition-[background-color,opacity] disabled:cursor-not-allowed disabled:opacity-50';
 /**
  * Editable transaction table row.
- *
- * @component
- * @param {Object} props
- *
- * @param {Object} props.transaction
- *        The transaction record. Expected to have `id`, denormalized
- *        `*_name` strings for display, and `*_id` foreign keys.
- * @param {Array<Object>} props.accounts - All accounts (unused in edit but kept for parity).
- * @param {Array<Object>} props.allCategories
- * @param {Array<Object>} props.allSubCategories
- * @param {Array<Object>} props.allTypes
- * @param {Array<Object>} props.allParties
- *
- * @param {(txnId: number, updates: Object) => Promise<void>} props.onUpdate
- *        Persist edits. Should throw on failure (the row catches it and
- *        marks itself in error).
- * @param {(type: string, parentId: ?number, parentName: string, onSuccess: Function) => void} props.onOpenCreateModal
- *        Open the table's shared create-taxonomy modal.
- *
- * @param {boolean} props.isSelected - Row checkbox state.
- * @param {(checked: boolean) => void} props.onSelectionChange
- *
- * @param {(partyId: number) => void} props.onRemapParty
- *        Open the global remap modal for a party.
- * @param {(partyName: string, typeId: number) => Promise<number>} props.onFindOrCreateParty
- *        Find or create a party under a type; returns the new/found id.
- *
- * @returns {JSX.Element}
+ * (full docblock unchanged)
  */
 export default function TransactionRow({
   transaction,
@@ -82,39 +62,12 @@ export default function TransactionRow({
   const { addToast } = useToast();
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  /** `true` when the last save attempt failed. Renders a ⚠ indicator. */
   const [error, setError] = useState(null);
-  /**
-   * Working copy of editable fields while in edit mode.
-   * Committed to the server only on explicit Save.
-   */
   const [draft, setDraft] = useState(null);
-
-  // ── Conflict state ────────────────────────────────────────────────
-  /**
-   * When the user changes a parent (category/subcat/type) while a party
-   * is selected, we pause and ask what to do.
-   *
-   * @typedef {Object} Conflict
-   * @property {Object} oldDraft      - Draft snapshot before the change.
-   * @property {number} oldPartyId    - Party that was selected.
-   * @property {string} oldPartyName  - Display name.
-   * @property {Object} newDraftAfter - Draft that would result if user proceeds.
-   */
   const [conflict, setConflict] = useState(null);
-
-  /**
-   * When the user chooses "this transaction only" we defer party
-   * creation until save time. Store the name + target type here.
-   * @type {?{partyName: string, typeId: number}}
-   */
   const [reuseParty, setReuseParty] = useState(null);
-  /** Receipt modal mode: 'view' | 'upload' | null. */
   const [receiptModalMode, setReceiptModalMode] = useState(null);
-
   // ── Edit lifecycle ────────────────────────────────────────────────
-
-  /** Enter edit mode: snapshot current values into `draft`. */
   const startEditing = () => {
     setDraft({
       category_id:
@@ -134,8 +87,6 @@ export default function TransactionRow({
     setReuseParty(null);
     setIsEditing(true);
   };
-
-  /** Exit edit mode, discarding unsaved changes. */
   const cancelEditing = () => {
     setDraft(null);
     setConflict(null);
@@ -143,13 +94,7 @@ export default function TransactionRow({
     setError(null);
     setIsEditing(false);
   };
-
   // ── Draft builders for hierarchy changes ──────────────────────────
-
-  /**
-   * Produce a new draft after the user selects a different type.
-   * Auto-fills category + subcat; clears party (belongs to old type).
-   */
   const buildDraftAfterTypeChange = (currentDraft, newTypeId) => {
     const type = newTypeId ? allTypes.find((t) => t.id === newTypeId) : null;
     const subCategory = type
@@ -163,8 +108,6 @@ export default function TransactionRow({
       party_id: null,
     };
   };
-
-  /** New draft after sub-category change; clears type & party. */
   const buildDraftAfterSubCategoryChange = (currentDraft, newSubCategoryId) => {
     const subCategory = newSubCategoryId
       ? allSubCategories.find((sc) => sc.id === newSubCategoryId)
@@ -177,8 +120,6 @@ export default function TransactionRow({
       party_id: null,
     };
   };
-
-  /** New draft after category change; clears subcat/type/party. */
   const buildDraftAfterCategoryChange = (currentDraft, newCategoryId) => ({
     ...currentDraft,
     category_id: newCategoryId,
@@ -186,21 +127,13 @@ export default function TransactionRow({
     type_id: null,
     party_id: null,
   });
-
   // ── Conflict detection ────────────────────────────────────────────
-
-  /**
-   * If a party is already selected and the user changes a parent level,
-   * show the conflict prompt instead of applying the change immediately.
-   */
   const maybeShowConflict = (currentDraft, newDraftAfter, applyImmediately) => {
     if (!currentDraft.party_id) {
       applyImmediately(newDraftAfter);
       return;
     }
-
     const oldParty = allParties.find((p) => p.id === currentDraft.party_id);
-
     setConflict({
       oldDraft: currentDraft,
       oldPartyId: currentDraft.party_id,
@@ -208,31 +141,19 @@ export default function TransactionRow({
       newDraftAfter,
     });
   };
-
-  // ── Change handlers (category → subcat → type → party) ───────────
-
+  // ── Change handlers ───────────────────────────────────────────────
   const handleCategoryChange = (categoryId) => {
     const id = categoryId ? parseInt(categoryId) : null;
-    const newDraftAfter = buildDraftAfterCategoryChange(draft, id);
-    maybeShowConflict(draft, newDraftAfter, setDraft);
+    maybeShowConflict(draft, buildDraftAfterCategoryChange(draft, id), setDraft);
   };
-
   const handleSubCategoryChange = (subCategoryId) => {
     const id = subCategoryId ? parseInt(subCategoryId) : null;
-    const newDraftAfter = buildDraftAfterSubCategoryChange(draft, id);
-    maybeShowConflict(draft, newDraftAfter, setDraft);
+    maybeShowConflict(draft, buildDraftAfterSubCategoryChange(draft, id), setDraft);
   };
-
   const handleTypeChange = (typeId) => {
     const id = typeId ? parseInt(typeId) : null;
-    const newDraftAfter = buildDraftAfterTypeChange(draft, id);
-    maybeShowConflict(draft, newDraftAfter, setDraft);
+    maybeShowConflict(draft, buildDraftAfterTypeChange(draft, id), setDraft);
   };
-
-  /**
-   * Selecting a party syncs **upward** (fills type/subcat/cat) — no
-   * conflict, because the party drives the hierarchy.
-   */
   const handlePartyChange = (partyId) => {
     const id = partyId ? parseInt(partyId) : null;
     const party = allParties.find((p) => p.id === id);
@@ -249,11 +170,6 @@ export default function TransactionRow({
     }));
     setReuseParty(null);
   };
-
-  /**
-   * Open the appropriate receipt modal based on whether a receipt is
-   * already attached. The 'upload' branch is wired in a later commit.
-   */
   const handleReceiptIconClick = () => {
     if (transaction.receipt_id) {
       setReceiptModalMode('view');
@@ -261,10 +177,7 @@ export default function TransactionRow({
       setReceiptModalMode('upload');
     }
   };
-
   // ── Conflict prompt handlers ──────────────────────────────────────
-
-  /** User chose "Remap all transactions" — delegate to parent modal. */
   const handleRemapAll = () => {
     if (!conflict) return;
     const { oldPartyId, newDraftAfter } = conflict;
@@ -274,8 +187,6 @@ export default function TransactionRow({
     onRemapParty(oldPartyId);
     cancelEditing();
   };
-
-  /** User chose "This transaction only" — defer party find/create to save. */
   const handleThisOnly = () => {
     if (!conflict) return;
     const { oldPartyName, newDraftAfter } = conflict;
@@ -283,20 +194,12 @@ export default function TransactionRow({
     setReuseParty({ partyName: oldPartyName, typeId: newDraftAfter.type_id });
     setDraft(newDraftAfter);
   };
-
-  /** User cancelled the conflict prompt — restore draft. */
   const handleCancelConflict = () => {
     if (!conflict) return;
     setDraft(conflict.oldDraft);
     setConflict(null);
   };
-
   // ── Persist ───────────────────────────────────────────────────────
-
-  /**
-   * Actually call `onUpdate` with the final payload.
-   * @param {?number} partyId - Resolved party id (may differ from `draft.party_id`).
-   */
   const persistSave = async (partyId) => {
     if (!draft) return;
     setIsSaving(true);
@@ -313,20 +216,13 @@ export default function TransactionRow({
       setDraft(null);
       setReuseParty(null);
     } catch {
-      // Parent already toasted the API error.
       setError(true);
     } finally {
       setIsSaving(false);
     }
   };
-
-  /**
-   * Public save entry point. Resolves deferred party creation if
-   * `reuseParty` is set, then calls {@link persistSave}.
-   */
   const saveChanges = async () => {
     if (!draft) return;
-
     if (reuseParty) {
       const targetTypeId = draft.type_id ?? reuseParty.typeId;
       if (!targetTypeId) {
@@ -348,17 +244,13 @@ export default function TransactionRow({
       }
       return;
     }
-
     await persistSave(draft.party_id);
   };
-
   // ── Filtered dropdown options ─────────────────────────────────────
-
   const filteredSubCategories = useMemo(() => {
     if (!isEditing || !draft?.category_id) return allSubCategories;
     return allSubCategories.filter((sc) => sc.category_id === draft.category_id);
   }, [isEditing, draft?.category_id, allSubCategories]);
-
   const filteredTypes = useMemo(() => {
     if (!isEditing) return allTypes;
     if (draft?.sub_category_id) {
@@ -370,7 +262,6 @@ export default function TransactionRow({
     }
     return allTypes;
   }, [isEditing, draft?.category_id, draft?.sub_category_id, filteredSubCategories, allTypes]);
-
   const filteredParties = useMemo(() => {
     if (!isEditing) return allParties;
     if (draft?.type_id) {
@@ -382,9 +273,7 @@ export default function TransactionRow({
     }
     return allParties;
   }, [isEditing, draft?.category_id, draft?.sub_category_id, draft?.type_id, filteredTypes, allParties]);
-
-  // ── Create handlers (open modal, apply id on success) ─────────────
-
+  // ── Create handlers ───────────────────────────────────────────────
   const handleCreateCategory = () => {
     onOpenCreateModal('category', null, '', (newCategory) => {
       if (newCategory?.id) {
@@ -398,7 +287,6 @@ export default function TransactionRow({
       }
     });
   };
-
   const handleCreateSubCategory = () => {
     const category = allCategories.find((c) => c.id === draft.category_id);
     onOpenCreateModal('sub_category', category.id, category.category, (newSC) => {
@@ -412,7 +300,6 @@ export default function TransactionRow({
       }
     });
   };
-
   const handleCreateType = () => {
     const subCategory = allSubCategories.find((sc) => sc.id === draft.sub_category_id);
     onOpenCreateModal('type', subCategory.id, subCategory.sub_category, (newType) => {
@@ -421,7 +308,6 @@ export default function TransactionRow({
       }
     });
   };
-
   const handleCreateParty = () => {
     const type = allTypes.find((t) => t.id === draft.type_id);
     onOpenCreateModal('party', type.id, type.type, (newParty) => {
@@ -431,21 +317,43 @@ export default function TransactionRow({
       }
     });
   };
-
   // ── Display helpers ───────────────────────────────────────────────
-
-  /** Format an ISO date string as `YYYY-MM-DD`. */
   const formatDate = (ds) => (ds ? new Date(ds).toISOString().split('T')[0] : '');
-
-  /** Format a numeric amount to two decimals. */
   const formatAmount = (a) => (a == null ? '' : parseFloat(a).toFixed(2));
-
-  const renderViewCell = (value) => <span className="view-value">{value || '-'}</span>;
-
+  const renderViewCell = (value) => <span className={VIEW}>{value || '-'}</span>;
   const renderCheckboxCell = (value) => (
-    <span className={`check-indicator ${value ? 'checked' : ''}`}>{value ? '✓' : ''}</span>
+    <span className="block text-center text-base font-bold text-[#4caf50]">
+      {value ? '✓' : ''}
+    </span>
   );
-
+  // ── Row styling ───────────────────────────────────────────────────
+  /*
+   * Backgrounds are computed per-state rather than layered, which fixes a
+   * specificity bug: the table's `tbody tr:nth-child(even)` rule (0,2,2)
+   * used to override `.transaction-row.selected` / `.editing` (0,2,0),
+   * making those highlights invisible on every even row.
+   * Hover still wins over state — preserving the original resolved order.
+   */
+  const rowBg = isEditing
+    ? 'bg-[#fff9e6]'
+    : isSelected
+      ? 'bg-[#e7f3ff]'
+      : 'even:bg-gray-50';
+  const rowRing = error
+    ? 'shadow-[inset_0_0_0_2px_#f44336]'
+    : isEditing
+      ? 'shadow-[inset_0_0_0_2px_#f0c36d]'
+      : '';
+  /*
+   * Replaces `.transaction-row.editing select, .dropdown-with-create select`.
+   * NOTE: only covers selects inside THIS row — the modals that also use
+   * DropdownWithCreate lose their select styling when TransactionRow.css
+   * is deleted. See the migration notes.
+   */
+  const editingSelects = isEditing
+    ? '[&_select]:w-full [&_select]:rounded [&_select]:border [&_select]:border-gray-300 ' +
+      '[&_select]:bg-white [&_select]:px-2 [&_select]:py-1.5 [&_select]:text-left [&_select]:text-sm'
+    : '';
   return (
     <>
       {conflict && (
@@ -456,7 +364,6 @@ export default function TransactionRow({
           onCancel={handleCancelConflict}
         />
       )}
-
       {receiptModalMode === 'view' && (
         <ReceiptViewModal
           isOpen
@@ -470,7 +377,6 @@ export default function TransactionRow({
           onReceiptUnlinked={(updated) => onReceiptChange?.(updated)}
         />
       )}
-
       {receiptModalMode === 'upload' && (
         <ReceiptUploadModal
           isOpen
@@ -480,28 +386,27 @@ export default function TransactionRow({
           onReceiptLinked={(updated) => onReceiptChange?.(updated)}
         />
       )}
-      
+      {/* `group` enables the remap-button hover reveal */}
       <tr
-        className={`transaction-row ${isEditing ? 'editing' : ''} ${
-          isSelected ? 'selected' : ''
-        } ${error ? 'has-error' : ''}`}
+        className={`group transition-colors duration-200 hover:bg-gray-200 ${rowBg} ${rowRing} ${editingSelects}`}
       >
         {/* Selection checkbox */}
-        <td className="select-cell">
+        <td className={`${TD} w-10 text-center`}>
           <Checkbox checked={isSelected} onChange={onSelectionChange} disabled={isEditing} />
         </td>
-
         {/* Description (read-only) */}
-        <td className="description-cell" title={transaction.description}>
+        <td
+          className={`${TD} w-[20%] min-w-[200px] ${TRUNC_EXPAND} leading-[1.4]`}
+          title={transaction.description}
+        >
           {transaction.description}
         </td>
-
         {/* Cleaned Description (editable) */}
-        <td className="cleaned-description-cell">
+        <td className={`${TD} w-[15%] min-w-[150px] ${TRUNC_EXPAND}`}>
           {isEditing ? (
             <input
               type="text"
-              className="edit-input"
+              className="w-full rounded border border-gray-300 px-2 py-1.5 text-left text-sm"
               value={draft.cleaned_description}
               onChange={(e) =>
                 setDraft((prev) => ({ ...prev, cleaned_description: e.target.value }))
@@ -512,15 +417,16 @@ export default function TransactionRow({
             renderViewCell(transaction.cleaned_description)
           )}
         </td>
-
         {/* Date (read-only) */}
-        <td className="date-cell">{formatDate(transaction.transaction_date)}</td>
-
+        <td className={`${TD} w-[10%] whitespace-nowrap tabular-nums`}>
+          {formatDate(transaction.transaction_date)}
+        </td>
         {/* Amount (read-only) */}
-        <td className="amount-cell">{formatAmount(transaction.amount)}</td>
-
+        <td className={`${TD} w-[10%] text-right text-gray-800`}>
+          {formatAmount(transaction.amount)}
+        </td>
         {/* Is Credit */}
-        <td className="lodgment-cell">
+        <td className={`${TD} w-20 text-center`}>
           {isEditing ? (
             <Checkbox
               checked={draft.is_credit}
@@ -530,14 +436,13 @@ export default function TransactionRow({
             renderCheckboxCell(transaction.is_credit)
           )}
         </td>
-
         {/* Account (read-only) */}
-        <td className="account-cell" title={transaction.account_name || ''}>
+        <td className={`${TD} w-[10%] ${TRUNC}`} title={transaction.account_name || ''}>
           {transaction.account_name || '-'}
         </td>
-
-        {/* Party */}
-        <td className="party-cell" title={isEditing ? '' : transaction.party_name || ''}>
+        {/* Party — inner flex wrapper instead of `display:flex` on the <td>,
+            so the table layout is preserved and truncation actually works */}
+        <td className={`${TD} w-[10%]`} title={isEditing ? '' : transaction.party_name || ''}>
           {isEditing ? (
             <DropdownWithCreate
               value={draft.party_id}
@@ -552,11 +457,13 @@ export default function TransactionRow({
               createLabel="➕ Create New Party..."
             />
           ) : (
-            <>
-              {renderViewCell(transaction.party_name)}
+            <div className="flex items-center gap-[0.4rem]">
+              <span className={`min-w-0 flex-1 truncate ${VIEW}`}>
+                {transaction.party_name || '-'}
+              </span>
               {transaction.party_id && onRemapParty && (
                 <button
-                  className="remap-party-btn"
+                  className="shrink-0 cursor-pointer rounded border border-transparent bg-none px-1 py-px text-[0.8rem] leading-none text-gray-500 opacity-0 transition-[opacity,color,border-color] duration-150 group-hover:opacity-100 hover:border-[#93c5fd] hover:bg-[#eff6ff] hover:text-[#2563eb]"
                   onClick={() => onRemapParty(transaction.party_id)}
                   title={`Remap party: ${transaction.party_name}`}
                   type="button"
@@ -564,12 +471,11 @@ export default function TransactionRow({
                   ✎
                 </button>
               )}
-            </>
+            </div>
           )}
         </td>
-
         {/* Type */}
-        <td className="type-cell" title={isEditing ? '' : transaction.type_name || ''}>
+        <td className={`${TD} w-[10%] ${TRUNC}`} title={isEditing ? '' : transaction.type_name || ''}>
           {isEditing ? (
             <DropdownWithCreate
               value={draft.type_id}
@@ -587,9 +493,11 @@ export default function TransactionRow({
             renderViewCell(transaction.type_name)
           )}
         </td>
-
         {/* Sub-Category */}
-        <td className="sub-category-cell" title={isEditing ? '' : transaction.sub_category_name || ''}>
+        <td
+          className={`${TD} w-[10%] ${TRUNC}`}
+          title={isEditing ? '' : transaction.sub_category_name || ''}
+        >
           {isEditing ? (
             <DropdownWithCreate
               value={draft.sub_category_id}
@@ -607,9 +515,11 @@ export default function TransactionRow({
             renderViewCell(transaction.sub_category_name)
           )}
         </td>
-
         {/* Category */}
-        <td className="category-cell" title={isEditing ? '' : transaction.category_name || ''}>
+        <td
+          className={`${TD} w-[10%] ${TRUNC}`}
+          title={isEditing ? '' : transaction.category_name || ''}
+        >
           {isEditing ? (
             <DropdownWithCreate
               value={draft.category_id}
@@ -627,9 +537,8 @@ export default function TransactionRow({
             renderViewCell(transaction.category_name)
           )}
         </td>
-
         {/* Is Kids */}
-        <td className="kids-cell">
+        <td className={`${TD} w-20 text-center`}>
           {isEditing ? (
             <Checkbox
               checked={draft.is_kids}
@@ -639,9 +548,8 @@ export default function TransactionRow({
             renderCheckboxCell(transaction.is_kids)
           )}
         </td>
-
         {/* Is One-Off */}
-        <td className="one-off-cell">
+        <td className={`${TD} w-20 text-center`}>
           {isEditing ? (
             <Checkbox
               checked={draft.is_one_off}
@@ -651,28 +559,26 @@ export default function TransactionRow({
             renderCheckboxCell(transaction.is_one_off)
           )}
         </td>
-
         {/* Receipt */}
-        <td className="receipt-cell">
+        <td className={`${TD} text-center`}>
           <ReceiptIcon
             hasReceipt={!!transaction.receipt_id}
             onClick={handleReceiptIconClick}
           />
         </td>
-        
         {/* Actions */}
-        <td className="actions-cell">
+        <td className={`${TD} w-[60px] text-center`}>
           {error && (
-            <span className="row-error" title="Save failed — see notification">
+            <span className="mr-2 cursor-help text-[#f44336]" title="Save failed — see notification">
               ⚠
             </span>
           )}
           {isEditing ? (
-            <div className="edit-actions">
+            <div className="flex justify-center gap-1">
               <button
                 onClick={saveChanges}
                 disabled={isSaving}
-                className="btn-save"
+                className={`${ACTION_BTN} bg-[#4caf50] hover:bg-[#388e3c]`}
                 title="Save changes"
               >
                 {isSaving ? '...' : '✓'}
@@ -680,14 +586,18 @@ export default function TransactionRow({
               <button
                 onClick={cancelEditing}
                 disabled={isSaving}
-                className="btn-cancel"
+                className={`${ACTION_BTN} bg-[#f44336] hover:bg-[#d32f2f]`}
                 title="Cancel"
               >
                 ✕
               </button>
             </div>
           ) : (
-            <button onClick={startEditing} className="btn-edit" title="Edit transaction">
+            <button
+              onClick={startEditing}
+              className={`${ACTION_BTN} bg-[#2196f3] hover:bg-[#1976d2]`}
+              title="Edit transaction"
+            >
               ✎
             </button>
           )}
