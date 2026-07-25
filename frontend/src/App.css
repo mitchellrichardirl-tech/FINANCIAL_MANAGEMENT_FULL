@@ -34,6 +34,20 @@
   --color-success-hover: #218838;
   --color-primary: #007bff;
   --color-primary-hover: #0056b3;
+
+  --animate-fade-in: fade-in 0.3s ease-in;
+  --animate-highlight-pulse: highlight-pulse 1s ease-in-out;
+
+  @keyframes fade-in {
+    from { opacity: 0; transform: translateY(-5px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  
+  @keyframes highlight-pulse {
+    0%   { background-color: #28a745; }
+    50%  { background-color: #d4edda; }
+    100% { background-color: #d4edda; }
+  }
 }
 
 @layer base {

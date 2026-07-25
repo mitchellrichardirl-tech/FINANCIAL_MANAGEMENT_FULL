@@ -212,6 +212,16 @@ Migrating the frontend from individual CSS files to Tailwind CSS v4. Note: this 
       hiding-the-image-while-loading never worked. Now explicit
       `isLoading ? 'hidden' : 'block'`. Image is genuinely hidden during
       load — verify this is desired.
+- [x] `CandidateTransactions.jsx` — migrated + CSS deleted.
+      First file requiring custom @keyframes → added --animate-fade-in and
+      --animate-highlight-pulse to @theme in index.css.
+      All 6 `!important` declarations ELIMINATED: they were defending
+      against (a) `.transaction-row td` out-specifying `.amount-cell`, and
+      (b) a global `.amount-cell` class collision with ImportResult.css.
+      Both causes gone now that cells carry utilities directly.
+      Dead CSS dropped: `.transaction-row.selected` (never applied — JSX
+      only sets `linked`).
+      Minor refactor: extracted duplicated <PanelHeader>.
 		
 ## Next Steps (statementFormats)
 - [ ] Revisit `DeleteFormatDialog` `<ul>` + body spacing once `ConfirmDialog` is done.
@@ -282,3 +292,12 @@ Migration order is leaf/page first, then shared components. Shared components fl
   (identical declaration) but it masked a source-order bug. If other
   components rely on a locally-defined `.hidden`, Tailwind's utility now
   covers them — but check for the same block/hidden ordering trap.
+- **Unscoped class names caused real collisions:** `.amount-cell` was
+  defined globally by BOTH ImportResult.css and CandidateTransactions.css
+  with conflicting font-weight, forcing !important. Worth grepping for
+  other generic names still live in unmigrated CSS (.date-cell,
+  .party-cell, .actions-cell, .table-header, .btn-remove, .empty-state,
+  .hidden) — each is a latent cross-feature collision.
+- **THREE scrollbar variants:** #888/#555 (ProcessReceipts,
+  SelectableReceiptTable) vs #c1c1c1/#a1a1a1 (CandidateTransactions).
+  Consolidate into a single `@utility scrollbar-thin` in index.css.
