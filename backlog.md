@@ -318,6 +318,17 @@ Migrating the frontend from individual CSS files to Tailwind CSS v4. Note: this 
       as setting a floor. Don't simplify.
       h3 kept at font-bold (UA inherited) vs M.TITLE's font-semibold —
       normalise if/when <Modal> is extracted.
+- [x] `ReceiptUploadModal.jsx` — migrated + CSS deleted. Clean, fully
+      namespaced, scoped button selectors, no dead rules.
+      Colours already consistent: #4caf50/#388e3c matches ReceiptIcon
+      attached-state + TransactionRow btn-save; #e0e0e0/#d0d0d0 matches
+      M.BTN_SECONDARY.
+      <input type="file"> left unstyled (it was unstyled in CSS too) — only
+      raw file picker in the app; `file:` variants noted if consistency
+      wanted later.
+      Preserved two minor inconsistencies vs its ViewModal sibling:
+      disabled opacity 0.6 vs 0.5, and close-button disabled state present
+      here but absent there.
 
 
 		
@@ -423,8 +434,18 @@ Migration order is leaf/page first, then shared components. Shared components fl
   (b) BulkEditModal.css — .modal-overlay / .modal-content / .modal-header /
       .modal-close-btn / .modal-actions / .save-button / .cancel-button.
       A rogue duplicate, NOT the shared system (corrects my earlier note).
-  Resolution: migrate Modal.css into a <Modal> component, then convert
-  BulkEditModal to use it and delete its generic classes.
+  (c)  modalClasses.js (500px / bg-black-50 / shadow-25 / px-6 / gap-3),
+      BulkEditModal (600px / bg-black-70 / shadow-6 / gap-4),
+      ReceiptViewModal (640px / bg-black-50+p-4 / shadow-40 / px-5 / gap-2).
+      A <Modal size="sm|md|lg"> component would collapse all three and settle
+      the arbitrary padding/shadow/title-weight drift.
+  (d) ReceiptUploadModal (440px / no max-h / bg-black-50+p-4 / shadow-40 /
+      px-5 / gap-2) — overlay, header, close button and actions row are
+      BYTE-IDENTICAL to ReceiptViewModal's. These two are copy-paste siblings
+      differing only in max-width, max-height, and primary button colour.
+      Four implementations now; <Modal size> would collapse all of them.
+      Resolution: migrate Modal.css into a <Modal> component, then convert
+      BulkEditModal to use it and delete its generic classes.
 - **Cross-feature CSS leakage confirmed:** CreateCategoryModal.css was
   supplying `.field-error` and `.form-group.has-error` to ProcessReceipts,
   which declared neither. Both now explicit. Worth assuming any
@@ -442,10 +463,5 @@ Migration order is leaf/page first, then shared components. Shared components fl
   on frequency (3 files); #2563eb (blue-600) wins on being an actual
   Tailwind value; #2196f3 wins on being the modal/action-button standard.
   Pick one.
-- **THREE modal implementations now catalogued**, with drifting dimensions:
-  modalClasses.js (500px / bg-black-50 / shadow-25 / px-6 / gap-3),
-  BulkEditModal (600px / bg-black-70 / shadow-6 / gap-4),
-  ReceiptViewModal (640px / bg-black-50+p-4 / shadow-40 / px-5 / gap-2).
-  A <Modal size="sm|md|lg"> component would collapse all three and settle
-  the arbitrary padding/shadow/title-weight drift.
+
 
