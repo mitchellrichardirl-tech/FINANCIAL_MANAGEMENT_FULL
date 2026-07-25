@@ -264,6 +264,24 @@ Migrating the frontend from individual CSS files to Tailwind CSS v4. Note: this 
       TransactionRow only. BulkEditModal / RemapPartyModal /
       CreateCashTransactionModal / GenerateCashFromReceiptModal selects
       are currently unstyled.
+- [x] `BulkEditModal.jsx` — migrated. CSS deletion GATED on grep.
+      ⚠️ BulkEditModal.css contains the app's de-facto modal design system
+      (.modal-overlay/.modal-content/.modal-header/.modal-actions/
+      .save-button/.cancel-button/.form-field/.form-section/.modal-error).
+      ImagePreview.css already documents a conflicting `.modal-content`
+      (width:560px) elsewhere — confirmed duplication. Grep all modals
+      before deleting; if any depend on this copy, move the generic rules
+      to src/styles/legacy-modal.css imported from index.css.
+      ⚠️ BUG FIXED: dark-mode-first again (bg #1a1a1a + prefers-color-scheme
+      light override). Settled light-only.
+      ⚠️ BUG FIXED: .save-button had NO background/border/radius and
+      .cancel-button set border-color with no border-width — both depended
+      on Vite's deleted global `button` rule. Save given #646cff primary,
+      cancel an outline. Judgment call.
+      ⚠️ BUG FIXED: .checkbox-field set align-items/gap but not
+      flex-direction, so it inherited `column` from .form-field — checkbox
+      and Clear button were stacked + centred. Now a row.
+      Dead CSS dropped: .party-name-display, .party-name-value.
 
 
 
@@ -356,3 +374,13 @@ Migration order is leaf/page first, then shared components. Shared components fl
   <PageHeader>.
 - **Focus ring width drift:** 3px (UploadStatement, ProcessReceipts) vs 2px
   (CategorizeTransactions). Candidate for a single --shadow-focus-ring token.
+- **Unstyled buttons from the deleted Vite `button` rule — now 4 found:**
+  .new-cash-button, .clear-filters-button, .save-button, .cancel-button.
+  The tell is a rule that sets only padding/margin/border-color with no
+  background, border-width, or border-radius. Grep remaining CSS for
+  `border-color:` without an adjacent `border:` declaration.
+- **SHARED MODAL CHROME is the biggest remaining structural issue.** Six
+  unmigrated modals plus ConfirmDialog all consume generic .modal-* classes
+  with at least two conflicting .modal-content definitions. Strongly
+  consider extracting a <Modal> component before migrating them
+  individually — it also resolves the deferred ConfirmDialog item.
