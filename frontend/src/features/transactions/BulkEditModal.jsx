@@ -27,6 +27,13 @@ export default function BulkEditModal({
   onClose,
   onSave,
   transactionCount,
+  title,
+  confirmLabel,
+  savingLabel = 'Updating...',
+  emptyLable: emptyLabel = '-- No Change --',
+  initialPartyId = null,
+  initialIsKids = null,
+  intitialIsOneOff = null,
   categories,
   subCategories,
   types,
@@ -100,19 +107,36 @@ export default function BulkEditModal({
   }, [parties, types, subCategories, updates.type_id, updates.sub_category_id, updates.category_id]);
   // ── Reset state each time the modal opens ─────────────────────────
   useEffect(() => {
-    if (isOpen) {
-      setUpdates({
-        category_id: null,
-        sub_category_id: null,
-        type_id: null,
-        party_id: null,
-        party_name: '',
-        is_kids: null,
-        is_one_off: null,
-      });
-      setValidationError(null);
-      setIsSaving(false);
+    if (!isOpen) return;
+    let prefill = {
+      category_id: null,
+      sub_category_id: null,
+      type_id: null,
+      party_id: null,
+      party_name: '',
+    };
+    if (initialPartyId) {
+      const party = parties.find((p) => p.id === initialPartyId);
+      const type = party ? types.find((t) => t.id === party.type_id) : null;
+      const sub = type ? subCategories.find((sc) => sc.id === type.sub_category_id) : null;
+      if (party) {
+        prefill = {
+          category_id: sub?.category_id ?? null,
+          sub_category_id: type?.sub_category_id ?? null,
+          type_id: party.type_id,
+          party_id: party.id,
+          party_name: party.name,
+        };
+      }
     }
+    setUpdates({
+      ...prefill,
+      is_kids: initialIsKids,
+      is_one_off: intitialIsOneOff,
+    });
+    setValidationError(null);
+    setIsSaving(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
   // ── Taxonomy change handlers ──────────────────────────────────────
   const handleCategoryChange = (categoryId) => {
@@ -338,7 +362,7 @@ export default function BulkEditModal({
         <div className={`${M.PANEL} ${M.W_LG}`} onClick={(e) => e.stopPropagation()}>
           <div className={M.HEADER}>
             <h2 className={M.TITLE}>
-              Bulk Edit {transactionCount} Transactions
+              {title ?? `Bulk Edit ${transactionCount} Transactions`}
             </h2>
             <button
               className={M.CLOSE_BTN}
@@ -377,7 +401,7 @@ export default function BulkEditModal({
                   valueKey="id"
                   labelKey="category"
                   includeEmpty
-                  emptyLabel="-- No Change --"
+                  emptyLabel={emptyLabel}
                   onCreateNew={handleCreateCategory}
                   createLabel="➕ Create New Category..."
                   disabled={isSaving}
@@ -392,7 +416,7 @@ export default function BulkEditModal({
                   valueKey="id"
                   labelKey="sub_category"
                   includeEmpty
-                  emptyLabel="-- No Change --"
+                  emptyLabel={emptyLabel}
                   onCreateNew={updates.category_id ? handleCreateSubCategory : null}
                   createLabel="➕ Create New Sub-Category..."
                   disabled={isSaving}
@@ -407,7 +431,7 @@ export default function BulkEditModal({
                   valueKey="id"
                   labelKey="type"
                   includeEmpty
-                  emptyLabel="-- No Change --"
+                  emptyLabel={emptyLabel}
                   onCreateNew={updates.sub_category_id ? handleCreateType : null}
                   createLabel="➕ Create New Type..."
                   disabled={isSaving}
@@ -422,7 +446,7 @@ export default function BulkEditModal({
                   valueKey="id"
                   labelKey="name"
                   includeEmpty
-                  emptyLabel="-- No Change --"
+                  emptyLabel={emptyLabel}
                   onCreateNew={updates.type_id ? handleCreateParty : null}
                   createLabel="➕ Create New Party..."
                   disabled={isSaving}
@@ -476,7 +500,7 @@ export default function BulkEditModal({
               Cancel
             </button>
             <button onClick={handleSave} disabled={!canSave} className={M.BTN_PRIMARY} type="button">
-              {isSaving ? 'Updating...' : `Update ${transactionCount} Transactions`}
+              {isSaving ? savingLabel : (confirmLabel ?? `Update ${transactionCount} Transactions`)}
             </button>
           </div>
         </div>
