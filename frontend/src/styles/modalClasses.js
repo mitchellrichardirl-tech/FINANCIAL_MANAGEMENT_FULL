@@ -68,7 +68,6 @@ export const SECTION = 'flex flex-col gap-3';
 export const SECTION_TITLE =
   'text-[0.95rem] font-semibold uppercase tracking-wider text-gray-700';
 export const HINT = 'text-[0.8rem] leading-[1.4] text-gray-500';
-export const FIELD = 'flex flex-col gap-[0.3rem]';
 export const FIELD_LABEL = 'text-[0.85rem] font-medium text-gray-700';
 export const FOOTER =
   'flex shrink-0 justify-end gap-3 border-t border-gray-200 px-6 py-4';
@@ -79,3 +78,26 @@ export const BTN_SECONDARY =
 export const BTN_PRIMARY =
   'cursor-pointer rounded-md bg-blue-600 px-5 py-2 text-[0.9rem] font-medium text-white ' +
   'transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300';
+
+  /* ── Form fields ───────────────────────────────────────────────────── */
+export const FORM_GROUP = 'mb-4 last:mb-0';
+export const FORM_LABEL = 'mb-1.5 block text-sm font-medium text-gray-600';
+export const FIELD =
+  'w-full rounded-md border border-gray-300 px-3 py-2 text-sm ' +
+  'transition-[border-color,box-shadow] ' +
+  'focus:border-blue-600 focus:shadow-[0_0_0_2px_rgba(37,99,235,0.2)] focus:outline-none ' +
+  'disabled:cursor-not-allowed disabled:bg-gray-100';
+export const FIELD_ERR =
+  'w-full rounded-md border border-red-600 bg-red-50 px-3 py-2 text-sm ' +
+  'transition-[border-color,box-shadow] ' +
+  'focus:border-red-600 focus:shadow-[0_0_0_2px_rgba(220,38,38,0.2)] focus:outline-none ' +
+  'disabled:cursor-not-allowed disabled:bg-gray-100';
+export const FIELD_ERR_TEXT = 'mt-1 block text-[0.8rem] text-red-600';
+/* ── Radio / checkbox options ──────────────────────────────────────── */
+export const RADIO_ROW = 'flex flex-col gap-2';
+export const OPTION =
+  'flex cursor-pointer items-center gap-2 text-sm text-gray-800 ' +
+  'has-[:disabled]:cursor-not-allowed has-[:disabled]:text-gray-400';
+/* ── Read-only value display ───────────────────────────────────────── */
+export const READONLY_VALUE =
+  'rounded-md bg-gray-100 px-3 py-2.5 text-sm text-gray-800';

@@ -40,13 +40,13 @@ import {
   createParty,
 } from '@/features/transactions/api';
 import GenerateCashFromReceiptModal from './GenerateCashFromReceiptModal';
+import BulkEditModal from '../transactions/BulkEditModal';
 import { ErrorCode, parseApiError } from '@/lib/apiErrors';
 import { useToast } from '@/components/ToastContext';
 import BulkUploadReceipts from './BulkUploadReceipts';
 import SelectableReceiptTable from './SelectableReceiptTable';
 import ImagePreview from './ImagePreview';
 import CandidateTransactions from './CandidateTransactions';
-// ❌ removed: import './ProcessReceipts.css';
 import { createLogger } from '@/lib/logger';
 /** @type {import('@/lib/logger').Logger} */
 const logger = createLogger('ProcessReceipts');
@@ -111,6 +111,7 @@ function ProcessReceipts() {
   const [isCashModalOpen, setIsCashModalOpen] = useState(false);
   const [suggestedPartyId, setSuggestedPartyId] = useState(null);
   const [isGeneratingCash, setIsGeneratingCash] = useState(false);
+  const [editTransaction, setEditTransaction] = useState(null);
   useEffect(() => {
     if (selectedReceipt) {
       const extracted = selectedReceipt.extracted_data || {};
@@ -406,7 +407,7 @@ function ProcessReceipts() {
       );
       setLinkedTransactionId(transaction.id);
       addToast({ message: 'Receipt linked to transaction', type: 'success', duration: 2500 });
-      setTimeout(selectNextReceipt, 1000);
+      setEditTransaction(transaction);
     } catch (err) {
       logger.error('Failed to link receipt to transaction:', err);
       if (err.code === ErrorCode.NOT_FOUND && err.entity === 'Transaction') {
@@ -418,6 +419,25 @@ function ProcessReceipts() {
     } finally {
       setIsLinking(false);
     }
+  };
+  const handleRecategorize = async (updates) => {
+    if (!editTransaction) return;
+    try {
+      await updateTransaction(editTransaction.id, updates);
+      addToast({ message: 'Transaction updated', type: 'success', duration: 2000 });
+      handleCloseRecategorize();
+    } catch (err) {
+      logger.error('Failed to update transaction:', err);
+      addToast({
+        message: `Failed to update transaction: ${err.userMessage || err.message}`,
+        type: 'error',
+      });
+      throw err;   // keeps the modal open; BulkEditModal resets isSaving in its catch
+    }
+  };
+  const handleCloseRecategorize = () => {
+    setEditTransaction(null);
+    setTimeout(selectNextReceipt, 300);   // advance only once the modal is dealt with
   };
   const handleDelete = async () => {
     if (!selectedReceipt) return;
@@ -728,6 +748,26 @@ function ProcessReceipts() {
         onTypeCreated={handleTypeCreated}
         onPartyCreated={handlePartyCreated}
       />
+      <BulkEditModal
+        isOpen={editTransaction !== null}
+        onClose={handleCloseRecategorize}
+        onSave={handleRecategorize}
+        transactionCount={1}
+        title="Categorise Linked Transaction"
+        confirmLabel="Update Transaction"
+        emptyLabel="-- Keep Current --"
+        initialPartyId={editTransaction?.party_id ?? null}
+        initialIsKids={editTransaction?.is_kids ?? null}
+        initialIsOneOff={editTransaction?.is_one_off ?? null}
+        categories={categories}
+        subCategories={subCategories}
+        types={types}
+        parties={parties}
+        onCategoryCreated={handleCategoryCreated}
+        onSubCategoryCreated={handleSubCategoryCreated}
+        onTypeCreated={handleTypeCreated}
+        onPartyCreated={handlePartyCreated}
+      />      
     </div>
   );
 }

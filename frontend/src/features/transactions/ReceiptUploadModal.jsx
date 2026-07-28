@@ -21,7 +21,6 @@ import { useState, useEffect } from 'react';
 import { uploadReceipt, linkReceipt } from './api';
 import { useToast } from '@/components/ToastContext';
 import { createLogger } from '@/lib/logger';
-// ❌ removed: import './ReceiptUploadModal.css';
 /** @type {import('@/lib/logger').Logger} */
 const logger = createLogger('ReceiptUploadModal');
 const ACCEPT = 'image/png,image/jpeg,image/jpg,application/pdf,.png,.jpg,.jpeg,.pdf';
