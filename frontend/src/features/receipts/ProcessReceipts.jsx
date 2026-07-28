@@ -46,7 +46,6 @@ import BulkUploadReceipts from './BulkUploadReceipts';
 import SelectableReceiptTable from './SelectableReceiptTable';
 import ImagePreview from './ImagePreview';
 import CandidateTransactions from './CandidateTransactions';
-// ❌ removed: import './ProcessReceipts.css';
 import { createLogger } from '@/lib/logger';
 /** @type {import('@/lib/logger').Logger} */
 const logger = createLogger('ProcessReceipts');
