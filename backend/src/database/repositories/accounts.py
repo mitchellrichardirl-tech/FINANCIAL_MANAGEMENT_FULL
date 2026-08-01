@@ -389,7 +389,7 @@ class AccountRepository:
                 cursor = conn.cursor()
 
                 cursor.execute(
-                    "SELECT COUNT(*) as count FROM transactions WHERE account_id = ?",
+                    "SELECT COUNT(*) as count FROM transactions WHERE account_id = ? AND deleted_at IS NULL",
                     (account_id,),
                 )
                 count = cursor.fetchone()["count"]
@@ -440,7 +440,7 @@ class AccountRepository:
             with self.db.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "SELECT COUNT(*) as count FROM transactions WHERE account_id = ?",
+                    "SELECT COUNT(*) as count FROM transactions WHERE account_id = ? AND deleted_at IS NULL",
                     (account_id,),
                 )
                 row = cursor.fetchone()

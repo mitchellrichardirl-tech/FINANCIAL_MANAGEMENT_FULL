@@ -137,7 +137,10 @@ class CashTransactionService:
             ),
         )
         new_id = cursor.lastrowid
-        cursor.execute("SELECT * FROM transactions WHERE id = ?", (new_id,))
+        cursor.execute(
+            "SELECT * FROM transactions WHERE id = ? AND deleted_at IS NULL",
+            (new_id,)
+            )
         transaction = dict(cursor.fetchone())
 
         return transaction, upload_id
@@ -173,7 +176,7 @@ class CashTransactionService:
             )
 
         cursor.execute(
-            "SELECT id FROM transactions WHERE receipt_id = ? LIMIT 1",
+            "SELECT id FROM transactions WHERE receipt_id = ? AND deleted_at IS NULL LIMIT 1",
             (receipt_id,),
         )
         existing = cursor.fetchone()
