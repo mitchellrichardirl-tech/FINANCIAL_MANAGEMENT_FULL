@@ -9,7 +9,7 @@ import Button from '@/components/Button';
 import { useToast } from '@/components/ToastContext';
 import { STEP, STEP_LABELS } from '../constants';
 import { useFormatEditor } from './useFormatEditor';
-import Stepper from './Stepper';
+import Stepper from './stepper';
 import StepSampleFile from './steps/StepSampleFile';
 import StepIdentity from './steps/StepIdentity';
 import StepColumns from './steps/StepColumns';

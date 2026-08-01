@@ -440,6 +440,11 @@ class SchemaManager:
 
         Indexes: transaction_date, account_id, party_id, upload_id,
             is_credit, receipt_id.
+
+        Note:
+            The `source_transaction_id` and `deleted_at` columns are added
+            separately by `migrations.migrate()` rather than in this DDL,
+            for backwards compatibility with existing databases.
         """
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
