@@ -43,6 +43,11 @@ class Transaction:
             for party matching.
         receipt_id: FK to `receipts.id` if a receipt image has been
             linked to this transaction. None if unmatched.
+        source_transaction_id: Recursive FK to this table for a transaction
+            generated from a parent (eg - a cash lodgement from an ATM
+            withdrawal)
+        deleted_at: Time a transaction was soft-deleted. Null value means
+            the transaction has not been deleted.
     """
     id: int
     transaction_date: datetime
@@ -57,3 +62,5 @@ class Transaction:
     is_one_off: bool
     cleaned_description: str | None = None
     receipt_id: int | None = None
+    source_transaction_id: int | None = None
+    deleted_at: str | None = None

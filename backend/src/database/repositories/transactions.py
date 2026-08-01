@@ -236,20 +236,24 @@ class TransactionRepository:
             logger.error(f"Failed to bulk add transactions: {e}")
             raise DatabaseError(f"Failed to bulk add transactions: {e}") from e
 
-    def get_transactions(self, limit: Optional[int] = None) -> List[Transaction]:
+    def get_transactions(
+        self,
+        limit: Optional[int] = None,
+        include_deleted: bool = False
+    ) -> List[Transaction]:
         """Fetch transactions as `Transaction` model instances.
-
         Joins to `accounts`, `parties`, and `receipts` to populate
         `account_name`, `related_party_name`, and `receipt_filename`.
         Ordered by date descending (most recent first).
-
+        Soft-deleted transactions (`deleted_at IS NOT NULL`) are excluded
+        unless `include_deleted` is True.
         Args:
             limit: Maximum rows to return. None for all.
-
+            include_deleted: If True, include soft-deleted transactions.
+                Defaults to False.
         Returns:
             List of `Transaction` instances. Empty list if the table
             is empty.
-
         Raises:
             DatabaseError: On query failure.
         """
@@ -265,43 +269,49 @@ class TransactionRepository:
                     LEFT JOIN accounts a ON t.account_id = a.id
                     LEFT JOIN parties p ON t.party_id = p.id
                     LEFT JOIN receipts r ON t.receipt_id = r.id
-                    ORDER BY t.transaction_date DESC
                 '''
+                if not include_deleted:
+                    query += ' WHERE t.deleted_at IS NULL'
+                query += ' ORDER BY t.transaction_date DESC'
                 if limit:
                     query += ' LIMIT ?'
                     cursor.execute(query, (limit,))
                 else:
                     cursor.execute(query)
-
                 rows = cursor.fetchall()
                 transactions = [Transaction(**dict(row)) for row in rows]
-
-                logger.debug(f"Retrieved {len(transactions)} transactions")
+                logger.debug(
+                    f"Retrieved {len(transactions)} transactions "
+                    f"(include_deleted={include_deleted})"
+                )
                 return transactions
 
         except Exception as e:
             logger.error(f"Failed to get transactions: {e}")
             raise DatabaseError(f"Failed to get transactions: {e}") from e
 
-    def get_transaction_by_id(self, transaction_id: int) -> Optional[Transaction]:
+    def get_transaction_by_id(
+        self,
+        transaction_id: int,
+        include_deleted: bool = False
+    ) -> Optional[Transaction]:
         """Fetch a single transaction by primary key.
-
         Joins to `accounts`, `parties`, and `receipts` for context
-        fields.
-
+        fields. Returns None for soft-deleted transactions unless
+        `include_deleted` is True.
         Args:
             transaction_id: The transaction's `id` column value.
-
+            include_deleted: If True, return the row even if it has been
+                soft-deleted. Defaults to False.
         Returns:
             A `Transaction` instance, or None if no match.
-
         Raises:
             DatabaseError: On query failure.
         """
         try:
             with self.db.get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute('''
+                query = '''
                     SELECT t.*,
                         a.account_name as account_name,
                         p.name as related_party_name,
@@ -311,15 +321,15 @@ class TransactionRepository:
                     LEFT JOIN parties p ON t.party_id = p.id
                     LEFT JOIN receipts r ON t.receipt_id = r.id
                     WHERE t.id = ?
-                ''', (transaction_id,))
-
+                '''
+                if not include_deleted:
+                    query += ' AND t.deleted_at IS NULL'
+                cursor.execute(query, (transaction_id,))
                 row = cursor.fetchone()
                 if not row:
                     logger.debug(f"Transaction {transaction_id} not found")
                     return None
-
                 return Transaction(**dict(row))
-
         except Exception as e:
             logger.error(f"Failed to get transaction {transaction_id}: {e}")
             raise DatabaseError(f"Failed to get transaction: {e}") from e
@@ -368,15 +378,13 @@ class TransactionRepository:
                 cursor = conn.cursor()
 
                 base_query = '''
-                    SELECT t.*,
-                        a.account_name as account_name,
-                        p.name as related_party_name,
-                        r.original_filename as receipt_filename
+                    ...
                     FROM transactions t
                     LEFT JOIN accounts a ON t.account_id = a.id
                     LEFT JOIN parties p ON t.party_id = p.id
                     LEFT JOIN receipts r ON t.receipt_id = r.id
-                    WHERE ABS(t.amount - ?) <= ?
+                    WHERE t.deleted_at IS NULL
+                    AND ABS(t.amount - ?) <= ?
                     AND ABS(julianday(t.transaction_date) - julianday(?)) <= ?
                 '''
 
@@ -424,9 +432,10 @@ class TransactionRepository:
         category_id: Optional[int] = None,
         sub_category_id: Optional[int] = None,
         type_id: Optional[int] = None,
-        sort_by: Optional[str] = None,
         sort_dir: Optional[str] = None,
-        has_receipt: Optional[bool] = None
+        has_receipt: Optional[bool] = None,
+        include_deleted: bool = False,
+        deleted_only: bool = False
     ) -> List[Dict[str, Any]]:
         """Fetch transactions with full category hierarchy and optional filters.
 
@@ -463,6 +472,11 @@ class TransactionRepository:
                 fall back to the default.
             sort_dir: "asc" or "desc". Defaults to "desc".
             has_receipt: Filter by presence of receipt.
+            include_deleted: If True, include soft-deleted transactions
+                alongside live ones. Defaults to False.
+            deleted_only: If True, return *only* soft-deleted
+                transactions (for a recycle-bin view). Takes precedence
+                over `include_deleted`. Defaults to False.
         Returns:
             List of transaction dicts, each including `account_name`,
             `account_type`, `party_name`, `type_name`,
@@ -497,6 +511,14 @@ class TransactionRepository:
 
                 conditions = []
                 params = []
+                
+                # Soft-delete filter. Must be expressed literally as
+                # `deleted_at IS NULL` for SQLite to use the partial index
+                # idx_transactions_active_date.
+                if deleted_only:
+                    conditions.append('t.deleted_at IS NOT NULL')
+                elif not include_deleted:
+                    conditions.append('t.deleted_at IS NULL')
 
                 if start_date:
                     conditions.append('t.transaction_date >= ?')
@@ -618,27 +640,32 @@ class TransactionRepository:
             logger.error(f"Failed to get transactions with hierarchy: {e}")
             raise DatabaseError(f"Failed to get transactions: {e}") from e
 
-    def get_transaction_with_hierarchy(self, transaction_id: int) -> Optional[Dict[str, Any]]:
+    def get_transaction_with_hierarchy(
+        self,
+        transaction_id: int,
+        include_deleted: bool = False
+    ) -> Optional[Dict[str, Any]]:
         """Fetch a single transaction with full category hierarchy.
-
         Same joins as `get_transactions_with_hierarchy()` but for one
         row. Used after updates to return the refreshed state to the
         caller.
-
         Args:
             transaction_id: Primary key of the transaction.
-
+            include_deleted: If True, return the row even if it has been
+                soft-deleted. Defaults to False. Used by
+                `delete_transaction()` / `restore_transaction()` to read
+                back rows the default filter would hide.
         Returns:
             Transaction dict with all hierarchy and receipt fields,
-            or None if the transaction doesn't exist.
-
+            or None if the transaction doesn't exist (or is deleted and
+            `include_deleted` is False).
         Raises:
             DatabaseError: On query failure.
         """
         try:
             with self.db.get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute('''
+                query = '''
                     SELECT 
                         t.*,
                         a.account_name,
@@ -664,15 +691,15 @@ class TransactionRepository:
                     LEFT JOIN categories c ON sc.category_id = c.id
                     LEFT JOIN receipts r ON t.receipt_id = r.id
                     WHERE t.id = ?
-                ''', (transaction_id,))
-
+                '''
+                if not include_deleted:
+                    query += ' AND t.deleted_at IS NULL'
+                cursor.execute(query, (transaction_id,))
                 row = cursor.fetchone()
                 if not row:
                     logger.debug(f"Transaction {transaction_id} not found")
                     return None
-
                 return dict(row)
-
         except Exception as e:
             logger.error(f"Failed to get transaction {transaction_id} with hierarchy: {e}")
             raise DatabaseError(f"Failed to get transaction: {e}") from e
@@ -728,7 +755,10 @@ class TransactionRepository:
                     return self.get_transaction_with_hierarchy(transaction_id)
 
                 params.append(transaction_id)
-                query = f"UPDATE transactions SET {', '.join(updates)} WHERE id = ?"
+                query = (
+                    f"UPDATE transactions SET {', '.join(updates)} "
+                    f"WHERE id = ? AND deleted_at IS NULL"
+                )
 
                 cursor.execute(query, params)
 
@@ -807,6 +837,7 @@ class TransactionRepository:
                     UPDATE transactions 
                     SET {', '.join(updates)} 
                     WHERE id IN ({placeholders})
+                      AND deleted_at IS NULL
                 """
 
                 cursor.execute(query, params)
@@ -826,6 +857,145 @@ class TransactionRepository:
         except Exception as e:
             logger.error(f"Failed to bulk update transactions: {e}")
             raise DatabaseError(f"Failed to bulk update transactions: {e}") from e
+
+    # SQLite's default SQLITE_MAX_VARIABLE_NUMBER is 999 on older builds
+    # (32766 since 3.32). Chunk well below the conservative limit.
+    _MAX_SQL_VARIABLES = 900
+    @staticmethod
+    def _chunked(items: List[Any], size: int):
+        """Yield successive `size`-length slices of `items`."""
+        for i in range(0, len(items), size):
+            yield items[i:i + size]
+    def delete_transaction(self, transaction_id: int) -> bool:
+        """Soft-delete a transaction by stamping `deleted_at`.
+        The row is retained in full; it is simply excluded from every
+        read path that doesn't explicitly pass `include_deleted=True`.
+        Reversible via `restore_transaction()`.
+        Idempotent in effect: deleting an already-deleted transaction is
+        a no-op and returns False, leaving the original `deleted_at`
+        timestamp untouched.
+        Args:
+            transaction_id: Primary key of the transaction to delete.
+        Returns:
+            True if a live transaction was soft-deleted. False if no
+            such transaction exists, or it was already deleted. Call
+            `get_transaction_by_id(id, include_deleted=True)` to
+            distinguish the two cases.
+        Raises:
+            DatabaseError: On any database failure.
+        """
+        try:
+            with self.db.transaction() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE transactions
+                    SET deleted_at = strftime('%Y-%m-%d %H:%M:%f', 'now')
+                    WHERE id = ? AND deleted_at IS NULL
+                ''', (transaction_id,))
+                if cursor.rowcount == 0:
+                    logger.debug(
+                        f"Transaction {transaction_id} not found or already deleted"
+                    )
+                    return False
+            logger.info(f"Soft-deleted transaction {transaction_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete transaction {transaction_id}: {e}")
+            raise DatabaseError(f"Failed to delete transaction: {e}") from e
+        
+    def bulk_delete_transactions(self, transaction_ids: List[int]) -> Dict[str, Any]:
+        """Soft-delete multiple transactions in a single database transaction.
+        Already-deleted and non-existent IDs are skipped rather than
+        raising, so the operation is safe to retry. All chunks commit
+        together — a failure partway through rolls the whole batch back.
+        Args:
+            transaction_ids: Primary keys of the transactions to delete.
+                Duplicates are collapsed.
+        Returns:
+            Dict with:
+                - `deleted_count`: Number of rows actually soft-deleted.
+                - `deleted_ids`: IDs that were live and are now deleted.
+                - `skipped_ids`: IDs that were already deleted or don't
+                  exist.
+            Returns zeroed counts if `transaction_ids` is empty.
+        Raises:
+            DatabaseError: On any database failure (entire batch is
+                rolled back).
+        """
+        if not transaction_ids:
+            return {'deleted_count': 0, 'deleted_ids': [], 'skipped_ids': []}
+        # Preserve caller ordering while removing duplicates
+        unique_ids = list(dict.fromkeys(transaction_ids))
+        try:
+            deleted_ids: List[int] = []
+            with self.db.transaction() as conn:
+                cursor = conn.cursor()
+                for chunk in self._chunked(unique_ids, self._MAX_SQL_VARIABLES):
+                    placeholders = ','.join('?' * len(chunk))
+                    # Identify live rows first so we can report exactly
+                    # which IDs were affected. rowcount alone wouldn't
+                    # tell us *which*.
+                    cursor.execute(
+                        f"SELECT id FROM transactions "
+                        f"WHERE id IN ({placeholders}) AND deleted_at IS NULL",
+                        chunk
+                    )
+                    live_ids = [row['id'] for row in cursor.fetchall()]
+                    if not live_ids:
+                        continue
+                    live_placeholders = ','.join('?' * len(live_ids))
+                    cursor.execute(
+                        f"UPDATE transactions "
+                        f"SET deleted_at = strftime('%Y-%m-%d %H:%M:%f', 'now') "
+                        f"WHERE id IN ({live_placeholders})",
+                        live_ids
+                    )
+                    deleted_ids.extend(live_ids)
+            deleted_set = set(deleted_ids)
+            skipped_ids = [i for i in unique_ids if i not in deleted_set]
+            logger.info(
+                f"Bulk soft-deleted {len(deleted_ids)} transactions "
+                f"(requested {len(unique_ids)}, skipped {len(skipped_ids)})"
+            )
+            return {
+                'deleted_count': len(deleted_ids),
+                'deleted_ids': deleted_ids,
+                'skipped_ids': skipped_ids
+            }
+        except Exception as e:
+            logger.error(f"Failed to bulk delete transactions: {e}")
+            raise DatabaseError(f"Failed to bulk delete transactions: {e}") from e
+        
+    def restore_transaction(self, transaction_id: int) -> bool:
+        """Restore a soft-deleted transaction by clearing `deleted_at`.
+        The inverse of `delete_transaction()`. Backs the "Undo" action
+        in the UI.
+        Args:
+            transaction_id: Primary key of the transaction to restore.
+        Returns:
+            True if a deleted transaction was restored. False if no such
+            transaction exists, or it was never deleted.
+        Raises:
+            DatabaseError: On any database failure.
+        """
+        try:
+            with self.db.transaction() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE transactions
+                    SET deleted_at = NULL
+                    WHERE id = ? AND deleted_at IS NOT NULL
+                ''', (transaction_id,))
+                if cursor.rowcount == 0:
+                    logger.debug(
+                        f"Transaction {transaction_id} not found or not deleted"
+                    )
+                    return False
+            logger.info(f"Restored transaction {transaction_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to restore transaction {transaction_id}: {e}")
+            raise DatabaseError(f"Failed to restore transaction: {e}") from e
 
     def find_matching_transactions(
         self,
@@ -899,6 +1069,9 @@ class TransactionRepository:
 
                 if not conditions:
                     raise ValueError("At least one search parameter is required")
+                # Appended after the guard so it doesn't count as a
+                # user-supplied search parameter.
+                conditions.append('t.deleted_at IS NULL')
 
                 where_clause = f"WHERE {' AND '.join(conditions)}"
 
@@ -980,7 +1153,8 @@ class TransactionRepository:
                     raise ValueError(f"Receipt {receipt_id} does not exist")
 
                 cursor.execute(
-                    'UPDATE transactions SET receipt_id = ? WHERE id = ?',
+                    'UPDATE transactions SET receipt_id = ? '
+                    'WHERE id = ? AND deleted_at IS NULL',
                     (receipt_id, transaction_id)
                 )
 
