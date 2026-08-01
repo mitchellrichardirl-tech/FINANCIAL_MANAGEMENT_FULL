@@ -17,7 +17,14 @@ from typing import Optional, Dict, List, Any
 import pandas as pd
 
 from src.database.connection import get_manager
-from src.database.errors import DatabaseError
+from src.database.errors import (
+    DatabaseError,
+    TransactionRuleError,
+    SOURCE_SPLIT,
+    SOURCE_GENERATED,
+    DELETED_REASON_CASCADE,
+    DELETED_REASON_USER
+    )
 from src.models.transaction import Transaction
 from src.utils.logging import ContextLogger
 from src.api.utils.errors import not_found
@@ -730,6 +737,11 @@ class TransactionRepository:
         Raises:
             DatabaseError: On any database failure including FK
                 violations.
+
+        Notes:
+            allowed_fields must never be allowed to contain deleted_at,
+            deleted_reason, source_transaction_id, or source_relationship.
+            These must never be user updatable fields.
         """
         try:
             with self.db.transaction() as conn:
@@ -802,6 +814,11 @@ class TransactionRepository:
         Raises:
             DatabaseError: On any database failure (entire batch is
                 rolled back).
+
+        Notes:
+            allowed_fields must never be allowed to contain deleted_at,
+            deleted_reason, source_transaction_id, or source_relationship.
+            These must never be user updatable fields.
         """
         if not transaction_ids:
             return {'updated_count': 0, 'updated_ids': []}
@@ -867,133 +884,289 @@ class TransactionRepository:
         """Yield successive `size`-length slices of `items`."""
         for i in range(0, len(items), size):
             yield items[i:i + size]
-    def delete_transaction(self, transaction_id: int) -> bool:
-        """Soft-delete a transaction by stamping `deleted_at`.
-        The row is retained in full; it is simply excluded from every
-        read path that doesn't explicitly pass `include_deleted=True`.
-        Reversible via `restore_transaction()`.
-        Idempotent in effect: deleting an already-deleted transaction is
-        a no-op and returns False, leaving the original `deleted_at`
-        timestamp untouched.
+
+    def delete_transaction(self, transaction_id: int) -> Dict[str, Any]:
+        """Soft-delete a transaction, cascading to its generated children.
+        Sets `deleted_at` and `deleted_reason = 'user'`. Any live child
+        with `source_relationship = 'generated'` (e.g. a cash lodgement
+        derived from an ATM withdrawal) is soft-deleted in the same
+        database transaction with `deleted_reason = 'cascade'`, so that
+        restoring the parent can later restore exactly those rows and no
+        others.
+        Children the user had already deleted by hand keep their original
+        `deleted_reason = 'user'` and are not touched.
         Args:
             transaction_id: Primary key of the transaction to delete.
         Returns:
-            True if a live transaction was soft-deleted. False if no
-            such transaction exists, or it was already deleted. Call
-            `get_transaction_by_id(id, include_deleted=True)` to
-            distinguish the two cases.
+            Dict with:
+                - `deleted`: True if a live transaction was soft-deleted.
+                  False if it doesn't exist or was already deleted.
+                - `transaction_id`: Echoed back.
+                - `cascaded_ids`: IDs of generated children also deleted.
+                  The caller should remove these from the UI too.
         Raises:
-            DatabaseError: On any database failure.
+            TransactionRuleError: If the transaction is a split child
+                (`source_relationship = 'split'`). Deleting one line item
+                of a split would silently break amount conservation;
+                unsplit the source transaction instead.
+            DatabaseError: On any database failure (all or nothing).
         """
         try:
             with self.db.transaction() as conn:
                 cursor = conn.cursor()
-                cursor.execute('''
-                    UPDATE transactions
-                    SET deleted_at = strftime('%Y-%m-%d %H:%M:%f', 'now')
-                    WHERE id = ? AND deleted_at IS NULL
-                ''', (transaction_id,))
-                if cursor.rowcount == 0:
+                row = self._fetch_delete_state(cursor, transaction_id)
+                if row is None or row['deleted_at'] is not None:
                     logger.debug(
                         f"Transaction {transaction_id} not found or already deleted"
                     )
-                    return False
-            logger.info(f"Soft-deleted transaction {transaction_id}")
-            return True
+                    return {
+                        'deleted': False,
+                        'transaction_id': transaction_id,
+                        'cascaded_ids': []
+                    }
+                if row['source_relationship'] == SOURCE_SPLIT:
+                    raise TransactionRuleError(
+                        f"Transaction {transaction_id} is one line of a split and "
+                        f"cannot be deleted on its own. Unsplit transaction "
+                        f"{row['source_transaction_id']} instead."
+                    )
+                # Collect before updating: once the parent is marked deleted
+                # we can still find children, but capturing IDs up front keeps
+                # the response honest if the predicate ever changes.
+                cascaded_ids = self._live_generated_children(cursor, transaction_id)
+                cursor.execute(f'''
+                    UPDATE transactions
+                    SET deleted_at = {_NOW},
+                        deleted_reason = ?
+                    WHERE id = ? AND deleted_at IS NULL
+                ''', (DELETED_REASON_USER, transaction_id))
+                if cascaded_ids:
+                    cursor.execute(f'''
+                        UPDATE transactions
+                        SET deleted_at = {_NOW},
+                            deleted_reason = ?
+                        WHERE source_transaction_id = ?
+                          AND source_relationship = ?
+                          AND deleted_at IS NULL
+                    ''', (DELETED_REASON_CASCADE, transaction_id, SOURCE_GENERATED))
+            logger.info(
+                f"Soft-deleted transaction {transaction_id}"
+                + (f" (cascaded to {cascaded_ids})" if cascaded_ids else "")
+            )
+            return {
+                'deleted': True,
+                'transaction_id': transaction_id,
+                'cascaded_ids': cascaded_ids
+            }
+        except TransactionRuleError:
+            raise
         except Exception as e:
             logger.error(f"Failed to delete transaction {transaction_id}: {e}")
             raise DatabaseError(f"Failed to delete transaction: {e}") from e
         
     def bulk_delete_transactions(self, transaction_ids: List[int]) -> Dict[str, Any]:
-        """Soft-delete multiple transactions in a single database transaction.
-        Already-deleted and non-existent IDs are skipped rather than
-        raising, so the operation is safe to retry. All chunks commit
-        together — a failure partway through rolls the whole batch back.
+        """Soft-delete multiple transactions, cascading to generated children.
+        Atomic: if any requested ID is a split child, nothing is deleted.
+        A half-applied bulk delete is worse than a rejected one — the user
+        can unsplit and retry, but can't easily tell which of fifty rows
+        went through.
+        Ordering matters. Explicit IDs are marked `'user'` first; the
+        cascade pass then runs against the remainder, so a child the user
+        explicitly selected is recorded as `'user'` (and will survive a
+        later restore of its parent) rather than `'cascade'`.
         Args:
-            transaction_ids: Primary keys of the transactions to delete.
-                Duplicates are collapsed.
+            transaction_ids: Primary keys to delete. Duplicates collapsed.
         Returns:
             Dict with:
-                - `deleted_count`: Number of rows actually soft-deleted.
-                - `deleted_ids`: IDs that were live and are now deleted.
-                - `skipped_ids`: IDs that were already deleted or don't
-                  exist.
-            Returns zeroed counts if `transaction_ids` is empty.
+                - `deleted_count`: Rows soft-deleted with reason 'user'.
+                - `deleted_ids`: Which ones.
+                - `cascaded_ids`: Generated children also deleted.
+                - `skipped_ids`: Requested IDs that didn't exist or were
+                  already deleted.
         Raises:
-            DatabaseError: On any database failure (entire batch is
-                rolled back).
+            TransactionRuleError: If any requested ID is a split child.
+            DatabaseError: On any database failure (entire batch rolled back).
         """
         if not transaction_ids:
-            return {'deleted_count': 0, 'deleted_ids': [], 'skipped_ids': []}
-        # Preserve caller ordering while removing duplicates
+            return {
+                'deleted_count': 0, 'deleted_ids': [],
+                'cascaded_ids': [], 'skipped_ids': []
+            }
         unique_ids = list(dict.fromkeys(transaction_ids))
         try:
             deleted_ids: List[int] = []
+            cascaded_ids: List[int] = []
             with self.db.transaction() as conn:
                 cursor = conn.cursor()
+                # 1. Reject the whole batch if it contains any split children.
+                split_children: List[int] = []
                 for chunk in self._chunked(unique_ids, self._MAX_SQL_VARIABLES):
                     placeholders = ','.join('?' * len(chunk))
-                    # Identify live rows first so we can report exactly
-                    # which IDs were affected. rowcount alone wouldn't
-                    # tell us *which*.
+                    cursor.execute(
+                        f"SELECT id FROM transactions "
+                        f"WHERE id IN ({placeholders}) AND source_relationship = ?",
+                        (*chunk, SOURCE_SPLIT)
+                    )
+                    split_children.extend(r['id'] for r in cursor.fetchall())
+                if split_children:
+                    raise TransactionRuleError(
+                        f"Cannot bulk delete: {len(split_children)} of the selected "
+                        f"transactions are lines of a split ({split_children}). "
+                        f"Unsplit their source transactions first."
+                    )
+                # 2. Identify live rows so the response says which IDs moved.
+                for chunk in self._chunked(unique_ids, self._MAX_SQL_VARIABLES):
+                    placeholders = ','.join('?' * len(chunk))
                     cursor.execute(
                         f"SELECT id FROM transactions "
                         f"WHERE id IN ({placeholders}) AND deleted_at IS NULL",
                         chunk
                     )
-                    live_ids = [row['id'] for row in cursor.fetchall()]
-                    if not live_ids:
-                        continue
-                    live_placeholders = ','.join('?' * len(live_ids))
+                    deleted_ids.extend(r['id'] for r in cursor.fetchall())
+                # 3. Explicit deletions, reason 'user'.
+                for chunk in self._chunked(deleted_ids, self._MAX_SQL_VARIABLES):
+                    placeholders = ','.join('?' * len(chunk))
                     cursor.execute(
                         f"UPDATE transactions "
-                        f"SET deleted_at = strftime('%Y-%m-%d %H:%M:%f', 'now') "
-                        f"WHERE id IN ({live_placeholders})",
-                        live_ids
+                        f"SET deleted_at = {_NOW}, deleted_reason = ? "
+                        f"WHERE id IN ({placeholders})",
+                        (DELETED_REASON_USER, *chunk)
                     )
-                    deleted_ids.extend(live_ids)
+                # 4. Cascade. Runs after step 3, so explicitly-selected children
+                #    are already deleted and the `deleted_at IS NULL` guard
+                #    leaves their reason as 'user'.
+                for chunk in self._chunked(deleted_ids, self._MAX_SQL_VARIABLES):
+                    placeholders = ','.join('?' * len(chunk))
+                    cursor.execute(
+                        f"SELECT id FROM transactions "
+                        f"WHERE source_transaction_id IN ({placeholders}) "
+                        f"  AND source_relationship = ? "
+                        f"  AND deleted_at IS NULL",
+                        (*chunk, SOURCE_GENERATED)
+                    )
+                    children = [r['id'] for r in cursor.fetchall()]
+                    if not children:
+                        continue
+                    child_placeholders = ','.join('?' * len(children))
+                    cursor.execute(
+                        f"UPDATE transactions "
+                        f"SET deleted_at = {_NOW}, deleted_reason = ? "
+                        f"WHERE id IN ({child_placeholders})",
+                        (DELETED_REASON_CASCADE, *children)
+                    )
+                    cascaded_ids.extend(children)
             deleted_set = set(deleted_ids)
             skipped_ids = [i for i in unique_ids if i not in deleted_set]
             logger.info(
                 f"Bulk soft-deleted {len(deleted_ids)} transactions "
-                f"(requested {len(unique_ids)}, skipped {len(skipped_ids)})"
+                f"(requested {len(unique_ids)}, skipped {len(skipped_ids)}, "
+                f"cascaded {len(cascaded_ids)})"
             )
             return {
                 'deleted_count': len(deleted_ids),
                 'deleted_ids': deleted_ids,
+                'cascaded_ids': cascaded_ids,
                 'skipped_ids': skipped_ids
             }
+        except TransactionRuleError:
+            raise
         except Exception as e:
             logger.error(f"Failed to bulk delete transactions: {e}")
             raise DatabaseError(f"Failed to bulk delete transactions: {e}") from e
         
-    def restore_transaction(self, transaction_id: int) -> bool:
-        """Restore a soft-deleted transaction by clearing `deleted_at`.
-        The inverse of `delete_transaction()`. Backs the "Undo" action
-        in the UI.
+    def restore_transaction(self, transaction_id: int) -> Dict[str, Any]:
+        """Restore a user-deleted transaction and its cascaded children.
+        Enforces the three-line rule set:
+            - `deleted_reason = 'user'`       → restorable here.
+            - `deleted_reason = 'cascade'`    → restore the source instead.
+            - `deleted_reason = 'superseded'` → unsplit instead.
+            - `deleted_reason = 'unsplit'`    → re-split instead.
+        Also enforces *child live implies parent live*: a generated child
+        cannot be restored while its source transaction is deleted.
+        Restores only children with `deleted_reason = 'cascade'`, so a
+        child the user deleted by hand before deleting the parent stays
+        deleted — which is what they asked for.
         Args:
             transaction_id: Primary key of the transaction to restore.
         Returns:
-            True if a deleted transaction was restored. False if no such
-            transaction exists, or it was never deleted.
+            Dict with:
+                - `restored`: True if a deleted transaction was restored.
+                  False if it doesn't exist or was never deleted.
+                - `transaction_id`: Echoed back.
+                - `restored_ids`: IDs of cascade-deleted children restored
+                  alongside it.
         Raises:
+            TransactionRuleError: If the row wasn't deleted by the user,
+                or if restoring it would orphan it from a deleted parent.
             DatabaseError: On any database failure.
         """
         try:
             with self.db.transaction() as conn:
                 cursor = conn.cursor()
-                cursor.execute('''
-                    UPDATE transactions
-                    SET deleted_at = NULL
-                    WHERE id = ? AND deleted_at IS NOT NULL
-                ''', (transaction_id,))
-                if cursor.rowcount == 0:
+                row = self._fetch_delete_state(cursor, transaction_id)
+                if row is None or row['deleted_at'] is None:
                     logger.debug(
                         f"Transaction {transaction_id} not found or not deleted"
                     )
-                    return False
-            logger.info(f"Restored transaction {transaction_id}")
-            return True
+                    return {
+                        'restored': False,
+                        'transaction_id': transaction_id,
+                        'restored_ids': []
+                    }
+                reason = row['deleted_reason']
+                if reason not in RESTORABLE_REASONS:
+                    help_text = _RESTORE_HELP.get(
+                        reason, "it was not deleted by the user."
+                    )
+                    raise TransactionRuleError(
+                        f"Cannot restore transaction {transaction_id}: {help_text}"
+                    )
+                # Invariant: a generated child may only be live if its source is.
+                # Split children have the inverse invariant, but they can never
+                # reach this point — delete_transaction() refuses them, so they
+                # never carry reason='user'.
+                if (row['source_relationship'] == SOURCE_GENERATED
+                        and row['source_transaction_id'] is not None):
+                    parent = self._fetch_delete_state(
+                        cursor, row['source_transaction_id']
+                    )
+                    if parent is None or parent['deleted_at'] is not None:
+                        raise TransactionRuleError(
+                            f"Cannot restore transaction {transaction_id}: its source "
+                            f"transaction {row['source_transaction_id']} is deleted. "
+                            f"Restore the source transaction instead."
+                        )
+                cursor.execute('''
+                    UPDATE transactions
+                    SET deleted_at = NULL, deleted_reason = NULL
+                    WHERE id = ? AND deleted_at IS NOT NULL
+                ''', (transaction_id,))
+                cursor.execute('''
+                    SELECT id FROM transactions
+                    WHERE source_transaction_id = ?
+                      AND source_relationship = ?
+                      AND deleted_reason = ?
+                ''', (transaction_id, SOURCE_GENERATED, DELETED_REASON_CASCADE))
+                restored_ids = [r['id'] for r in cursor.fetchall()]
+                if restored_ids:
+                    cursor.execute('''
+                        UPDATE transactions
+                        SET deleted_at = NULL, deleted_reason = NULL
+                        WHERE source_transaction_id = ?
+                          AND source_relationship = ?
+                          AND deleted_reason = ?
+                    ''', (transaction_id, SOURCE_GENERATED, DELETED_REASON_CASCADE))
+            logger.info(
+                f"Restored transaction {transaction_id}"
+                + (f" (restored children {restored_ids})" if restored_ids else "")
+            )
+            return {
+                'restored': True,
+                'transaction_id': transaction_id,
+                'restored_ids': restored_ids
+            }
+        except TransactionRuleError:
+            raise
         except Exception as e:
             logger.error(f"Failed to restore transaction {transaction_id}: {e}")
             raise DatabaseError(f"Failed to restore transaction: {e}") from e
