@@ -10,7 +10,7 @@ from src.api.utils.file_handling import FileHandler, TempFileManager
 from src.api.utils.errors import (
   AppError, ErrorCode, not_found, duplicate, has_dependencies, invalid_value
 )
-from src.database.connection import DatabaseError
+from src.database.errors import DatabaseError
 from src.utils.logging import ContextLogger
 
 logger = ContextLogger(__name__)

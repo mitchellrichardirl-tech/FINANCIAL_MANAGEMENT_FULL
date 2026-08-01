@@ -16,7 +16,8 @@ Return types vary by method:
 from typing import Optional, Dict, List, Any
 import pandas as pd
 
-from src.database.connection import get_manager, DatabaseError
+from src.database.connection import get_manager
+from src.database.errors import DatabaseError
 from src.models.transaction import Transaction
 from src.utils.logging import ContextLogger
 from src.api.utils.errors import not_found
@@ -1172,3 +1173,37 @@ class TransactionRepository:
                 f"Failed to link receipt {receipt_id} to transaction {transaction_id}: {e}"
             )
             raise DatabaseError(f"Failed to link receipt to transaction: {e}") from e
+
+    def _fetch_delete_state(self, cursor, transaction_id: int):
+        """Read the columns needed to reason about deletion for one row.
+        Deliberately ignores the soft-delete filter — callers need to see
+        deleted rows to decide what to do with them.
+        Args:
+            cursor: An open cursor inside the caller's transaction.
+            transaction_id: Primary key to look up.
+        Returns:
+            A `sqlite3.Row` with `id`, `deleted_at`, `deleted_reason`,
+            `source_transaction_id` and `source_relationship`, or None.
+        """
+        cursor.execute('''
+            SELECT id, deleted_at, deleted_reason,
+                   source_transaction_id, source_relationship
+            FROM transactions
+            WHERE id = ?
+        ''', (transaction_id,))
+        return cursor.fetchone()
+    def _live_generated_children(self, cursor, parent_id: int) -> List[int]:
+        """Return IDs of live `generated` children of `parent_id`.
+        Split children are excluded — they have inverted polarity and are
+        never cascade-deleted. Rows the user already deleted by hand are
+        excluded by the `deleted_at IS NULL` guard, so their
+        `deleted_reason` is never overwritten with 'cascade'.
+        Uses idx_transactions_source_transaction_id.
+        """
+        cursor.execute('''
+            SELECT id FROM transactions
+            WHERE source_transaction_id = ?
+              AND source_relationship = ?
+              AND deleted_at IS NULL
+        ''', (parent_id, SOURCE_GENERATED))
+        return [row['id'] for row in cursor.fetchall()]

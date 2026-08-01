@@ -20,7 +20,8 @@ import json
 import sqlite3
 from typing import Any, Dict, List, Optional
 
-from src.database.connection import get_manager, DatabaseError, RecordNotFound
+from src.database.connection import get_manager
+from src.database.errors import DatabaseError, RecordNotFound
 from src.database.repositories.base import BaseRepository
 from src.utils.logging import ContextLogger
 

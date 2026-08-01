@@ -26,7 +26,8 @@ import json
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple, Tuple
 
-from src.database.connection import get_manager, DatabaseError
+from src.database.connection import get_manager
+from src.database.errors import DatabaseError
 from src.database.repositories.accounts import AccountRepository
 from src.utils.logging import ContextLogger
 
@@ -120,8 +121,8 @@ class CashTransactionService:
             (transaction_date, amount, description,
                 cleaned_description, is_credit, is_kids,
                 is_one_off, account_id, upload_id,
-                party_id, receipt_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                party_id, receipt_id, source_relationship)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 transaction_date,
                 signed_amount,
@@ -134,6 +135,7 @@ class CashTransactionService:
                 upload_id,
                 party_id,
                 receipt_id,
+                'generated'
             ),
         )
         new_id = cursor.lastrowid

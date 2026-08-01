@@ -9,7 +9,8 @@ own SQL rather than building on this; consolidating that is on the backlog.
 
 from typing import Optional, Tuple, Any
 
-from src.database.connection import get_manager, DatabaseError
+from src.database.connection import get_manager
+from src.database.errors import DatabaseError
 from src.utils.logging import ContextLogger
 import sqlite3
 

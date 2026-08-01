@@ -33,28 +33,11 @@ from typing import Optional, Union
 from flask import current_app, g
 
 from src.database.migrations import migrate
+from src.database.errors import DatabaseError, RecordNotFound
 from src.utils.logging import ContextLogger
 
 logger = ContextLogger(__name__)
 
-
-class DatabaseError(Exception):
-    """Raised when a database operation fails.
-
-    Wraps lower-level `sqlite3.Error` exceptions and other failures
-    (e.g. backup I/O errors) with a consistent exception type so callers
-    can catch a single error class.
-    """
-
-    pass
-
-class RecordNotFound(DatabaseError):
-    """Requested record does not exist. Safe to map to HTTP 404."""
-    def __init__(self, entity: str, **criteria):
-        self.entity = entity
-        self.criteria = criteria
-        parts = ", ".join(f"{k}={v!r}" for k, v in criteria.items())
-        super().__init__(f"{entity} not found: {parts}")
 
 class ConnectionManager:
     """Manages SQLite database connections and configuration.

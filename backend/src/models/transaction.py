@@ -48,6 +48,10 @@ class Transaction:
             withdrawal)
         deleted_at: Time a transaction was soft-deleted. Null value means
             the transaction has not been deleted.
+        deleted_reason: ∈ user | cascade | superseded | unsplit, NULL when live.
+        source_relationship:  ∈ generated | split, NULL when
+            source_transaction_id is NULL. It lives on the child, next to the FK
+            it qualifies.
     """
     id: int
     transaction_date: datetime
@@ -64,3 +68,5 @@ class Transaction:
     receipt_id: int | None = None
     source_transaction_id: int | None = None
     deleted_at: str | None = None
+    deleted_reason: str | None = None
+    source_relationship: str | None = None

@@ -18,7 +18,8 @@ Typical usage:
 from typing import Optional, Dict, List, Any
 import sqlite3
 
-from src.database.connection import get_manager, DatabaseError
+from src.database.connection import get_manager
+from src.database.errors import DatabaseError
 from src.database.repositories.base import BaseRepository
 from src.utils.logging import ContextLogger
 

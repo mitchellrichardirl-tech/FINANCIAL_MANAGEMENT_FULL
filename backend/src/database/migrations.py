@@ -75,6 +75,7 @@ def migrate(db_path: str):
         cursor.execute(
             "ALTER TABLE transactions ADD COLUMN deleted_at TIMESTAMP DEFAULT NULL"
         )
+        conn.commit()
         # Partial index: covers the overwhelmingly common "live rows, ordered
         # by date" access path while excluding soft-deleted rows entirely.
         cursor.execute(
@@ -89,4 +90,21 @@ def migrate(db_path: str):
         )
     else:
         logger.info("Migration already applied: transactions.deleted_at")
+    # Add deleted_reason and source_relationship fields to enable 
+    # appropriate cascade deletion and restoration behaviour for 
+    # generated and split transactions
+    if 'deleted_reason' not in _table_columns(cursor, "transactions"):
+        cursor.execute(
+            "ALTER TABLE transactions ADD COLUMN deleted_reason TEXT DEFAULT NULL;"
+        )
+        conn.commit()
+    else:
+        logger.info("Migration already applied: transactions.deleted_reason")
+    if 'source_relationship' not in _table_columns(cursor, 'transactions'):
+        cursor.execute(
+            "ALTER TABLE transactions ADD COLUMN source_relationship TEXT DEFAULT NULL;"
+        )
+        conn.commit()
+    else:
+        logger.info("Migration already applied: transactions.source_relationship")
     conn.close()
