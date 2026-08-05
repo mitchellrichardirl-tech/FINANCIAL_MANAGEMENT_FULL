@@ -20,10 +20,13 @@ from src.database.connection import get_manager
 from src.database.errors import (
     DatabaseError,
     TransactionRuleError,
+    _NOW,
     SOURCE_SPLIT,
     SOURCE_GENERATED,
     DELETED_REASON_CASCADE,
-    DELETED_REASON_USER
+    DELETED_REASON_USER,
+    RESTORABLE_REASONS,
+    _RESTORE_HELP
     )
 from src.models.transaction import Transaction
 from src.utils.logging import ContextLogger
@@ -440,10 +443,12 @@ class TransactionRepository:
         category_id: Optional[int] = None,
         sub_category_id: Optional[int] = None,
         type_id: Optional[int] = None,
+        sort_by: Optional[str] = None,
         sort_dir: Optional[str] = None,
         has_receipt: Optional[bool] = None,
         include_deleted: bool = False,
-        deleted_only: bool = False
+        deleted_only: bool = False,
+        deleted_reason: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Fetch transactions with full category hierarchy and optional filters.
 
@@ -528,6 +533,10 @@ class TransactionRepository:
                 elif not include_deleted:
                     conditions.append('t.deleted_at IS NULL')
 
+                if deleted_reason:
+                    conditions.append('t.deleted_reason = ?')
+                    params.append(deleted_reason)
+
                 if start_date:
                     conditions.append('t.transaction_date >= ?')
                     params.append(start_date)
@@ -590,7 +599,7 @@ class TransactionRepository:
                     logger.debug(f"Querying transactions with {len(conditions)} filters")
 
                 where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-
+                
                 # Build ORDER BY clause safely
                 sort_column = SORTABLE_COLUMNS.get(sort_by, 't.transaction_date')
                 sort_direction = 'ASC' if sort_dir == 'asc' else 'DESC'
