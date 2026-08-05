@@ -1,3 +1,33 @@
+# Undo Delete Transaction
+
+When we add an action slot to our Toast implementation we can add undo delete functionality to the front end. The undo path is straightforward — each deleted_id needs a restore call, and the cascade-restore in the backend handles children automatically:
+
+```javascript
+addToast({
+  message: `${result.deleted_count} transaction(s) deleted`,
+  type: 'success',
+  duration: 8000,
+  action: {
+    label: 'Undo',
+    onClick: async () => {
+      try {
+        // Restore in parallel — each one restores its own cascade children.
+        await Promise.all(
+          result.deleted_ids.map((id) => restoreTransaction(id))
+        );
+        await loadTransactions();
+        addToast({ message: 'Transactions restored', type: 'success', duration: 3000 });
+      } catch (err) {
+        addToast({
+          message: `Failed to undo: ${err.userMessage || err.message}`,
+          type: 'error',
+        });
+      }
+    },
+  },
+});
+```
+
 # Split Transaction — Implementation Notes
 
 ## Overview

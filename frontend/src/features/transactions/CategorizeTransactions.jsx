@@ -5,6 +5,8 @@ import {
   updateTransaction,
   bulkUpdateTransactions,
   generateCashTransactions,
+  bulkDeleteTransactions,
+  restoreTransaction,
   createCashTransaction,
   getCategories,
   getSubCategories,
@@ -20,6 +22,7 @@ import {
 import { getAccounts } from '@/features/statements/api';
 import TransactionTable from './TransactionTable';
 import Pagination from '@/components/Pagination';
+import DeleteTransactionsModal from './DeleteTransactionsModal';
 import BulkEditModal from './BulkEditModal';
 import RemapPartyModal from './RemapPartyModal';
 import GenerateCashModal from './GenerateCashModal';
@@ -64,6 +67,8 @@ export default function CategorizeTransactions() {
   const [totalTransactions, setTotalTransactions] = useState(0);
   const [filters, setFilters] = useState({});
   const [selectedTransactions, setSelectedTransactions] = useState([]);
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [isBulkEditOpen, setIsBulkEditOpen] = useState(false)
   const [isGenerateCashOpen, setIsGenerateCashOpen] = useState(false);
   const [isCreateCashOpen, setIsCreateCashOpen] = useState(false);
@@ -183,6 +188,55 @@ export default function CategorizeTransactions() {
       setLoading(false);
     }
   };
+
+  const handleDeleteTransactions = async () => {
+    if (selectedTransactions.length === 0) {
+      throw new Error('No transactions selected');
+    }
+    setIsDeleting(true);
+    try {
+      const response = await bulkDeleteTransactions(selectedTransactions);
+      const result = response?.data ?? response;
+      // Optimistically remove affected rows so the table updates
+      // instantly. The full reload below catches anything else
+      // (e.g. pagination shifting).
+      const removedIds = new Set([
+        ...(result.deleted_ids ?? []),
+        ...(result.cascaded_ids ?? []),
+      ]);
+      setTransactions((prev) => prev.filter((t) => !removedIds.has(t.id)));
+      setSelectedTransactions([]);
+      setIsDeleteOpen(false);
+      // Build a human message
+      const parts = [`${result.deleted_count} deleted`];
+      if (result.cascaded_ids?.length > 0) {
+        parts.push(`${result.cascaded_ids.length} linked cash transaction(s) also deleted`);
+      }
+      if (result.skipped_ids?.length > 0) {
+        parts.push(`${result.skipped_ids.length} skipped`);
+      }
+      addToast({
+        message: `Transactions: ${parts.join(' · ')}`,
+        type: result.deleted_count > 0 ? 'success' : 'info',
+        duration: 5000,
+        // If your toast supports an action slot, this is where
+        // the Undo button goes — see the note at the bottom.
+      });
+      // Reload to fix pagination counts and pick up any
+      // cascaded removals the optimistic pass missed.
+      await loadTransactions();
+    } catch (err) {
+      logger.error('Error deleting transactions:', err);
+      addToast({
+        message: `Failed to delete transactions: ${err.userMessage || err.message}`,
+        type: 'error',
+      });
+      throw err;
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const handleGenerateCash = async () => {
     if (selectedTransactions.length === 0) {
       throw new Error('No transactions selected');
@@ -387,6 +441,12 @@ export default function CategorizeTransactions() {
               >
                 Generate Cash ({selectedTransactions.length})
               </button>
+              <button
+                onClick={() => setIsDeleteOpen(true)}
+                className={`${ACTION_BTN} bg-[#e53935] hover:bg-[#c62828]`}
+              >
+                Delete ({selectedTransactions.length})
+              </button>
             </>
           )}
         </div>
@@ -495,6 +555,13 @@ export default function CategorizeTransactions() {
         onTypeCreated={handleTypeCreated}
         onPartyCreated={handlePartyCreated}
       />
+      <DeleteTransactionsModal
+        isOpen={isDeleteOpen}
+        onClose={() => setIsDeleteOpen(false)}
+        onConfirm={handleDeleteTransactions}
+        transactionCount={selectedTransactions.length}
+        loading={isDeleting}
+      />      
     </div>
   );
 }
