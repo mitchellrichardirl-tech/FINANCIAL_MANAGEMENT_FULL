@@ -222,6 +222,10 @@ export default function CategorizeTransactions() {
         // If your toast supports an action slot, this is where
         // the Undo button goes — see the note at the bottom.
       });
+      // Reload uploadsData to exclude any uploads which now have no visible
+      // transactions
+      const [uploadsData] = await Promise.all([getUploads()]);
+      setUploads(uploadsData.data || uploadsData);
       // Reload to fix pagination counts and pick up any
       // cascaded removals the optimistic pass missed.
       await loadTransactions();
