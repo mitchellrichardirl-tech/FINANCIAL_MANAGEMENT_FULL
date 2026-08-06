@@ -95,12 +95,13 @@ export async function previewFile(file, numRows = 20) {
  * @returns {Promise<Object>} Raw API response (import summary / results).
  * @throws {AppError|ApiError}
  */
-export async function importFile(file, startRow, accountId) {
+export async function importFile(file, startRow, accountId, formatId) {
   try {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('start_row', startRow.toString());
     formData.append('account_id', parseInt(accountId).toString());
+    formData.append('format_id', parseInt(formatId).toString());
     formData.append('has_header', 'true');
     formData.append('skip_empty_rows', 'true');
     formData.append('strip_whitespace', 'true');
