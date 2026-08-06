@@ -130,6 +130,13 @@ export default function CategorizeTransactions() {
         cleanFilters.sort_dir = sortDir;
       }
       const data = await getTransactions(cleanFilters);
+
+      // Deleting everything on the last page strands us past the end.
+      if (data.length === 0 && currentPage > 1) {
+        setCurrentPage((p) => p - 1);
+        return;
+      }
+      
       setTransactions(data);
       setTotalTransactions(
         data.length === ITEMS_PER_PAGE
@@ -197,9 +204,7 @@ export default function CategorizeTransactions() {
     try {
       const response = await bulkDeleteTransactions(selectedTransactions);
       const result = response?.data ?? response;
-      // Optimistically remove affected rows so the table updates
-      // instantly. The full reload below catches anything else
-      // (e.g. pagination shifting).
+      // Optimistically remove affected rows so the table updates instantly.
       const removedIds = new Set([
         ...(result.deleted_ids ?? []),
         ...(result.cascaded_ids ?? []),
@@ -207,7 +212,6 @@ export default function CategorizeTransactions() {
       setTransactions((prev) => prev.filter((t) => !removedIds.has(t.id)));
       setSelectedTransactions([]);
       setIsDeleteOpen(false);
-      // Build a human message
       const parts = [`${result.deleted_count} deleted`];
       if (result.cascaded_ids?.length > 0) {
         parts.push(`${result.cascaded_ids.length} linked cash transaction(s) also deleted`);
@@ -219,16 +223,40 @@ export default function CategorizeTransactions() {
         message: `Transactions: ${parts.join(' · ')}`,
         type: result.deleted_count > 0 ? 'success' : 'info',
         duration: 5000,
-        // If your toast supports an action slot, this is where
-        // the Undo button goes — see the note at the bottom.
       });
-      // Reload uploadsData to exclude any uploads which now have no visible
-      // transactions
-      const [uploadsData] = await Promise.all([getUploads()]);
-      setUploads(uploadsData.data || uploadsData);
-      // Reload to fix pagination counts and pick up any
-      // cascaded removals the optimistic pass missed.
-      await loadTransactions();
+      // An upload disappears from the list once its last live transaction is
+      // deleted. If that's the one currently being filtered on, the select
+      // silently falls back to "All Uploads" while filters.upload_id still
+      // points at the dead id — so clear it explicitly.
+      const freshUploads = await refreshUploads();
+      const selectedUploadId = filters.upload_id;
+      // A controlled <select> whose value has no matching <option> renders as the
+      // first option while the state says otherwise. Derive the value so the
+      // control can never display something different from what's being filtered.
+      const uploadFilterValue = uploads.some((u) => u.id === filters.upload_id)
+        ? String(filters.upload_id)
+        : '';
+      const uploadFilterStale =
+        Boolean(selectedUploadId) &&
+        !freshUploads.some((u) => u.id === selectedUploadId);
+      if (uploadFilterStale) {
+        logger.info(
+          `Upload ${selectedUploadId} has no live transactions left; clearing filter`
+        );
+        // Do NOT call loadTransactions() here. It closes over the current
+        // render's `filters`, which still holds the dead upload_id. Updating
+        // the filter re-runs the effect with a fresh closure.
+        handleFilterChange({ ...filters, upload_id: null });
+        addToast({
+          message: 'Showing all uploads — the selected upload has no transactions left',
+          type: 'info',
+          duration: 4000,
+        });
+      } else {
+        // Filter is still valid; reload to fix pagination counts and pick up
+        // any cascaded removals the optimistic pass missed.
+        await loadTransactions();
+      }
     } catch (err) {
       logger.error('Error deleting transactions:', err);
       addToast({
@@ -249,12 +277,8 @@ export default function CategorizeTransactions() {
     try {
       const response = await generateCashTransactions(selectedTransactions);
       const result = response?.data ?? response;
-      const [accountsData, uploadsData] = await Promise.all([
-        getAccounts(),
-        getUploads(),
-      ]);
+      const [accountsData] = await Promise.all([getAccounts(), refreshUploads()]);
       setAccounts(accountsData);
-      setUploads(uploadsData.data || uploadsData);
       await loadTransactions();
       setSelectedTransactions([]);
       setIsGenerateCashOpen(false);
@@ -286,12 +310,8 @@ export default function CategorizeTransactions() {
     setLoading(true);
     try {
       await createCashTransaction(opts);
-      const [accountsData, uploadsData] = await Promise.all([
-        getAccounts(),
-        getUploads(),
-      ]);
+      const [accountsData] = await Promise.all([getAccounts(), refreshUploads()]);
       setAccounts(accountsData);
-      setUploads(uploadsData.data || uploadsData);
       await loadTransactions();
       setIsCreateCashOpen(false);
       addToast({
@@ -332,6 +352,23 @@ export default function CategorizeTransactions() {
       throw err;
     }
   };
+
+  /**
+   * Refetch uploads and return the fresh list.
+   *
+   * Uploads whose transactions have all been soft-deleted are filtered out
+   * server-side, so the list can shrink after a delete and grow after a
+   * restore.
+   *
+   * @returns {Promise<Array<{id: number, original_filename: string, upload_date: string}>>}
+   */
+  const refreshUploads = useCallback(async () => {
+    const uploadsData = await getUploads();
+    const fresh = uploadsData.data || uploadsData;
+    setUploads(fresh);
+    return fresh;
+  }, []);
+
   // ── Create-item factory ───────────────────────────────────────────
   const makeCreateHandler = useCallback(
     (label, createFn, refetchFn, setFn, findFn) =>
