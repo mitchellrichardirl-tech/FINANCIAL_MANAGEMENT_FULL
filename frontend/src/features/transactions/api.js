@@ -475,3 +475,29 @@ export async function uploadReceipt(file, opts = {}) {
   });
   return unwrap(response, 'receipt');
 }
+
+/**
+ * Soft-delete multiple transactions.
+ *
+ * @param {number[]} transactionIds
+ * @returns {Promise<{deleted_count: number, deleted_ids: number[], cascaded_ids: number[], skipped_ids: number[]}>}
+ */
+export async function bulkDeleteTransactions(transactionIds) {
+  return apiCall('/transactions/bulk', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: { transaction_ids: transactionIds },
+  });
+}
+
+/**
+ * Restore a single soft-deleted transaction (and any cascade-deleted children).
+ *
+ * @param {number} transactionId
+ * @returns {Promise<{transaction: object, restored_ids: number[]}>}
+ */
+export async function restoreTransaction(transactionId) {
+  return apiCall(`/transactions/${transactionId}/restore`, {
+    method: 'POST',
+  });
+}

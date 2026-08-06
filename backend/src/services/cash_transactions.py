@@ -26,7 +26,8 @@ import json
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple, Tuple
 
-from src.database.connection import get_manager, DatabaseError
+from src.database.connection import get_manager
+from src.database.errors import DatabaseError
 from src.database.repositories.accounts import AccountRepository
 from src.utils.logging import ContextLogger
 
@@ -120,8 +121,8 @@ class CashTransactionService:
             (transaction_date, amount, description,
                 cleaned_description, is_credit, is_kids,
                 is_one_off, account_id, upload_id,
-                party_id, receipt_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                party_id, receipt_id, source_relationship)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 transaction_date,
                 signed_amount,
@@ -134,10 +135,14 @@ class CashTransactionService:
                 upload_id,
                 party_id,
                 receipt_id,
+                'generated'
             ),
         )
         new_id = cursor.lastrowid
-        cursor.execute("SELECT * FROM transactions WHERE id = ?", (new_id,))
+        cursor.execute(
+            "SELECT * FROM transactions WHERE id = ? AND deleted_at IS NULL",
+            (new_id,)
+            )
         transaction = dict(cursor.fetchone())
 
         return transaction, upload_id
@@ -173,7 +178,7 @@ class CashTransactionService:
             )
 
         cursor.execute(
-            "SELECT id FROM transactions WHERE receipt_id = ? LIMIT 1",
+            "SELECT id FROM transactions WHERE receipt_id = ? AND deleted_at IS NULL LIMIT 1",
             (receipt_id,),
         )
         existing = cursor.fetchone()

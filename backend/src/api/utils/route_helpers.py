@@ -10,7 +10,7 @@ from src.api.utils.file_handling import FileHandler, TempFileManager
 from src.api.utils.errors import (
   AppError, ErrorCode, not_found, duplicate, has_dependencies, invalid_value
 )
-from src.database.connection import DatabaseError
+from src.database.errors import DatabaseError, TransactionRuleError
 from src.utils.logging import ContextLogger
 
 logger = ContextLogger(__name__)
@@ -251,6 +251,17 @@ def classify_database_error(e: Exception, entity_hint: str|None = None) -> AppEr
         status_code=500,
     )
 
+def conflict(message: str, field: str = None):
+    """Request is valid but conflicts with current resource state (HTTP 409).
+    Used for transaction relationship invariant violations — e.g. deleting
+    one line of a split, or restoring a transaction the user didn't delete.
+    """
+    return AppError(
+        message=message,
+        code=ErrorCode.CONFLICT,
+        status_code=409,
+        field=field
+        )
 
 def handle_errors(entity: str|None = None):
     """
@@ -285,6 +296,10 @@ def handle_errors(entity: str|None = None):
                 # Common for repo-layer validation
                 logger.info(f"{f.__name__}: ValueError - {e}")
                 return error_response(invalid_value(str(e)))
+
+            except TransactionRuleError as e:
+                logger.info(f"{f.__name__}: TransactionError -> {e.code.value}: {e}")
+                return conflict(e.message)
             
             except Exception as e:
                 logger.error(f"{f.__name__}: Unexpected error: {e}", exc_info=True)

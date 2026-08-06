@@ -17,7 +17,8 @@ here since they're tightly coupled to the hierarchy.
 from typing import Optional, Dict, List, Any, Union
 import sqlite3
 
-from src.database.connection import get_manager, DatabaseError
+from src.database.connection import get_manager
+from src.database.errors import DatabaseError
 from src.database.repositories.base import BaseRepository
 from src.utils.logging import ContextLogger
 
@@ -1412,7 +1413,7 @@ class CategoryRepository:
         )
 
         cursor.execute(
-            "SELECT COUNT(*) as count FROM transactions WHERE party_id = ?",
+            "SELECT COUNT(*) as count FROM transactions WHERE party_id = ? AND deleted_at IS NULL",
             (party_id,)
         )
         tx_count = cursor.fetchone()['count']
@@ -1553,7 +1554,7 @@ class CategoryRepository:
                 cursor = conn.cursor()
 
                 cursor.execute(
-                    "SELECT COUNT(*) as count FROM transactions WHERE party_id = ?",
+                    "SELECT COUNT(*) as count FROM transactions WHERE party_id = ? AND deleted_at IS NULL",
                     (party_id,)
                 )
                 count = cursor.fetchone()['count']
@@ -1607,6 +1608,7 @@ class CategoryRepository:
                     FROM transactions t
                     LEFT JOIN accounts a ON t.account_id = a.id
                     WHERE t.party_id = ?
+                    AND deleted_at IS NULL
                     ORDER BY t.transaction_date DESC
                 ''', (party_id,))
                 rows = cursor.fetchall()
@@ -1696,6 +1698,7 @@ class CategoryRepository:
                         t.cleaned_description as alias,
                         t.party_id
                     FROM transactions t
+                    WHERE deleted_at IS NULL
                     ORDER BY t.cleaned_description
                 ''')
                 alias_data = cursor.fetchall()

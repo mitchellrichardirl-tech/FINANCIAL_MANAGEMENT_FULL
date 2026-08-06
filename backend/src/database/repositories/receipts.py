@@ -16,7 +16,8 @@ from datetime import datetime
 import sqlite3
 import json
 
-from src.database.connection import get_manager, DatabaseError
+from src.database.connection import get_manager
+from src.database.errors import DatabaseError
 from src.models.receipt import Receipt
 from src.utils.logging import ContextLogger
 

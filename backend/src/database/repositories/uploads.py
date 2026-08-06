@@ -22,8 +22,8 @@ import logging
 import sqlite3
 import json
 
-from src.database.connection import get_manager, DatabaseError, init as initialize_db_connection
-
+from src.database.connection import get_manager, init as initialize_db_connection
+from src.database.errors import DatabaseError
 # TODO: Use context logger
 logger = logging.getLogger(__name__)
 

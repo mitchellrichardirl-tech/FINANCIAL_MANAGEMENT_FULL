@@ -1,3 +1,240 @@
+# Undo Delete Transaction
+
+When we add an action slot to our Toast implementation we can add undo delete functionality to the front end. The undo path is straightforward — each deleted_id needs a restore call, and the cascade-restore in the backend handles children automatically:
+
+```javascript
+addToast({
+  message: `${result.deleted_count} transaction(s) deleted`,
+  type: 'success',
+  duration: 8000,
+  action: {
+    label: 'Undo',
+    onClick: async () => {
+      try {
+        // Restore in parallel — each one restores its own cascade children.
+        await Promise.all(
+          result.deleted_ids.map((id) => restoreTransaction(id))
+        );
+        await loadTransactions();
+        addToast({ message: 'Transactions restored', type: 'success', duration: 3000 });
+      } catch (err) {
+        addToast({
+          message: `Failed to undo: ${err.userMessage || err.message}`,
+          type: 'error',
+        });
+      }
+    },
+  },
+});
+```
+
+# Split Transaction — Implementation Notes
+
+## Overview
+
+Allow a user to split a single transaction into two or more child transactions whose amounts sum to the original. The parent is hidden (not deleted) and the children take its place in every view. Reversible via an "unsplit" operation that discards the children and restores the parent.
+
+---
+
+## Data model
+
+No schema changes required. Uses fields already in place:
+
+| Field (on child) | Value |
+|---|---|
+| `source_transaction_id` | Parent's `id` |
+| `source_relationship` | `'split'` |
+| `transaction_date` | Inherited from parent |
+| `account_id` | Inherited from parent |
+| `upload_id` | Inherited from parent |
+| `is_credit` | Inherited from parent |
+
+| Field (on parent) | Value |
+|---|---|
+| `deleted_at` | Stamped at split time |
+| `deleted_reason` | `'superseded'` |
+
+The user supplies per-child: `amount`, `party_id`, and optionally `description`, `cleaned_description`, `is_kids`, `is_one_off`.
+
+---
+
+## Invariants to enforce
+
+**Amount conservation.** `sum(child.amount) == parent.amount`. Validate before writing. Use exact decimal comparison — convert both sides to `round(x, 2)` or `Decimal` before comparing, because IEEE 754 floats will betray you on splits like £10.00 → £3.33 + £3.33 + £3.34. If the amounts don't sum, reject with a clear error — do not silently adjust.
+
+**Minimum children.** A split must produce ≥ 2 children. A single child is a no-op that just hides the original.
+
+**Depth limit.** The parent must have `source_transaction_id IS NULL`. Splitting a child of a split (or a generated cash lodgement) would create depth > 1 and make cascade delete/restore recursive. Reject with a message pointing the user to the root transaction.
+
+**Parent must be live.** `parent.deleted_at IS NULL`. You can't split something that's already deleted or already superseded (i.e. already split). Reject both.
+
+**Credit/debit consistency.** Every child must inherit the parent's `is_credit` value. A debit can't be split into a debit and a credit — that's a different operation (a transfer, or a correction).
+
+---
+
+## Service: `split_transaction(parent_id, parts)`
+
+### Input
+
+```python
+parent_id: int
+parts: List[Dict]   # each dict has at least {amount, party_id}
+```
+
+### Flow
+
+```
+1.  Read parent row (must exist, must be live, must have source_transaction_id IS NULL).
+2.  Validate len(parts) >= 2.
+3.  Validate sum(part.amount) == parent.amount   (after rounding).
+4.  Validate each part.amount > 0.
+5.  Inside a single db transaction:
+      a.  INSERT each child:
+            - Copy transaction_date, account_id, upload_id, is_credit from parent.
+            - Set source_transaction_id = parent.id
+            - Set source_relationship = 'split'
+            - Set amount, party_id, description, is_kids, is_one_off from the part dict.
+            - Set cleaned_description from part dict or NULL.
+      b.  UPDATE parent:
+            - deleted_at = strftime('%Y-%m-%d %H:%M:%f', 'now')
+            - deleted_reason = 'superseded'
+      c.  Collect child IDs from lastrowid.
+6.  Return { parent_id, child_ids, child_count }.
+```
+
+**Do not call `delete_transaction()` in step 5b.** That method stamps `deleted_reason = 'user'` (which would put the parent in the recycle bin) and cascades to generated children (which would destroy any cash lodgement derived from this transaction). Write the UPDATE directly, within the same cursor. Worth a code comment explaining why.
+
+### Receipt handling
+
+If the parent has a `receipt_id`, copy it to every child. There's no unique constraint on `receipt_id`, so multiple transactions can reference the same receipt. The parent's `receipt_id` stays set but is invisible (parent is hidden) — no harm, and it means unsplit restores the link automatically.
+
+### Suggested location
+
+`src/services/split_transaction.py` alongside the existing cash generation service. Depends on `TransactionRepository` for reads and the connection manager for the write transaction. Alternatively add a `split_transaction` method directly to the repository — either works, but a service is consistent with how cash generation is structured.
+
+---
+
+## Service: `unsplit_transaction(parent_id)`
+
+### Input
+
+```python
+parent_id: int
+```
+
+### Flow
+
+```
+1.  Read parent row.
+      - Must exist.
+      - Must have deleted_reason = 'superseded'.
+        (If it's live → it was never split. If reason is 'user' → the user
+         deleted it independently after it was already split, which shouldn't
+         happen because delete_transaction rejects rows that are already
+         deleted, but guard anyway.)
+2.  Read children: source_transaction_id = parent_id
+                    AND source_relationship = 'split'.
+      - Children should all be live (deleted_at IS NULL).
+        If any child has been manually deleted, something unexpected
+        happened — log a warning but proceed. The goal is to restore
+        the parent and hide all children regardless of their current state.
+3.  Inside a single db transaction:
+      a.  UPDATE children:
+            - deleted_at = now
+            - deleted_reason = 'unsplit'
+          Use a single UPDATE ... WHERE source_transaction_id = ? AND source_relationship = 'split'
+          (don't filter on deleted_at — catch any straggler state).
+      b.  UPDATE parent:
+            - deleted_at = NULL
+            - deleted_reason = NULL
+4.  Return { parent_id, removed_child_ids }.
+```
+
+The frontend needs `removed_child_ids` to pull them out of the transaction list and insert the restored parent.
+
+### What about receipts on children?
+
+If the user attached a *different* receipt to a child (not inherited from the parent), unsplitting hides the child and that receipt becomes effectively orphaned in the UI. Options:
+
+- **Do nothing.** Receipts stay in the receipts table; they're just not linked to any visible transaction. The user can re-link them later. Simplest, and fine for a personal app.
+- **Warn before unsplitting** if any child has a `receipt_id` that differs from the parent's. Return the warning, let the frontend confirm.
+
+Recommend option 1 initially, option 2 as a polish pass.
+
+---
+
+## What split children can and can't do
+
+| Operation | Allowed? | Reason |
+|---|---|---|
+| View / list | ✅ | They're live rows |
+| Edit `party_id`, `description`, `is_kids`, `is_one_off` | ✅ | Recategorisation is the whole point |
+| Edit `amount` | ❌ | Breaks conservation; unsplit and re-split instead |
+| Edit `transaction_date`, `account_id`, `is_credit` | ❌ | Inherited from parent, must stay in sync |
+| Delete | ❌ | `delete_transaction` rejects `source_relationship = 'split'` (already implemented) |
+| Link receipt | ✅ | Useful — the clothing portion has a different receipt |
+| Split again | ❌ | Depth limit: `source_transaction_id IS NOT NULL` → reject |
+| Generate cash | ❌ | Same depth limit check |
+
+Enforce the edit restrictions in `update_transaction` by checking `source_relationship = 'split'` and rejecting writes to the locked fields. Suggest a new set:
+
+```python
+SPLIT_LOCKED_FIELDS = {'amount', 'transaction_date', 'account_id', 'is_credit'}
+```
+
+If any kwargs key is in `SPLIT_LOCKED_FIELDS` and the row has `source_relationship = 'split'`, raise `TransactionRuleError`.
+
+---
+
+## API routes
+
+| Verb | Path | Body | Returns |
+|---|---|---|---|
+| `POST` | `/api/transactions/<id>/split` | `{ "parts": [{amount, party_id, ...}, ...] }` | `{ parent_id, child_ids }` — 201 |
+| `POST` | `/api/transactions/<id>/unsplit` | (empty) | `{ parent_id, removed_child_ids }` — 200 |
+
+Error responses:
+
+| Condition | Status | Message |
+|---|---|---|
+| Parent not found / already deleted | 404 | Transaction not found |
+| Already split (`deleted_reason = 'superseded'`) | 409 | Transaction is already split |
+| Is itself a child | 409 | Cannot split a child transaction; split the root instead |
+| Amounts don't sum | 422 | Split amounts (£X) do not equal transaction amount (£Y) |
+| Fewer than 2 parts | 422 | A split must produce at least 2 transactions |
+| Unsplit a non-split row | 409 | Transaction is not split |
+
+---
+
+## Frontend sketch
+
+**Split dialog:** user sees the parent amount and adds rows. Each row has amount + party selector (and optionally the other editable fields). A running total and remainder are shown. Submit is disabled until remainder = 0 and parts ≥ 2. On success, remove the parent row from the list and insert the children.
+
+**Unsplit button:** visible on any transaction where `source_relationship = 'split'`. Confirms, calls unsplit, removes children from the list, inserts the restored parent. If the parent had a different `party_id` / category, the row visually changes — expected, because it's reverting to the original.
+
+**Visual indicator:** split children could show a small "split" badge or icon linking back to siblings. Clicking it filters to all children of the same parent. Low priority but nice for orientation.
+
+---
+
+## Testing checklist
+
+- [ ] Split a transaction into 2 parts — parent hidden, children visible, amounts sum correctly.
+- [ ] Split into 3+ parts.
+- [ ] Reject split where amounts don't sum.
+- [ ] Reject split of an already-split parent.
+- [ ] Reject split of a child (depth limit).
+- [ ] Reject split of a deleted transaction.
+- [ ] Unsplit — parent restored, children hidden.
+- [ ] Unsplit when a child has been edited (party changed) — parent still has original values.
+- [ ] Reject deleting a split child via `delete_transaction`.
+- [ ] Reject deleting a split child via `bulk_delete_transactions`.
+- [ ] `update_transaction` on a split child: allow `party_id`, reject `amount`.
+- [ ] Verify aggregates (sum, count, charts) count children but not the superseded parent.
+- [ ] Receipt copied from parent to children on split.
+- [ ] Receipt survives unsplit on parent.
+- [ ] Generate cash from a transaction, then split it → reject (depth limit on the cash lodgement) or → reject the split (parent has generated children and cascading superseded + cascade would conflict). Decide which guard fires first and test it.
+
+
 ## SQLite write hardening (busy_timeout + WAL)
 **Priority:** Medium · **Area:** backend/database · **Size:** S
 

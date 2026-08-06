@@ -1,6 +1,8 @@
 from flask import Blueprint, request
 
 from src.database.repositories.transactions import TransactionRepository
+from src.database.errors import DELETED_REASON_USER
+
 from src.api.utils.response_helpers import (
     success_response, paginated_response, search_response,
 )
@@ -83,8 +85,17 @@ def validate_transaction_filters(args: dict) -> dict:
         ['party_id', 'account_id', 'upload_id', 'category_id', 'sub_category_id', 'type_id'],
     )
 
-    add_string_filters(validator.validated, args, ['description', 'cleaned_description'])
-    validate_boolean_fields(validator, args, ['is_kids', 'is_one_off', 'is_credit', 'has_receipt'])
+    add_string_filters(
+        validator.validated,
+        args,
+        ['description', 'cleaned_description']
+        )
+
+    validate_boolean_fields(
+        validator,
+        args,
+        ['is_kids', 'is_one_off', 'is_credit', 'has_receipt', 'include_deleted', 'deleted_only']
+        )
 
     if not validator.is_valid():
         logger.warning(f"Validation failed: {validator.first_error_message()}")
@@ -162,6 +173,23 @@ def validate_transaction_search(data: dict) -> dict:
 
     return validator.validated
 
+def parse_transaction_ids(data: dict) -> list[int]:
+    """Extract and validate a `transaction_ids` array from a request body.
+    Raises AppError on a missing, non-list, empty, or non-integer value.
+    """
+    transaction_ids = data.get('transaction_ids', [])
+    if not transaction_ids or not isinstance(transaction_ids, list):
+        raise invalid_value(
+            'transaction_ids must be a non-empty array',
+            field='transaction_ids',
+        )
+    try:
+        return [int(tid) for tid in transaction_ids]
+    except (ValueError, TypeError):
+        raise invalid_value(
+            'All transaction_ids must be integers',
+            field='transaction_ids',
+        )
 
 # =============================================================================
 # Routes
@@ -253,20 +281,7 @@ def bulk_update_transactions():
     if not data:
         raise required('Request body')
 
-    transaction_ids = data.get('transaction_ids', [])
-    if not transaction_ids or not isinstance(transaction_ids, list):
-        raise invalid_value(
-            'transaction_ids must be a non-empty array',
-            field='transaction_ids',
-        )
-
-    try:
-        transaction_ids = [int(tid) for tid in transaction_ids]
-    except (ValueError, TypeError):
-        raise invalid_value(
-            'All transaction_ids must be integers',
-            field='transaction_ids',
-        )
+    transaction_ids = parse_transaction_ids(data)
 
     updates = data.get('updates', {})
     if not updates:
@@ -403,20 +418,7 @@ def generate_cash_transactions():
     if not data:
         raise required('Request body')
 
-    transaction_ids = data.get('transaction_ids', [])
-    if not transaction_ids or not isinstance(transaction_ids, list):
-        raise invalid_value(
-            'transaction_ids must be a non-empty array',
-            field='transaction_ids',
-        )
-
-    try:
-        transaction_ids = [int(tid) for tid in transaction_ids]
-    except (ValueError, TypeError):
-        raise invalid_value(
-            'All transaction_ids must be integers',
-            field='transaction_ids',
-        )
+    transaction_ids = parse_transaction_ids(data)
 
     from src.services.cash_transactions import CashTransactionService
 
@@ -573,3 +575,123 @@ def create_cash_transaction():
         message='Cash transaction created',
         status_code=201,
     )
+
+@bp.route('/<int:transaction_id>', methods=['DELETE'])
+@handle_errors(entity='Transaction')
+@log_route(logger)
+def delete_transaction(transaction_id: int):
+    """Soft-delete a transaction.
+    The row is retained with `deleted_at` stamped; it simply stops
+    appearing in every read path. Reversible via POST /<id>/restore.
+    Cascades to any generated cash transactions derived from this one —
+    their IDs come back in `cascaded_ids` so the client can remove them
+    from the table too.
+    Returns 404 if the transaction doesn't exist or was already deleted,
+    409 if it is one line of a split (unsplit the source instead).
+    """
+    repo = TransactionRepository()
+    result = repo.delete_transaction(transaction_id)
+    if not result['deleted']:
+        raise not_found('Transaction', transaction_id)
+    cascaded = result['cascaded_ids']
+    message = f'Transaction {transaction_id} deleted'
+    if cascaded:
+        message += (
+            f' ({len(cascaded)} generated cash transaction(s) also deleted)'
+        )
+    logger.info(message)
+    return success_response(data=result, message=message)
+
+@bp.route('/bulk', methods=['DELETE'])
+@handle_errors(entity='Transaction')
+@require_json
+@log_route(logger)
+def bulk_delete_transactions():
+    """Soft-delete multiple transactions.
+    Request body::
+        {
+            "transaction_ids": [12, 34, 56]
+        }
+    Atomic. If any requested ID is a line of a split, nothing is deleted
+    and the response is 409. IDs that don't exist or are already deleted
+    are reported in `skipped_ids` rather than failing the batch.
+    """
+    data = request.get_json()
+    if not data:
+        raise required('Request body')
+    transaction_ids = parse_transaction_ids(data)
+    repo = TransactionRepository()
+    result = repo.bulk_delete_transactions(transaction_ids)
+    message = f"Deleted {result['deleted_count']} transaction(s)"
+    if result['cascaded_ids']:
+        message += f" ({len(result['cascaded_ids'])} cascaded)"
+    if result['skipped_ids']:
+        message += f" ({len(result['skipped_ids'])} skipped)"
+    logger.info(
+        f"{message} | requested={len(transaction_ids)}"
+    )
+    return success_response(data=result, message=message)
+
+@bp.route('/<int:transaction_id>/restore', methods=['POST'])
+@handle_errors(entity='Transaction')
+@log_route(logger)
+def restore_transaction(transaction_id: int):
+    """Restore a soft-deleted transaction.
+    Only transactions the user deleted themselves can be restored here.
+    Cascade-deleted children are restored alongside their source. Rows
+    hidden by a split ('superseded') or discarded by an unsplit return
+    409 with a message pointing at the right operation.
+    Returns the restored transaction with full hierarchy so the client
+    can drop it straight back into the list.
+    """
+    repo = TransactionRepository()
+    result = repo.restore_transaction(transaction_id)
+    if not result['restored']:
+        raise not_found('Transaction', transaction_id)
+    transaction = repo.get_transaction_with_hierarchy(transaction_id)
+    restored_children = result['restored_ids']
+    message = f'Transaction {transaction_id} restored'
+    if restored_children:
+        message += (
+            f' ({len(restored_children)} generated cash transaction(s) '
+            f'also restored)'
+        )
+    logger.info(message)
+    return success_response(
+        data={
+            'transaction': transaction,
+            'restored_ids': restored_children,
+        },
+        message=message,
+    )
+
+@bp.route('/deleted', methods=['GET'])
+@handle_errors(entity='Transaction')
+@log_route(logger)
+def get_deleted_transactions():
+    """Recycle bin — transactions the user deleted, newest first.
+    Deliberately filtered to `deleted_reason = 'user'`. Transactions
+    hidden by a split ('superseded') or by a cascade were never deleted
+    by the user and must not be restorable from here — restoring a
+    superseded parent would silently destroy its split children.
+    Supports the same filters, sorting and pagination as GET /.
+    """
+    filters = validate_transaction_filters(request.args.to_dict())
+    limit = filters.pop('limit')
+    offset = filters.pop('offset')
+    sort_by = filters.pop('sort_by', None)
+    sort_dir = filters.pop('sort_dir', None)
+    # The bin controls its own visibility rules.
+    filters.pop('include_deleted', None)
+    repo = TransactionRepository()
+    transactions = repo.get_transactions_with_hierarchy(
+        limit=limit,
+        offset=offset,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
+        deleted_only=True,
+        deleted_reason=DELETED_REASON_USER,
+        **filters,
+    )
+    logger.info(f"Retrieved {len(transactions)} deleted transactions")
+    return paginated_response(transactions, limit, offset, data_key='transactions')
