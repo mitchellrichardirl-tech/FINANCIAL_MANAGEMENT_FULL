@@ -426,6 +426,112 @@ class TransactionRepository:
             logger.error(f"Failed to find receipt match candidates: {e}")
             raise DatabaseError(f"Failed to find receipt match candidates: {e}") from e
 
+    # Joins shared by the page query and the count query. Declared once so the
+    # two can never disagree about what they're counting.
+    #
+    # Every join is on an INTEGER PRIMARY KEY, so none of them can multiply
+    # rows — COUNT(*) over this FROM clause equals COUNT(*) over `transactions`
+    # alone. SQLite's omit-LEFT-JOIN optimisation also drops any join whose
+    # table isn't referenced in the WHERE clause, so carrying all six in the
+    # count query costs nothing.
+    _HIERARCHY_FROM = '''
+        FROM transactions t
+        LEFT JOIN accounts a ON t.account_id = a.id
+        LEFT JOIN parties p ON t.party_id = p.id
+        LEFT JOIN types tp ON p.type_id = tp.id
+        LEFT JOIN sub_categories sc ON tp.sub_category_id = sc.id
+        LEFT JOIN categories c ON sc.category_id = c.id
+        LEFT JOIN receipts r ON t.receipt_id = r.id
+    '''
+
+    def _build_hierarchy_filters(
+        self,
+        *,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        party_id: Optional[int] = None,
+        account_id: Optional[int] = None,
+        upload_id: Optional[int] = None,
+        description: Optional[str] = None,
+        cleaned_description: Optional[str] = None,
+        is_kids: Optional[bool] = None,
+        is_one_off: Optional[bool] = None,
+        is_credit: Optional[bool] = None,
+        category_id: Optional[int] = None,
+        sub_category_id: Optional[int] = None,
+        type_id: Optional[int] = None,
+        has_receipt: Optional[bool] = None,
+        include_deleted: bool = False,
+        deleted_only: bool = False,
+        deleted_reason: Optional[str] = None,
+    ) -> tuple[str, List[Any]]:
+        """Build the WHERE clause shared by the page and count queries.
+        Single source of truth for transaction filtering. If the two queries
+        built their conditions separately they would eventually drift, and a
+        paginated response would report a total for a different result set
+        than the one it returned.
+        Keyword-only by design: these are always passed as `**filters`.
+        Returns:
+            Tuple of (where_clause, params). `where_clause` is an empty string
+            when nothing is filtered.
+        """
+        conditions: List[str] = []
+        params: List[Any] = []
+        # Soft-delete filter. Must be expressed literally as `deleted_at IS NULL`
+        # for SQLite to use the partial index idx_transactions_active_date.
+        if deleted_only:
+            conditions.append('t.deleted_at IS NOT NULL')
+        elif not include_deleted:
+            conditions.append('t.deleted_at IS NULL')
+        if deleted_reason:
+            conditions.append('t.deleted_reason = ?')
+            params.append(deleted_reason)
+        if start_date:
+            conditions.append('t.transaction_date >= ?')
+            params.append(start_date)
+        if end_date:
+            conditions.append('t.transaction_date <= ?')
+            params.append(end_date)
+        if party_id:
+            conditions.append('t.party_id = ?')
+            params.append(party_id)
+        if account_id:
+            conditions.append('t.account_id = ?')
+            params.append(account_id)
+        if upload_id:
+            conditions.append('t.upload_id = ?')
+            params.append(upload_id)
+        if description:
+            conditions.append('t.description LIKE ?')
+            params.append(f'%{description}%')
+        if cleaned_description:
+            conditions.append('t.cleaned_description LIKE ?')
+            params.append(f'%{cleaned_description}%')
+        if is_kids is not None:
+            conditions.append('t.is_kids = ?')
+            params.append(int(is_kids))
+        if is_one_off is not None:
+            conditions.append('t.is_one_off = ?')
+            params.append(int(is_one_off))
+        if is_credit is not None:
+            conditions.append('t.is_credit = ?')
+            params.append(int(is_credit))
+        if category_id:
+            conditions.append('c.id = ?')
+            params.append(category_id)
+        if sub_category_id:
+            conditions.append('sc.id = ?')
+            params.append(sub_category_id)
+        if type_id:
+            conditions.append('tp.id = ?')
+            params.append(type_id)
+        if has_receipt is not None:
+            conditions.append(
+                't.receipt_id IS NOT NULL' if has_receipt else 't.receipt_id IS NULL'
+            )
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        return where_clause, params
+    
     def get_transactions_with_hierarchy(
         self,
         limit: Optional[int] = None,
@@ -521,92 +627,28 @@ class TransactionRepository:
         try:
             with self.db.get_connection() as conn:
                 cursor = conn.cursor()
-
-                conditions = []
-                params = []
-                
-                # Soft-delete filter. Must be expressed literally as
-                # `deleted_at IS NULL` for SQLite to use the partial index
-                # idx_transactions_active_date.
-                if deleted_only:
-                    conditions.append('t.deleted_at IS NOT NULL')
-                elif not include_deleted:
-                    conditions.append('t.deleted_at IS NULL')
-
-                if deleted_reason:
-                    conditions.append('t.deleted_reason = ?')
-                    params.append(deleted_reason)
-
-                if start_date:
-                    conditions.append('t.transaction_date >= ?')
-                    params.append(start_date)
-
-                if end_date:
-                    conditions.append('t.transaction_date <= ?')
-                    params.append(end_date)
-
-                if party_id:
-                    conditions.append('t.party_id = ?')
-                    params.append(party_id)
-
-                if account_id:
-                    conditions.append('t.account_id = ?')
-                    params.append(account_id)
-
-                if upload_id:
-                    conditions.append('t.upload_id = ?')
-                    params.append(upload_id)
-
-                if description:
-                    conditions.append('t.description LIKE ?')
-                    params.append(f'%{description}%')
-
-                if cleaned_description:
-                    conditions.append('t.cleaned_description LIKE ?')
-                    params.append(f'%{cleaned_description}%')
-
-                if is_kids is not None:
-                    conditions.append('t.is_kids = ?')
-                    params.append(int(is_kids))
-
-                if is_one_off is not None:
-                    conditions.append('t.is_one_off = ?')
-                    params.append(int(is_one_off))
-
-                if is_credit is not None:
-                    conditions.append('t.is_credit = ?')
-                    params.append(int(is_credit))
-
-                if category_id:
-                    conditions.append('c.id = ?')
-                    params.append(category_id)
-
-                if sub_category_id:
-                    conditions.append('sc.id = ?')
-                    params.append(sub_category_id)
-
-                if type_id:
-                    conditions.append('tp.id = ?')
-                    params.append(type_id)
-
-                if has_receipt is not None:
-                    if has_receipt:
-                        conditions.append('t.receipt_id IS NOT NULL')
-                    else:
-                        conditions.append('t.receipt_id IS NULL')
-
-                if conditions:
-                    logger.debug(f"Querying transactions with {len(conditions)} filters")
-
-                where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-                
-                # Build ORDER BY clause safely
+                where_clause, params = self._build_hierarchy_filters(
+                    start_date=start_date,
+                    end_date=end_date,
+                    party_id=party_id,
+                    account_id=account_id,
+                    upload_id=upload_id,
+                    description=description,
+                    cleaned_description=cleaned_description,
+                    is_kids=is_kids,
+                    is_one_off=is_one_off,
+                    is_credit=is_credit,
+                    category_id=category_id,
+                    sub_category_id=sub_category_id,
+                    type_id=type_id,
+                    has_receipt=has_receipt,
+                    include_deleted=include_deleted,
+                    deleted_only=deleted_only,
+                    deleted_reason=deleted_reason,
+                )
                 sort_column = SORTABLE_COLUMNS.get(sort_by, 't.transaction_date')
                 sort_direction = 'ASC' if sort_dir == 'asc' else 'DESC'
-
-                # Add secondary sort by id for stable ordering
                 order_clause = f"ORDER BY {sort_column} {sort_direction}, t.id DESC"
-
                 query = f'''
                     SELECT 
                         t.*,
@@ -625,37 +667,62 @@ class TransactionRepository:
                         r.vendor as receipt_vendor,
                         r.amount as receipt_amount,
                         r.date as receipt_date
-                    FROM transactions t
-                    LEFT JOIN accounts a ON t.account_id = a.id
-                    LEFT JOIN parties p ON t.party_id = p.id
-                    LEFT JOIN types tp ON p.type_id = tp.id
-                    LEFT JOIN sub_categories sc ON tp.sub_category_id = sc.id
-                    LEFT JOIN categories c ON sc.category_id = c.id
-                    LEFT JOIN receipts r ON t.receipt_id = r.id
+                    {self._HIERARCHY_FROM}
                     {where_clause}
                     {order_clause}
                 '''
-
-                if limit:
+                # SQLite requires LIMIT before OFFSET. `LIMIT -1` means "no limit",
+                # which is the only way to offset into an unbounded result set.
+                if limit is not None:
                     query += ' LIMIT ?'
                     params.append(limit)
-
-                if offset:
-                    query += ' OFFSET ?'
+                    if offset:
+                        query += ' OFFSET ?'
+                        params.append(offset)
+                elif offset:
+                    query += ' LIMIT -1 OFFSET ?'
                     params.append(offset)
-
                 cursor.execute(query, params)
                 rows = cursor.fetchall()
-
                 logger.debug(
                     f"Retrieved {len(rows)} transactions with hierarchy "
                     f"(offset={offset}, limit={limit}, sort={sort_by} {sort_dir})"
                 )
                 return [dict(row) for row in rows]
-
         except Exception as e:
             logger.error(f"Failed to get transactions with hierarchy: {e}")
             raise DatabaseError(f"Failed to get transactions: {e}") from e
+
+    def count_transactions_with_hierarchy(self, **filters) -> int:
+        """Count transactions matching the same filters as the page query.
+        Takes the same filter keyword arguments as
+        `get_transactions_with_hierarchy()`. Pagination and sort arguments
+        (`limit`, `offset`, `sort_by`, `sort_dir`) are *not* accepted — they
+        don't affect the count, and passing them raises `TypeError` rather than
+        being silently ignored.
+        Deliberately `**filters` rather than a duplicated signature: the route
+        forwards the same dict to both methods, so adding a new filter to
+        `_build_hierarchy_filters()` wires it into the count automatically.
+        Returns:
+            Number of matching transactions, ignoring limit/offset.
+        Raises:
+            TypeError: If an unrecognised filter name is passed.
+            DatabaseError: On query failure.
+        """
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                where_clause, params = self._build_hierarchy_filters(**filters)
+                cursor.execute(
+                    f'SELECT COUNT(*) {self._HIERARCHY_FROM} {where_clause}',
+                    params,
+                )
+                total = cursor.fetchone()[0]
+                logger.debug(f"Counted {total} transactions with hierarchy")
+                return total
+        except Exception as e:
+            logger.error(f"Failed to count transactions with hierarchy: {e}")
+            raise DatabaseError(f"Failed to count transactions: {e}") from e
 
     def get_transaction_with_hierarchy(
         self,

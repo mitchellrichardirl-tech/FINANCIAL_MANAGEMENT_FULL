@@ -76,14 +76,18 @@ def paginated_response(
     Returns:
         Flask JSON response tuple
     """
-    response_data = {
-        data_key: items,
-        'pagination': {
+    pagination = {
             'limit': limit,
             'offset': offset,
             'count': len(items),
             'has_more': len(items) == limit
         }
+    if 'total' in extra_data:
+        pagination['total'] = extra_data.pop('total')
+        pagination['has_more'] = (offset + len(items)) < pagination['total']
+    response_data = {
+        data_key: items,
+        'pagination': pagination
     }
     response_data.update(extra_data)
 

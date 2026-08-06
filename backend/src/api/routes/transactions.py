@@ -219,12 +219,13 @@ def get_transactions():
         sort_dir=sort_dir,
         **filters,
     )
+    total = repo.count_transactions_with_hierarchy(**filters)
 
     logger.info(
         f"Retrieved {len(transactions)} transactions "
-        f"(offset={offset}, limit={limit}, sort={sort_by} {sort_dir})"
+        f"(offset={offset}, limit={limit}, total={total}, sort={sort_by} {sort_dir})"
     )
-    return paginated_response(transactions, limit, offset, data_key='transactions')
+    return paginated_response(transactions, limit, offset, total=total, data_key='transactions')
 
 
 @bp.route('/<int:transaction_id>', methods=['GET'])
@@ -693,5 +694,14 @@ def get_deleted_transactions():
         deleted_reason=DELETED_REASON_USER,
         **filters,
     )
-    logger.info(f"Retrieved {len(transactions)} deleted transactions")
-    return paginated_response(transactions, limit, offset, data_key='transactions')
+    total = repo.count_transactions_with_hierarchy(**filters)
+    logger.info(
+        f"Retrieved {len(transactions)} deleted transactions of {total} total"
+        )
+    return paginated_response(
+        transactions,
+        limit,
+        offset,
+        total=total,
+        data_key='transactions'
+        )
