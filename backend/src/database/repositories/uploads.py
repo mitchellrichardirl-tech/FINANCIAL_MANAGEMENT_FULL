@@ -42,23 +42,12 @@ class UploadRepository:
         db: The `ConnectionManager` instance used for database access.
     """
 
-    # Show an upload if it still has at least one live transaction, OR if it
-    # never produced any transactions at all (uploaded but not yet imported).
-    # Hide only uploads whose transactions have all been soft-deleted.
-    #
-    # The live-transaction EXISTS is evaluated first so SQLite can short-circuit
-    # the OR on the common case. Both subqueries seek idx_transactions_upload_id.
+    # Show an upload if it still has at least one live transaction
     _HAS_LIVE_TRANSACTIONS = '''
-        (
-            EXISTS (
-                SELECT 1 FROM transactions t
-                WHERE t.upload_id = uploads.id
-                  AND t.deleted_at IS NULL
-            )
-            OR NOT EXISTS (
-                SELECT 1 FROM transactions t
-                WHERE t.upload_id = uploads.id
-            )
+        EXISTS (
+            SELECT 1 FROM transactions t
+            WHERE t.upload_id = uploads.id
+                AND t.deleted_at IS NULL
         )
     '''
 
