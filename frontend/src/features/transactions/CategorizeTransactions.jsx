@@ -20,6 +20,7 @@ import {
   remapParty,
 } from './api';
 import { getAccounts } from '@/features/statements/api';
+import { unwrap } from '@/lib/apiClient';
 import TransactionTable from './TransactionTable';
 import Pagination from '@/components/Pagination';
 import DeleteTransactionsModal from './DeleteTransactionsModal';
@@ -116,6 +117,7 @@ export default function CategorizeTransactions() {
       });
     }
   };
+
   const loadTransactions = async () => {
     setLoading(true);
     try {
@@ -129,20 +131,18 @@ export default function CategorizeTransactions() {
         cleanFilters.sort_by = sortField;
         cleanFilters.sort_dir = sortDir;
       }
-      const data = await getTransactions(cleanFilters);
-
-      // Deleting everything on the last page strands us past the end.
-      if (data.length === 0 && currentPage > 1) {
-        setCurrentPage((p) => p - 1);
+      const data = await getTransactions(cleanFilters)
+      const rows = unwrap(data, 'transactions')
+      const pagination = unwrap(data, 'pagination')
+      // With a real total we can jump straight to the last valid page rather
+      // than stranding the user on an empty one after a delete.
+      const lastPage = Math.max(1, Math.ceil(pagination.total / ITEMS_PER_PAGE));
+      if (currentPage > lastPage) {
+        setCurrentPage(lastPage);   // effect refires with the corrected page
         return;
       }
-      
-      setTransactions(data);
-      setTotalTransactions(
-        data.length === ITEMS_PER_PAGE
-          ? currentPage * ITEMS_PER_PAGE + 1
-          : (currentPage - 1) * ITEMS_PER_PAGE + data.length
-      );
+      setTransactions(rows);
+      setTotalTransactions(pagination.total);
     } catch (err) {
       logger.error('Error loading transactions:', err);
       addToast({
@@ -150,10 +150,12 @@ export default function CategorizeTransactions() {
         type: 'error',
       });
       setTransactions([]);
+      setTotalTransactions(0);
     } finally {
       setLoading(false);
     }
   };
+  
   // ── Mutation handlers ─────────────────────────────────────────────
   const handleTransactionUpdate = async (transactionId, updates) => {
     try {

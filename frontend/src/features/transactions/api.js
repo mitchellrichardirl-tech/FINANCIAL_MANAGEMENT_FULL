@@ -52,7 +52,7 @@ export async function getTransactions(filters = {}) {
 
   const response = await apiCall(url);
 
-  return unwrap(response, 'transactions') || [];
+  return response || [];
 }
 
 /**

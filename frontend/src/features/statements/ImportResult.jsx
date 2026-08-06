@@ -13,6 +13,7 @@
  */
 import { useState, useEffect } from 'react';
 import { getTransactions } from '@/features/transactions/api';
+import { unwrap } from '@/lib/apiClient';
 import { createLogger } from '@/lib/logger';
 /** @type {import('@/lib/logger').Logger} */
 const logger = createLogger('ImportResult');
@@ -61,7 +62,7 @@ export default function ImportResult({ result, onUploadAnother, showHeader = tru
         upload_id: result.upload_id,
         limit: 500,
       });
-      setTransactions(data.transactions || data);
+      setTransactions(unwrap(data, 'transactions'));
     } catch (err) {
       setError('Failed to load transactions');
       logger.error('Error fetching transactions:', err);
