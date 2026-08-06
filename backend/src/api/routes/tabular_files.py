@@ -14,7 +14,7 @@ from src.api.utils.route_helpers import (
     TabularImportParams,
     handle_errors,
 )
-from src.api.utils.errors import invalid_value, not_found
+from src.api.utils.errors import invalid_value, not_found, required
 from src.api.utils.validators import (
     validate_pagination,
     validate_date_range_filters,
@@ -139,6 +139,90 @@ def validate_upload_filters(args) -> dict:
 
     return {**pagination, **date_filters, **filters}
 
+def _resolve_account(account_id: int) -> dict:
+    """Look up and validate the account before anything is committed.
+    Called *before* `_create_upload_record()` so that a bad `account_id`
+    or an unconfigured statement format fails the request without leaving
+    an orphaned upload behind. Compensating deletes are for failures we
+    can't predict; this one we can.
+    Args:
+        account_id: Primary key of the account to import against.
+    Returns:
+        The account dict.
+    Raises:
+        not_found: If the account doesn't exist.
+        invalid_value: If the account has no statement format configured.
+    """
+    account_repo = AccountRepository()
+    account = account_repo.get_account_by_id(account_id)
+    if account is None:
+        raise not_found('Account', account_id)
+    if not account.get('statement_format'):
+        raise invalid_value(
+            f"Account {account_id} has no statement_format configured",
+            field='account_id',
+        )
+    logger.debug(
+        f"Account {account_id} statement format: {account['statement_format']}"
+    )
+    return account
+
+def _process_as_statement(result, account: dict, upload_id: int):
+    """Process imported data as a bank statement.
+    Everything here runs *after* the upload has been committed. If any of
+    it raises, the caller discards the upload — so nothing in this function
+    may leave partial state behind. `bulk_add_transactions()` is atomic,
+    which is what makes that safe.
+    Args:
+        result: The `TabularProcessor` import result.
+        account: Account dict from `_resolve_account()`.
+        upload_id: The committed upload's primary key.
+    Returns:
+        List of warnings emitted by the statement processor.
+    """
+    account_id = account['id']
+    logger.info(
+        f"Processing upload {upload_id} as statement "
+        f"for account {account_id} | {len(result.data)} rows"
+    )
+    statement = get_processor(
+        identifier=account['statement_format'],
+        account_id=account_id,
+        upload_id=upload_id,
+    )
+    transactions = statement.process_statement(result.data)
+    transaction_repo = TransactionRepository()
+    transaction_repo.bulk_add_transactions(transactions)
+    logger.info(
+        f"Created {len(transactions)} transactions "
+        f"for account {account_id} from upload {upload_id}"
+    )
+    return statement.warnings
+
+def _discard_orphaned_upload(upload_id: int) -> None:
+    """Remove an upload whose statement processing failed.
+    Compensating delete for the gap between `create_upload_with_data()`
+    committing and `bulk_add_transactions()` committing. Without this, a
+    failure in statement processing leaves an upload with raw `upload_data`
+    rows and zero transactions — invisible to `GET /uploads` under the
+    live-transactions filter, and therefore undeletable through the UI.
+    Called from an exception handler, so it must never raise: masking the
+    original error with a cleanup error would be strictly worse.
+    Args:
+        upload_id: The upload to remove. `upload_data` rows cascade.
+    """
+    try:
+        UploadRepository().delete_upload(upload_id)
+        logger.warning(
+            f"Discarded orphaned upload {upload_id} "
+            f"after statement processing failed"
+        )
+    except Exception as cleanup_error:
+        logger.error(
+            f"Failed to discard orphaned upload {upload_id}: {cleanup_error}. "
+            f"The upload and its upload_data rows remain in the database and "
+            f"will not appear in GET /uploads."
+        )
 
 # =============================================================================
 # File Processing Endpoints
@@ -221,28 +305,59 @@ def preview_file(temp_path: Path, file_info: FileValidationResult):
 @with_uploaded_file(allowed_extensions={'csv', 'tsv', 'xlsx', 'xls'})
 @log_route(logger)
 def import_file(temp_path: Path, file_info: FileValidationResult):
-    """Import a tabular file and optionally process as statement."""
+    """Import a bank statement and create its transactions.
+
+    `account_id` is mandatory. An import that produces no transactions would
+    leave an upload that `GET /uploads` filters out (it has no live
+    transactions) and that therefore cannot be deleted through the UI — so
+    the request is rejected rather than allowed to create one.
+
+    Ordering is load-bearing:
+        1. Validate the account           — before anything is committed.
+        2. Parse the file                 — before anything is committed.
+        3. Commit the upload + raw rows.
+        4. Create transactions            — on failure, discard step 3.
+
+    A 2xx response therefore always means "upload exists and has
+    transactions"; any error response means nothing was persisted.
+    """
     original_filename = request.form.get('original_filename', temp_path.name)
     params = TabularImportParams.from_form(request.form)
 
+    # Account ids are AUTOINCREMENT from 1, so a falsy value is always absent
+    # or invalid. The frontend blocks this, but an upload is expensive to
+    # half-create, so don't rely on that.
+    if not params.account_id:
+        raise required('account_id')
+    
     logger.info(
-        f"Importing file: {original_filename} "
-        f"| account_id={params.account_id or 'none'}"
+        f"Importing file: {original_filename} | account_id={params.account_id}"
     )
+
+    # Fail before committing anything we'd have to clean up.
+    account = _resolve_account(params.account_id)
 
     result = _process_tabular_file(temp_path, params)
 
+    # --- Everything below this line touches the database ---
     upload_id = _create_upload_record(result, original_filename)
     result.upload_id = upload_id
     result.file_name = original_filename
 
-    if params.account_id:
-         warnings = _process_as_statement(result, params.account_id, upload_id)
-         if len(warnings) > 0:
-            result.warnings = [warning.to_dict() for warning in warnings]
-    else:
-        logger.debug("No account_id provided, skipping statement processing")
+    try:
+        warnings = _process_as_statement(result, account, upload_id)
+    except Exception:
+        # Catch everything, not just DatabaseError: bulk_add_transactions()
+        # raises a bare ValueError for missing columns, and process_statement()
+        # can raise whatever the parsers throw.
+        _discard_orphaned_upload(upload_id)
+        raise
 
+    # Deliberately outside the try. The transactions are committed by now, so a
+    # serialization failure here must not delete a perfectly good upload.
+    if warnings:
+        result.warnings = [warning.to_dict() for warning in warnings]
+        
     logger.info(
         f"Import complete: upload_id={upload_id} | "
         f"{len(result.data)} rows, {len(result.columns_imported)} columns"
