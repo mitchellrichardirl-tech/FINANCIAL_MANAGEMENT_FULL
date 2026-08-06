@@ -45,6 +45,13 @@ npm run dev
 The SQLite database lives at `backend/data-dev/financial_data.db`.
 Migrations run automatically when the backend starts.
 
+To access the database while the dev app is running use this command from
+within WSL
+
+```base
+sqlitebrowser ~/path/to/backend/data-dev/financial_data.db &
+```
+
 ---
 
 ## Production
