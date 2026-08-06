@@ -42,6 +42,26 @@ class UploadRepository:
         db: The `ConnectionManager` instance used for database access.
     """
 
+    # Show an upload if it still has at least one live transaction, OR if it
+    # never produced any transactions at all (uploaded but not yet imported).
+    # Hide only uploads whose transactions have all been soft-deleted.
+    #
+    # The live-transaction EXISTS is evaluated first so SQLite can short-circuit
+    # the OR on the common case. Both subqueries seek idx_transactions_upload_id.
+    _HAS_LIVE_TRANSACTIONS = '''
+        (
+            EXISTS (
+                SELECT 1 FROM transactions t
+                WHERE t.upload_id = uploads.id
+                  AND t.deleted_at IS NULL
+            )
+            OR NOT EXISTS (
+                SELECT 1 FROM transactions t
+                WHERE t.upload_id = uploads.id
+            )
+        )
+    '''
+
     def __init__(self):
         """Initialize with the default connection manager.
 
@@ -57,6 +77,52 @@ class UploadRepository:
             self.db = initialize_db_connection()
             logger.info("New database connection initialized for UploadRepository")
 
+    def _build_upload_filters(
+        self,
+        file_type: Optional[str] = None,
+        original_filename: Optional[str] = None,
+        filename: Optional[str] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        include_fully_deleted: bool = False,
+    ) -> tuple[str, List[Any]]:
+        """Build the shared WHERE clause for `uploads` queries.
+        Extracted so `get_all_uploads()` and `count_uploads()` cannot drift
+        apart — if they filter differently, paginated totals are wrong.
+        Args:
+            file_type: Exact match on file type.
+            original_filename: Substring match on original filename.
+            filename: Substring match on stored filename.
+            start_date: Only include uploads on or after this datetime.
+            end_date: Only include uploads on or before this datetime.
+            include_fully_deleted: If True, also return uploads whose
+                transactions have all been soft-deleted. Defaults to False.
+        Returns:
+            Tuple of (where_clause, params). `where_clause` is an empty
+            string when there is nothing to filter on.
+        """
+        conditions: List[str] = []
+        params: List[Any] = []
+        if not include_fully_deleted:
+            conditions.append(self._HAS_LIVE_TRANSACTIONS)
+        if file_type:
+            conditions.append('file_type = ?')
+            params.append(file_type)
+        if original_filename:
+            conditions.append('original_filename LIKE ?')
+            params.append(f'%{original_filename}%')
+        if filename:
+            conditions.append('filename LIKE ?')
+            params.append(f'%{filename}%')
+        if start_date:
+            conditions.append('upload_date >= ?')
+            params.append(start_date.isoformat(sep=' '))
+        if end_date:
+            conditions.append('upload_date <= ?')
+            params.append(end_date.isoformat(sep=' '))
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        return where_clause, params
+    
     # =========================================================================
     # Upload CRUD Operations
     # =========================================================================
@@ -155,69 +221,42 @@ class UploadRepository:
         original_filename: Optional[str] = None,
         filename: Optional[str] = None,
         start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
+        end_date: Optional[datetime] = None,
+        include_fully_deleted: bool = False,
     ) -> List[Dict[str, Any]]:
         """Fetch uploads with optional filtering and pagination.
-
-        All filter arguments are optional and ANDed together. Results
-        are ordered by `upload_date` descending (newest first).
-
+        By default, uploads whose transactions have all been soft-deleted are
+        excluded — there is nothing left to look at. Uploads that have not yet
+        produced any transactions are still returned.
         Args:
-            limit: Maximum rows to return. Defaults to 50.
-            offset: Rows to skip for pagination. Defaults to 0.
-            file_type: Exact match on file type (e.g. "csv").
-            original_filename: Substring match on original filename.
-            filename: Substring match on stored filename.
-            start_date: Only return uploads on or after this date.
-            end_date: Only return uploads on or before this date.
-
+            ... (unchanged)
+            include_fully_deleted: If True, include uploads whose transactions
+                have all been deleted. Defaults to False.
         Returns:
             List of upload dicts with `columns` parsed from JSON.
-            Empty list if no matches.
-
         Raises:
             DatabaseError: On query failure.
         """
         try:
             with self.db.get_connection() as conn:
                 cursor = conn.cursor()
-
-                conditions = []
-                params = []
-
-                if file_type:
-                    conditions.append('file_type = ?')
-                    params.append(file_type)
-
-                if original_filename:
-                    conditions.append('original_filename LIKE ?')
-                    params.append(f'%{original_filename}%')
-
-                if filename:
-                    conditions.append('filename LIKE ?')
-                    params.append(f'%{filename}%')
-
-                if start_date:
-                    conditions.append('upload_date >= ?')
-                    params.append(start_date.isoformat())
-
-                if end_date:
-                    conditions.append('upload_date <= ?')
-                    params.append(end_date.isoformat())
-
-                where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-
+                where_clause, params = self._build_upload_filters(
+                    file_type=file_type,
+                    original_filename=original_filename,
+                    filename=filename,
+                    start_date=start_date,
+                    end_date=end_date,
+                    include_fully_deleted=include_fully_deleted,
+                )
                 query = f'''
-                    SELECT * FROM uploads 
+                    SELECT * FROM uploads
                     {where_clause}
-                    ORDER BY upload_date DESC 
+                    ORDER BY upload_date DESC
                     LIMIT ? OFFSET ?
                 '''
                 params.extend([limit, offset])
-
                 cursor.execute(query, params)
                 return [self._row_to_dict(row) for row in cursor.fetchall()]
-
         except Exception as e:
             logger.error(f"Failed to get uploads: {e}")
             raise DatabaseError(f"Failed to get uploads: {e}") from e
@@ -339,49 +378,29 @@ class UploadRepository:
     def count_uploads(
         self,
         file_type: Optional[str] = None,
+        original_filename: Optional[str] = None,
+        filename: Optional[str] = None,
         start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
+        end_date: Optional[datetime] = None,
+        include_fully_deleted: bool = False,
     ) -> int:
-        """Count uploads with optional filters.
-
-        Supports the same filter parameters as `get_all_uploads()` for
-        use in pagination (total count alongside a paged result set).
-
-        Args:
-            file_type: Exact match on file type.
-            start_date: Only count uploads on or after this date.
-            end_date: Only count uploads on or before this date.
-
-        Returns:
-            Number of matching upload rows.
-
-        Raises:
-            DatabaseError: On query failure.
+        """Count uploads matching the same filters as `get_all_uploads()`.
+        Signature must stay in lockstep with `get_all_uploads()` or paginated
+        totals will disagree with the rows actually returned.
         """
         try:
             with self.db.get_connection() as conn:
                 cursor = conn.cursor()
-
-                conditions = []
-                params = []
-
-                if file_type:
-                    conditions.append('file_type = ?')
-                    params.append(file_type)
-
-                if start_date:
-                    conditions.append('upload_date >= ?')
-                    params.append(start_date.isoformat())
-
-                if end_date:
-                    conditions.append('upload_date <= ?')
-                    params.append(end_date.isoformat())
-
-                where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-
+                where_clause, params = self._build_upload_filters(
+                    file_type=file_type,
+                    original_filename=original_filename,
+                    filename=filename,
+                    start_date=start_date,
+                    end_date=end_date,
+                    include_fully_deleted=include_fully_deleted,
+                )
                 cursor.execute(f'SELECT COUNT(*) FROM uploads {where_clause}', params)
                 return cursor.fetchone()[0]
-
         except Exception as e:
             logger.error(f"Failed to count uploads: {e}")
             raise DatabaseError(f"Failed to count uploads: {e}") from e
