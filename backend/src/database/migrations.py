@@ -107,4 +107,23 @@ def migrate(db_path: str):
         conn.commit()
     else:
         logger.info("Migration already applied: transactions.source_relationship")
+    # --- Migration 4: normalise legacy statement_format values ---
+    # Legacy accounts stored bare builtin names (e.g. 'ptsb_current').
+    # Canonical form is 'builtin:<name>' or 'user:<id>'.
+    cursor.execute(
+        """
+        UPDATE accounts
+        SET statement_format = 'builtin:' || statement_format
+        WHERE statement_format IS NOT NULL
+        AND statement_format != ''
+        AND statement_format NOT LIKE '%:%'
+        """
+    )
+    # Normalise empty strings to NULL while we're here (see account 4).
+    cursor.execute(
+        "UPDATE accounts SET statement_format = NULL WHERE statement_format = ''"
+    )
+    conn.commit()
+    logger.info("Migration complete: normalised accounts.statement_format")
+
     conn.close()

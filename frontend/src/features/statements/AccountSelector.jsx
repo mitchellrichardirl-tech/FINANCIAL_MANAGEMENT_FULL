@@ -156,13 +156,14 @@ function AccountSelector({
   };
 
   /**
-   * Resolve a format key to its display name.
-   * @param {?string} formatKey
+   * Resolve a format identifier to its display name.
+   * @param {?string} formatKey e.g. 'builtin:ptsb_current' or 'user:1'
+   * @returns {?string} display name, or null if unset/unknown
    */
   const getFormatName = (formatKey) => {
     if (!formatKey) return null;
     const format = statementFormats.find((f) => f.identifier === formatKey);
-    return format ? format.name : formatKey;
+    return format ? format.display_name : null;
   };
 
   // ── Render: create form ───────────────────────────────────────────
@@ -365,7 +366,7 @@ function AccountSelector({
       <optgroup label="Existing Accounts">
         {accounts.map((account) => {
           const formatLabel = getFormatName(account.statement_format);
-          const displayLabel = formatLabel
+          const displayLabel = account.statement_format
             ? `${account.account_name} (${account.account_type}) — ${formatLabel}`
             : `${account.account_name} (${account.account_type}) — ⚠️ No format`;
 

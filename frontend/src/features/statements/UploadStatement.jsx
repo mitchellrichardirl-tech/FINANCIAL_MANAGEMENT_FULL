@@ -60,6 +60,7 @@ export default function UploadStatement() {
   const [statementFormats, setStatementFormats] = useState([]);
   /** Selected account id (empty string = none). */
   const [selectedAccountId, setSelectedAccountId] = useState('');
+  const [selectedFormatId, setSelectedFormatId] = useState('');
   /** 1-based row index where data starts. */
   const [startRow, setStartRow] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
@@ -81,11 +82,19 @@ export default function UploadStatement() {
     setSelectedFile(null);
     setPreviewData(null);
     setSelectedAccountId('');
+    setSelectedFormatId('');
     setStartRow(1);
     setImportResult(null);
     setImportError(null);
   };
   // ── File selection ────────────────────────────────────────────────
+  /** Resolve an account's statement_format (display_name, identifier, or object) to an identifier. */
+  const resolveFormatId = (account) => {
+    const raw = account?.statement_format;
+    if (!raw) return '';
+    return statementFormats.some((f) => f.identifier === raw) ? raw : '';
+  };
+
   const handleFileSelect = async (file) => {
     setSelectedFile(file);
     setPreviewData(null);
@@ -115,10 +124,18 @@ export default function UploadStatement() {
   };
   const handleAccountCreated = (newAccount) => {
     setAccounts([...accounts, newAccount]);
+    setSelectedAccountId(newAccount.id);
+    setSelectedFormatId(resolveFormatId(newAccount));
   };
   const handleAccountChange = (accountId) => {
     setSelectedAccountId(accountId);
     setImportError(null);
+    if (accountId === '') {
+      setSelectedFormatId('');
+      return;
+    }
+    const account = accounts.find((a) => a.id === accountId);
+    if (account) setSelectedFormatId(resolveFormatId(account));
   };
   // ── Import ────────────────────────────────────────────────────────
   const handleImport = async () => {
@@ -126,7 +143,7 @@ export default function UploadStatement() {
     setImportError(null);
     setImportWarnings([]);
     try {
-      const result = await importFile(selectedFile, startRow, selectedAccountId);
+      const result = await importFile(selectedFile, startRow, selectedAccountId, selectedFormatId);
       const { rows_in_file, rows_imported, warnings = [] } = result.data;
       setImportResult(result.data);
       setImportWarnings(warnings);
@@ -172,7 +189,7 @@ export default function UploadStatement() {
   };
   const getFileExtension = (filename) => filename.split('.').pop().toUpperCase();
   const showFormatWarning = selectedAccount && !selectedAccount.statement_format;
-  const canImport = !isLoading && !!selectedAccountId && !showFormatWarning && !importError;
+  const canImport = !isLoading && !!selectedAccountId && !!selectedFormatId && !importError;
   // ── Render ────────────────────────────────────────────────────────
   return (
     <div className="mx-auto max-w-[1400px] p-5">
@@ -273,9 +290,29 @@ export default function UploadStatement() {
                   {showFormatWarning && (
                     <div className="rounded border border-[#ffc107] bg-[#fff3cd] px-3 py-2 text-[13px] text-[#856404]">
                       ⚠️ This account has no statement format configured. Import will not be
-                      available until a format is set.
+                      available until a format is selected.
                     </div>
                   )}
+                </div>
+                {/* Statement format selector */}
+                <div className="flex w-full flex-col gap-1.5 md:w-auto lg:min-w-[220px]">
+                  <select
+                    id="statement-format"
+                    value={selectedFormatId}
+                    onChange={(e) => {
+                      setSelectedFormatId(e.target.value);
+                      setImportError(null);
+                    }}
+                    disabled={isLoading || !selectedAccountId}
+                    className={`${CONTROL_H} w-full rounded border border-gray-300 px-3 py-2.5 text-sm focus:border-[#4a90e2] focus:outline-none disabled:bg-gray-100`}
+                  >
+                    <option value="">Select a format…</option>
+                    {statementFormats.map((f) => (
+                      <option key={f.identifier} value={f.identifier}>
+                        {f.display_name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 {/* Import button */}
                 <div className="w-full lg:ml-auto lg:w-auto">
