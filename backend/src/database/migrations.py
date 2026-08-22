@@ -118,7 +118,7 @@ RETIRED_VIEWS: tuple[str, ...] = ()
 
 VIEWS: dict[str, str] = {
     "pay_months": """
-        WITH RECURSIVE
+		WITH RECURSIVE
         -- 1. The range of months we care about
         bounds AS (
             SELECT date(MIN(transaction_date), 'start of month', '-1 month') AS first_month,
@@ -185,28 +185,42 @@ VIEWS: dict[str, str] = {
             - (CAST(strftime('%Y', COALESCE(prev_anchor, next_anchor)) AS INTEGER) * 12
             + CAST(strftime('%m', COALESCE(prev_anchor, next_anchor)) AS INTEGER)) AS n_months
             FROM located
-        )
-        SELECT
-            r.month_start,
-            COALESCE(
-                date(a.pay_date, 'start of month', printf('%+d months', r.n_months),
-                    printf('+%d days',
-                            MIN(CAST(strftime('%d', a.pay_date) AS INTEGER),
-                                CAST(strftime('%d', date(a.pay_date, 'start of month',
-                                                        printf('%+d months', r.n_months),
-                                                        '+1 month', '-1 day')) AS INTEGER)
-                            ) - 1)
-                ),
-                r.month_start                 -- fallback: 1st of the month
-            ) AS pay_start_date,
-            CASE
-                WHEN r.pay_date IS NOT NULL THEN 'actual'
-                WHEN r.n_months > 0         THEN 'carried forward'
-                ELSE                             'carried backward'
-            END AS source
-        FROM resolved r
-        LEFT JOIN anchors a ON a.month_start = r.anchor_month
-        ORDER BY r.month_start;
+        ),
+        pay_dates AS (
+			SELECT
+				r.month_start,
+				COALESCE(
+					date(a.pay_date, 'start of month', printf('%+d months', r.n_months),
+						printf('+%d days',
+								MIN(CAST(strftime('%d', a.pay_date) AS INTEGER),
+									CAST(strftime('%d', date(a.pay_date, 'start of month',
+															printf('%+d months', r.n_months),
+															'+1 month', '-1 day')) AS INTEGER)
+								) - 1)
+					),
+					r.month_start                 -- fallback: 1st of the month
+				) AS pay_start_date,
+				CASE
+					WHEN r.pay_date IS NOT NULL THEN 'actual'
+					WHEN r.n_months > 0         THEN 'carried forward'
+					ELSE                             'carried backward'
+				END AS source
+			FROM resolved r
+			JOIN anchors a ON a.month_start = r.anchor_month
+			ORDER BY r.month_start
+		)
+		SELECT
+			month_start,
+			pay_start_date,
+			date(
+				LEAD (pay_start_date,
+					1,
+					date(pay_start_date, '+1 month')
+				) OVER (ORDER BY month_start ),
+				'-1 day'
+			) AS pay_end_date
+		FROM
+			pay_dates;
     """,
 }
 
