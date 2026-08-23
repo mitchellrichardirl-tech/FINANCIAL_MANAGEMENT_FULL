@@ -68,7 +68,7 @@
     "source=/mnt/c/Users/User/OneDrive/Receipts,target=/workspace/receipts,type=bind"
   ],
   "runArgs": [
-    // "--network=financial-management-network",
+    "--network=financial-management-network",
     "--add-host=host.docker.internal:host-gateway",
     "--env-file",".devcontainer/devcontainer.env"
   ]

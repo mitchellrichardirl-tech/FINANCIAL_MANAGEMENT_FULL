@@ -222,6 +222,43 @@ VIEWS: dict[str, str] = {
 		FROM
 			pay_dates;
     """,
+    "export": """
+        SELECT
+            t.id
+            , t.transaction_date
+            , t.amount
+            , t.description
+            , t.cleaned_description
+            , t.is_credit
+            , t.is_kids
+            , t.is_one_off
+            , a.account_name
+            , p.name AS party
+            , ty.type
+            , sc.sub_category
+            , c.category
+            , r.original_filename AS receipt
+            , pm.month_start AS pay_month
+        FROM transactions t
+        LEFT JOIN accounts a
+            ON t.account_id = a.id
+        LEFT JOIN parties p
+            ON t.party_id = p.id
+        LEFT JOIN types ty
+            ON p.type_id = ty.id
+        LEFT JOIN sub_categories sc
+            ON ty.sub_category_id = sc.id
+        LEFT JOIN categories c
+            ON sc.category_id = c.id
+        LEFT JOIN receipts r
+            ON t.receipt_id = r.id
+        LEFT JOIN pay_months pm
+            ON (t.transaction_date >= pm.pay_start_date) AND (t.transaction_date <= pm.pay_end_date)
+        WHERE t.deleted_at IS NULL
+        ORDER BY
+            t.transaction_date ASC,
+            t.amount DESC;
+    """
 }
 
 
