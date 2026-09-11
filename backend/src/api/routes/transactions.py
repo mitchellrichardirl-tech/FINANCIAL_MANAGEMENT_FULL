@@ -699,7 +699,7 @@ def get_deleted_transactions():
     logger.info(f"Retrieved {len(transactions)} deleted transactions")
     return paginated_response(transactions, limit, offset, data_key='transactions')
 
-@bp.route('/export', methods=['GET'])
+@bp.route('/export.csv', methods=['GET'])
 @handle_errors(entity='Transaction')
 @log_route(logger)
 def export_transactions():
