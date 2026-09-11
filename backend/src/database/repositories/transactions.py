@@ -1374,6 +1374,7 @@ class TransactionRepository:
             WHERE id = ?
         ''', (transaction_id,))
         return cursor.fetchone()
+    
     def _live_generated_children(self, cursor, parent_id: int) -> List[int]:
         """Return IDs of live `generated` children of `parent_id`.
         Split children are excluded — they have inverted polarity and are
@@ -1389,3 +1390,37 @@ class TransactionRepository:
               AND deleted_at IS NULL
         ''', (parent_id, SOURCE_GENERATED))
         return [row['id'] for row in cursor.fetchall()]
+
+    def export_data(self) -> list[Dict[str, Any]]:
+        """Export contextualized transactions data
+
+        Returns:
+            List of transaction dicts with hierarchy, ordered by date
+            ascending and amount descending.
+
+        Raises:
+            DatabaseError: On query failure.
+        """
+        logger.debug(
+            "Exporting contextualized transaction data"
+        )
+
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+
+                query = '''
+                    SELECT *
+                    FROM export
+                '''
+
+                cursor.execute(query)
+
+                rows = cursor.fetchall()
+
+                logger.debug(f"Found {len(rows)} transactions")
+                return [dict(row) for row in rows]
+
+        except Exception as e:
+            logger.error(f"Failed to find matching transactions: {e}")
+            raise DatabaseError(f"Failed to find matching transactions: {e}") from e
