@@ -1,3 +1,175 @@
+Three distinct drift points, none blocking Phase 1:
+
+1. **`Receipt` dataclass vs `receipts` table.** The dataclass is a pipeline working object, not a row model. Field names differ (`extracted_text` ↔ `raw_text`), types differ (`confidence: float` ↔ `INTEGER 0–3`), DB columns absent from the dataclass (`metadata`, `created_at`, `updated_at`), and the repository hand-maps scalars in `save()`/`update()`. Phase 1 adds `status` to the table — it will have no dataclass counterpart, widening the gap. Backlog: split into `ReceiptPipelineState` (numpy etc.) and a `ReceiptRecord` row model that the repository reads/writes; or adopt a single `row_to_model` path.
+2. **`Transaction` dataclass vs table.** Closer, but typed loosely (`deleted_at: str`), and `receipt_id` will become a denormalised mirror of `receipt_links` after Phase 1. Backlog: mark it derived in the docstring; drop it when split-receipts lands.
+3. **Frontend `ErrorCode` mirrors backend enum by hand** — already missing `CONFLICT` and `UNSUPPORTED_FILE_TYPE`. Backlog: generate from backend or add a test that diffs them.
+
+# Receipt lifecycle
+
+# Phase 1 — Recoverable & Retro-linkable Receipts
+
+**Goal:** every uploaded receipt is persisted with an explicit status, listable when not linked, and linkable from Process Receipts after the fact. Single server-side writer for links. Join table ready for split transactions.
+
+## 1. Config
+
+- [ ] Add `RECEIPT_MATCH_DATE_TOLERANCE_DAYS` (env, default `5`) to `create_app` config.
+- [ ] Add `RECEIPT_AUTO_LINK_THRESHOLD` (env, default `0.98`) — unused in Phase 1, reserved.
+- [ ] Add `RECEIPT_MATCH_AMOUNT_TOLERANCE` (env, default `0.01`).
+- [ ] Log the three values in the existing config debug line.
+
+## 2. Schema & migrations (`migrations.py`)
+
+- [ ] Add `_has_table(table)` guard helper alongside `_has_column`.
+- [ ] Append migration `receipts.status`: `ALTER TABLE receipts ADD COLUMN status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','unlinked','linked'))`.
+- [ ] Append migration `receipts.confirmed_at`: nullable `TIMESTAMP DEFAULT NULL`.
+- [ ] Append migration `receipt_links`:
+  ```
+  CREATE TABLE receipt_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    receipt_id INTEGER NOT NULL REFERENCES receipts(id) ON DELETE CASCADE,
+    transaction_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+    linked_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now')),
+    link_source TEXT NOT NULL DEFAULT 'manual',   -- manual | auto | import
+    UNIQUE (receipt_id),                          -- relax for split receipts later
+    UNIQUE (transaction_id)                       -- relax for split transactions later
+  )
+  ```
+- [ ] Append migration `receipts.backfill_status_and_links` (same migration as above or next entry):
+  - `INSERT INTO receipt_links (receipt_id, transaction_id, link_source) SELECT receipt_id, id, 'manual' FROM transactions WHERE receipt_id IS NOT NULL AND deleted_at IS NULL`
+  - `UPDATE receipts SET status='linked', confirmed_at=updated_at WHERE id IN (SELECT receipt_id FROM receipt_links)`
+  - `UPDATE receipts SET status='unlinked', confirmed_at=updated_at WHERE status='pending' AND vendor IS NOT NULL` (pre-existing confirmed-but-unlinked rows)
+- [ ] Add indexes to `INDEXES`: `receipt_links(transaction_id)`, `receipts(status)`, partial `receipts(date) WHERE status != 'linked'`.
+- [ ] Leave `transactions.receipt_id` in place as a mirror (export view, `find_matching_transactions`, formatters all read it). Add `# derived from receipt_links` comment to `Transaction` dataclass.
+- [ ] Add backlog note: drop `transactions.receipt_id` + rewrite `export` view when split receipts land.
+
+## 3. Repository layer
+
+### `ReceiptRepository`
+- [ ] Include `status`, `confirmed_at`, and `linked_transaction_id` (via `LEFT JOIN receipt_links`) in `get_by_id` and all row reads.
+- [ ] Extend `update()` with `status` and `confirmed_at` sentinel params.
+- [ ] Add `list(status: list[str] | None, vendor, date_from, date_to, amount_min, amount_max, q, limit, offset, sort, direction)` → `(rows, total)`.
+- [ ] Add `count_by_status()` → `{pending, unlinked, linked}`.
+- [ ] Ensure `save()` (called from stream processors) writes `status='pending'` explicitly.
+
+### New `ReceiptLinkRepository`
+- [ ] `get_by_receipt(receipt_id)`, `get_by_transaction(transaction_id)`.
+- [ ] `create(receipt_id, transaction_id, link_source)`.
+- [ ] `delete_by_receipt(receipt_id)`, `delete_by_transaction(transaction_id)`.
+
+### `TransactionRepository`
+- [ ] Change `find_matching_transactions` default `date_tolerance_days` to read from config at call site (route), not hard-coded `7`.
+- [ ] Route `link_receipt_to_transaction` through the new link service (or deprecate and delegate).
+- [ ] Check soft-delete / unsplit paths: on transaction delete/supersede, call `ReceiptLinkService.unlink_transaction` so receipt returns to `unlinked`.
+
+## 4. New service: `ReceiptLinkService`
+
+Single writer for all link state. Wrap in one `db.transaction()`.
+
+- [ ] `link(receipt_id, transaction_id, source='manual')`:
+  - validate receipt exists, status ∈ {pending, unlinked}; else `AppError(CONFLICT, entity='Receipt')`.
+  - validate transaction exists, live, has no existing link; else `AppError(CONFLICT, entity='Transaction')`.
+  - insert `receipt_links`; set `transactions.receipt_id`; set `receipts.status='linked'`, `confirmed_at` if null.
+  - return `{receipt, transaction}` formatted.
+- [ ] `unlink_receipt(receipt_id)`: delete link, null `transactions.receipt_id`, set `status='unlinked'`.
+- [ ] `unlink_transaction(transaction_id)`: same, keyed by transaction (used by transaction delete paths).
+- [ ] `confirm(receipt_id, fields)`: existing `confirm_receipt` logic + set `status='unlinked'` if currently `pending`, set `confirmed_at`.
+
+## 5. Routes — `receipts.bp`
+
+- [ ] `GET /receipts` — query params from §3 `list()`; default `status=pending,unlinked`; response `{receipts: [...], total, limit, offset}`. Validate `status` values → `invalid_value(field='status')`.
+- [ ] `GET /receipts/summary` — `count_by_status()`.
+- [ ] `GET /receipts/<id>` — full receipt via `ReceiptFormatter.detail()` (add formatter method; include `extracted_data` shape the frontend already consumes: `vendor, date, amount, confidence, selected_method, raw_text`).
+- [ ] `PATCH /receipts/<id>` — edit vendor/date/amount on `pending`/`unlinked`; reject on `linked` with `CONFLICT`.
+- [ ] `GET /receipts/<id>/candidates` — call `find_matching_transactions` using stored receipt fields, `amount * -1`, config tolerances, `include_matched=False`.
+- [ ] `POST /receipts/<id>/link` — body `{transaction_id}`; `ReceiptLinkService.link`; 200.
+- [ ] `DELETE /receipts/<id>/link` — `unlink_receipt`.
+- [ ] Modify `POST /receipts/confirm` → delegate to `ReceiptLinkService.confirm`; return `status` in payload.
+- [ ] Modify `DELETE /receipts/<id>` → refuse when `linked` (`HAS_DEPENDENCIES`, dependency `'transaction'`) unless `?force=true`, which unlinks first.
+- [ ] Reconcile `/receipts/<id>/cancel` vs `DELETE /receipts/<id>`: keep one, alias the other, update `api.js`.
+- [ ] Pass config tolerances into `/transactions/search` handler.
+- [ ] Modify `POST /transactions/<id>/link-receipt` → delegate to `ReceiptLinkService.link`.
+- [ ] Modify `PUT /transactions/<id>` (used by `updateTransaction`): if `receipt_id` present in body, delegate to link service (or unlink on `null`); strip from generic update.
+- [ ] Add `CONFLICT` handling: ensure 409 status in `AppError` for new uses.
+
+## 6. Formatters
+
+- [ ] `ReceiptFormatter.summary` — add `status`, `confirmed_at`, `linked_transaction_id`.
+- [ ] `ReceiptFormatter.detail` — summary + `extracted_data` block + `file_path`/`stored_filename`.
+- [ ] Transaction formatter — add `receipt_status` where `receipt_*` fields already appear.
+
+## 7. Frontend — `features/receipts/api.js`
+
+- [ ] Add `listReceipts(params)`, `getReceipt(id)`, `updateReceipt(id, fields)`, `getReceiptCandidates(id)`, `linkReceipt(id, transactionId)`, `unlinkReceipt(id)`, `getReceiptsSummary()`.
+- [ ] Fix `deleteReceipt` to match the retained backend route.
+- [ ] Remove or fix `getReceiptImage` (binary endpoint behind JSON `apiCall`).
+- [ ] Add `CONFLICT` and `UNSUPPORTED_FILE_TYPE` to `lib/apiErrors.js` `ErrorCode` + message templates.
+
+## 8. Frontend — `ProcessReceipts.jsx`
+
+- [ ] Rename UI status `'saved'` → `'unlinked'` everywhere (`SelectableReceiptTable` borders/icons, badges, `selectNextReceipt`, counts). Treat server `status` as source of truth for server-loaded rows.
+- [ ] Normalise receipt objects to one shape: `{receipt_id, filename, status, extracted_data, linked_transaction_id, source: 'session' | 'server'}` via a `toReceiptRow()` helper used by both upload stream and `listReceipts`.
+- [ ] Replace left-column "Receipts" card body with a tabbed component `ReceiptListTabs`:
+  - **Session** tab — existing behaviour.
+  - **Unlinked (N)** tab — `listReceipts({status:'pending,unlinked'})`, filters (vendor text, date range, amount), pagination; refresh on link/delete/confirm.
+- [ ] On select of a server-sourced receipt, hydrate `editableData` from `getReceipt(id)`.
+- [ ] Enable vendor/date/amount inputs, Save, Generate Cash, Delete, and candidate list when `status ∈ {pending, unlinked}`; read-only only when `linked`.
+- [ ] Change Save: for `unlinked`, call `updateReceipt` instead of `confirmReceipt`.
+- [ ] Change `handleSelectTransaction`: `confirm/update` then `linkReceipt(receiptId, txn.id)`; drop `updateTransaction(..., {receipt_id})`.
+- [ ] Add "Unlink" button for `linked` receipts → `unlinkReceipt`; return row to `unlinked`.
+- [ ] Handle `CONFLICT` from link: toast + `setCandidateRefreshKey`.
+- [ ] Change status badge for `unlinked`: amber, label "Saved — not linked".
+- [ ] Change "Clear All" → "Clear session" with tooltip "Receipts stay available under Unlinked".
+- [ ] Update header count: `{pending} pending, {unlinked} unlinked, {linked} linked` (session tab) — reuse `summary` for Unlinked tab.
+
+## 9. Frontend — `SelectableReceiptTable.jsx`
+
+- [ ] Accept `status` values `pending | unlinked | linked`; update `STATUS_BORDER`, `STATUS_ICON_CLS`, `getStatusIcon`.
+- [ ] Make remove (✕) column optional via prop `showRemove` (hidden on Unlinked tab).
+- [ ] Accept `emptyMessage` prop.
+
+## 10. Frontend — nav badge (`App.jsx`)
+
+- [ ] Add `ReceiptsNavLink` component: fetches `getReceiptsSummary()` on mount and on `receipts:changed` custom window event; renders `Process Receipts (N)` when `pending+unlinked > 0`.
+- [ ] Dispatch `receipts:changed` after confirm/link/unlink/delete in `ProcessReceipts` and `ReceiptUploadModal`.
+
+## 11. Frontend — `ReceiptUploadModal.jsx` (Transactions page)
+
+- [ ] No UI change. Verify `linkReceipt` still works through the refactored `/transactions/<id>/link-receipt`.
+- [ ] Dispatch `receipts:changed` on success.
+
+## 12. Tests
+
+Backend
+- [ ] Migration: fresh DB and legacy DB (with linked `transactions.receipt_id`) both reach correct `status` and `receipt_links` rows; `user_version` stamped.
+- [ ] `ReceiptLinkService.link`: happy path; receipt already linked → 409; transaction already linked → 409; deleted transaction → 404; mirror column set.
+- [ ] `unlink_receipt` / `unlink_transaction`: status returns to `unlinked`, mirror nulled.
+- [ ] Transaction soft-delete releases receipt.
+- [ ] `GET /receipts` filters, pagination, invalid status → 400 with `field='status'`.
+- [ ] `GET /receipts/<id>/candidates` uses config date tolerance (assert 5-day window, 6-day excluded).
+- [ ] `DELETE /receipts/<id>` on linked → 409 `HAS_DEPENDENCIES`; with `force=true` unlinks then deletes.
+- [ ] `confirm` sets `unlinked` + `confirmed_at`.
+
+Frontend
+- [ ] `ReceiptListTabs` renders server receipts; selecting hydrates detail panel.
+- [ ] `unlinked` receipt has enabled inputs and candidate list; `linked` is read-only with Unlink.
+- [ ] Link flow calls `linkReceipt` not `updateTransaction`.
+- [ ] Nav badge count updates after link.
+
+## 13. Acceptance criteria
+
+- [ ] Upload receipts, Save one without linking, refresh browser → receipt appears under **Unlinked**.
+- [ ] Upload receipts, navigate away mid-session without Saving → receipts appear under **Unlinked** (as `pending`).
+- [ ] Import a statement containing the matching transaction → open Unlinked receipt → candidate appears within 5 days → link succeeds → receipt disappears from Unlinked, badge decrements.
+- [ ] Deleting/unsplitting the transaction returns the receipt to Unlinked.
+- [ ] Existing Transactions-page "Attach receipt" flow unchanged.
+- [ ] `pay_months` and `export` views still queryable on startup.
+
+## 14. Out of scope (later phases)
+
+- `receipt_matching` scorer / party-name scoring / reverse suggestions (Phase 2).
+- Import hook, `POST /receipts/match`, review modal, auto-link threshold in use (Phase 3).
+- Dropping `transactions.receipt_id`; relaxing `receipt_links` UNIQUE constraints; stale-pending sweep (Phase 4 / split-transactions work).
+
 # Undo Delete Transaction
 
 When we add an action slot to our Toast implementation we can add undo delete functionality to the front end. The undo path is straightforward — each deleted_id needs a restore call, and the cascade-restore in the backend handles children automatically:
