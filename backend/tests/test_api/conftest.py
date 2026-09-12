@@ -213,6 +213,8 @@ class TestDataFactory:
             'selected_method': 'ocr',
             'raw_text': 'Test receipt text',
             'metadata': '{}',
+            'status': 'pending',
+            'confirmed_at': None,
         }
         defaults.update(kwargs)
         
@@ -223,8 +225,9 @@ class TestDataFactory:
                     '''INSERT INTO receipts (
                         original_filename, stored_filename, file_path,
                         vendor, date, amount, confidence, 
-                        selected_method, raw_text, metadata
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                        selected_method, raw_text, metadata, status,
+                        confirmed_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                     (
                         defaults['original_filename'],
                         defaults['stored_filename'],
@@ -236,6 +239,8 @@ class TestDataFactory:
                         defaults['selected_method'],
                         defaults['raw_text'],
                         defaults['metadata'],
+                        defaults['status'],
+                        defaults['confirmed_at'],
                     )
                 )
                 return cursor.lastrowid
@@ -385,6 +390,35 @@ class TestDataFactory:
             'party_id': party_id,
         }
 
+    @staticmethod
+    def soft_delete_transaction(app, transaction_id, reason='user'):
+        """Mark a transaction as soft-deleted."""
+        with app.app_context():
+            manager = db.get_manager()
+            with manager.transaction() as conn:
+                conn.execute(
+                    "UPDATE transactions SET deleted_at = strftime('%Y-%m-%d %H:%M:%f','now'), "
+                    "deleted_reason = ? WHERE id = ?",
+                    (reason, transaction_id),
+                )
+    @staticmethod
+    def set_receipt_status(app, receipt_id, status, confirmed_at=None):
+        """Directly set receipt status (bypasses service — for fixtures only)."""
+        with app.app_context():
+            manager = db.get_manager()
+            with manager.transaction() as conn:
+                conn.execute(
+                    "UPDATE receipts SET status = ?, confirmed_at = ? WHERE id = ?",
+                    (status, confirmed_at, receipt_id),
+                )
+    @staticmethod
+    def fetch_one(app, sql, params=()):
+        with app.app_context():
+            manager = db.get_manager()
+            with manager.get_connection() as conn:
+                row = conn.execute(sql, params).fetchone()
+                return dict(row) if row is not None else None
+
 
 @pytest.fixture
 def test_data():
@@ -396,3 +430,23 @@ def test_data():
 def test_hierarchy(app_with_db, test_data):
     """Create a full test hierarchy and return IDs."""
     return test_data.create_full_hierarchy(app_with_db)
+
+@pytest.fixture
+def live_transaction(app_with_db, test_data, test_hierarchy):
+    """A single live, unlinked transaction. Returns its id."""
+    upload_id = test_data.create_upload(app_with_db)
+    return test_data.create_transaction(
+        app_with_db, upload_id, test_hierarchy['party_id'],
+        transaction_date='2024-01-15', amount=-10.00,
+    )
+
+@pytest.fixture
+def make_transaction(app_with_db, test_data, test_hierarchy):
+    """Factory fixture: make_transaction(**overrides) -> transaction id."""
+    upload_id = test_data.create_upload(app_with_db)
+    def _make(**kwargs):
+        kwargs.setdefault('amount', -10.00)
+        return test_data.create_transaction(
+            app_with_db, upload_id, test_hierarchy['party_id'], **kwargs
+        )
+    return _make

@@ -35,7 +35,7 @@ Three distinct drift points, none blocking Phase 1:
   )
   ```
 - [ ] Append migration `receipts.backfill_status_and_links` (same migration as above or next entry):
-  - `INSERT INTO receipt_links (receipt_id, transaction_id, link_source) SELECT receipt_id, id, 'manual' FROM transactions WHERE receipt_id IS NOT NULL AND deleted_at IS NULL`
+  - `INSERT OR IGNORE INTO receipt_links (receipt_id, transaction_id, link_source) SELECT receipt_id, id, 'manual' FROM transactions WHERE receipt_id IS NOT NULL ORDER BY deleted_at`
   - `UPDATE receipts SET status='linked', confirmed_at=updated_at WHERE id IN (SELECT receipt_id FROM receipt_links)`
   - `UPDATE receipts SET status='unlinked', confirmed_at=updated_at WHERE status='pending' AND vendor IS NOT NULL` (pre-existing confirmed-but-unlinked rows)
 - [ ] Add indexes to `INDEXES`: `receipt_links(transaction_id)`, `receipts(status)`, partial `receipts(date) WHERE status != 'linked'`.
@@ -59,7 +59,7 @@ Three distinct drift points, none blocking Phase 1:
 ### `TransactionRepository`
 - [ ] Change `find_matching_transactions` default `date_tolerance_days` to read from config at call site (route), not hard-coded `7`.
 - [ ] Route `link_receipt_to_transaction` through the new link service (or deprecate and delegate).
-- [ ] Check soft-delete / unsplit paths: on transaction delete/supersede, call `ReceiptLinkService.unlink_transaction` so receipt returns to `unlinked`.
+- [ ] Check soft-delete / unsplit paths: verify soft-delete paths leave receipt_links untouched; add test.
 
 ## 4. New service: `ReceiptLinkService`
 
@@ -73,6 +73,7 @@ Single writer for all link state. Wrap in one `db.transaction()`.
 - [ ] `unlink_receipt(receipt_id)`: delete link, null `transactions.receipt_id`, set `status='unlinked'`.
 - [ ] `unlink_transaction(transaction_id)`: same, keyed by transaction (used by transaction delete paths).
 - [ ] `confirm(receipt_id, fields)`: existing `confirm_receipt` logic + set `status='unlinked'` if currently `pending`, set `confirmed_at`.
+- [ ] Unlinked view filter "linked to a deleted transaction" with a Release action, since those receipts are otherwise stranded if the transaction is never restored.
 
 ## 5. Routes — `receipts.bp`
 
@@ -160,7 +161,7 @@ Frontend
 - [ ] Upload receipts, Save one without linking, refresh browser → receipt appears under **Unlinked**.
 - [ ] Upload receipts, navigate away mid-session without Saving → receipts appear under **Unlinked** (as `pending`).
 - [ ] Import a statement containing the matching transaction → open Unlinked receipt → candidate appears within 5 days → link succeeds → receipt disappears from Unlinked, badge decrements.
-- [ ] Deleting/unsplitting the transaction returns the receipt to Unlinked.
+- [ ] Deleting a transaction leaves its receipt linked; restoring the transaction restores the relationship with no further action.
 - [ ] Existing Transactions-page "Attach receipt" flow unchanged.
 - [ ] `pay_months` and `export` views still queryable on startup.
 
