@@ -309,17 +309,18 @@ class TestDataFactory:
                 return cursor.lastrowid
     
     @staticmethod
-    def create_upload(app, filename=None):
+    def create_upload(app, filename=None, original_filename=None, file_type='csv'):
         """Insert a test upload."""
         unique_id = TestDataFactory._unique_id()
         filename = filename or f'upload_{unique_id}.csv'
-        
+        original_filename = original_filename or filename
         with app.app_context():
             manager = db.get_manager()
             with manager.transaction() as conn:
                 cursor = conn.execute(
-                    'INSERT INTO uploads (filename) VALUES (?)',
-                    (filename,)
+                    '''INSERT INTO uploads (original_filename, filename, file_type)
+                       VALUES (?, ?, ?)''',
+                    (original_filename, filename, file_type)
                 )
                 return cursor.lastrowid
     
