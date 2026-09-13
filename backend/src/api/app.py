@@ -53,19 +53,34 @@ def create_app(config=None):
         MAX_WORKERS=os.getenv("MAX_WORKERS", 2), # You can push this higher if using tesseract
         # LLM settings
         GEMINI_MODEL=os.getenv("GEMINI_MODEL", "gemini-3.5-flash"),
-        GEMINI_MAX_CONCURRENCY=os.getenv("GEMINI_MAX_CONCURRENCY", 4)
+        GEMINI_MAX_CONCURRENCY=os.getenv("GEMINI_MAX_CONCURRENCY", 4),
+        RECEIPT_MATCH_DATE_TOLERANCE_DAYS=int(
+            os.getenv("RECEIPT_MATCH_DATE_TOLERANCE_DAYS", 5)
+        ),
+        RECEIPT_MATCH_AMOUNT_TOLERANCE=float(
+            os.getenv("RECEIPT_MATCH_AMOUNT_TOLERANCE", 0.01)
+        ),
+        # Reserved for Phase 3. 0.98 is effectively "suggest only" until
+        # the scorer is trusted; set to 1.01 to disable auto-link outright.
+        RECEIPT_AUTO_LINK_THRESHOLD=float(
+            os.getenv("RECEIPT_AUTO_LINK_THRESHOLD", 0.98)
+        ),
     )
 
     if config:
         logger.info(f"Applying config overrides: {list(config.keys())}")
         app.config.update(config)
+        _validate_receipt_match_config(app)
 
     logger.debug(
         f"Config: upload_folder={app.config['UPLOAD_FOLDER']}, "
         f"db_path={app.config['DATABASE_PATH']}, "
         f"max_content_length={app.config['MAX_CONTENT_LENGTH']}, "
         f"allowed_extensions={app.config['ALLOWED_EXTENSIONS']}, "
-        f"max_workers={app.config['MAX_WORKERS']}"
+        f"max_workers={app.config['MAX_WORKERS']}, "
+        f"receipt_match_date_tolerance_days={app.config['RECEIPT_MATCH_DATE_TOLERANCE_DAYS']}, "
+        f"receipt_match_amount_tolerance={app.config['RECEIPT_MATCH_AMOUNT_TOLERANCE']}, "
+        f"receipt_auto_link_threshold={app.config['RECEIPT_AUTO_LINK_THRESHOLD']}"
     )
 
     # Enable CORS
@@ -145,6 +160,23 @@ def _register_blueprints(app):
 
     logger.info(f"Registered {len(blueprints)} blueprints")
 
+def _validate_receipt_match_config(app):
+    """Fail fast on nonsensical receipt-matching settings."""
+    days = app.config["RECEIPT_MATCH_DATE_TOLERANCE_DAYS"]
+    if not isinstance(days, int) or days < 0:
+        raise ValueError(
+            f"RECEIPT_MATCH_DATE_TOLERANCE_DAYS must be a non-negative integer, got {days!r}"
+        )
+    amount = app.config["RECEIPT_MATCH_AMOUNT_TOLERANCE"]
+    if amount < 0:
+        raise ValueError(
+            f"RECEIPT_MATCH_AMOUNT_TOLERANCE must be non-negative, got {amount!r}"
+        )
+    threshold = app.config["RECEIPT_AUTO_LINK_THRESHOLD"]
+    if not 0.0 <= threshold <= 1.01:
+        raise ValueError(
+            f"RECEIPT_AUTO_LINK_THRESHOLD must be in [0, 1.01], got {threshold!r}"
+        )
 
 def _init_database(app):
     """Initialize database for the application."""
