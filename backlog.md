@@ -30,8 +30,8 @@ Three distinct drift points, none blocking Phase 1:
     transaction_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
     linked_at TIMESTAMP DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now')),
     link_source TEXT NOT NULL DEFAULT 'manual',   -- manual | auto | import
-    UNIQUE (receipt_id),                          -- relax for split receipts later
-    UNIQUE (transaction_id)                       -- relax for split transactions later
+    UNIQUE (uq_receipt_links_receipt_id),         -- relax for split receipts later
+    UNIQUE (uq_receipt_links_transaction_id)      -- relax for split transactions later
   )
   ```
 - [ ] Append migration `receipts.backfill_status_and_links` (same migration as above or next entry):
@@ -67,6 +67,7 @@ Single writer for all link state. Wrap in one `db.transaction()`.
 
 - [ ] `link(receipt_id, transaction_id, source='manual')`:
   - validate receipt exists, status ∈ {pending, unlinked}; else `AppError(CONFLICT, entity='Receipt')`.
+  - validate source ∈ {manual, auto, import}
   - validate transaction exists, live, has no existing link; else `AppError(CONFLICT, entity='Transaction')`.
   - insert `receipt_links`; set `transactions.receipt_id`; set `receipts.status='linked'`, `confirmed_at` if null.
   - return `{receipt, transaction}` formatted.
@@ -170,6 +171,7 @@ Frontend
 - `receipt_matching` scorer / party-name scoring / reverse suggestions (Phase 2).
 - Import hook, `POST /receipts/match`, review modal, auto-link threshold in use (Phase 3).
 - Dropping `transactions.receipt_id`; relaxing `receipt_links` UNIQUE constraints; stale-pending sweep (Phase 4 / split-transactions work).
+- child-inherits-parent-receipt display resolution — split project
 
 # Undo Delete Transaction
 
@@ -277,9 +279,18 @@ parts: List[Dict]   # each dict has at least {amount, party_id}
 
 **Do not call `delete_transaction()` in step 5b.** That method stamps `deleted_reason = 'user'` (which would put the parent in the recycle bin) and cascades to generated children (which would destroy any cash lodgement derived from this transaction). Write the UPDATE directly, within the same cursor. Worth a code comment explaining why.
 
-### Receipt handling
+### Receipt handling (revised)
 
-If the parent has a `receipt_id`, copy it to every child. There's no unique constraint on `receipt_id`, so multiple transactions can reference the same receipt. The parent's `receipt_id` stays set but is invisible (parent is hidden) — no harm, and it means unsplit restores the link automatically.
+Do not copy receipt_id to children. Receipt linkage lives in receipt_links; the parent's link is left intact when the parent is superseded (deleted transactions keep their receipts). Children inherit the receipt for display via source_transaction_id; a child may also hold its own link. Resolution order: own link → parent link → none. transactions.receipt_id on a child is therefore NULL unless it has its own link.
+
+
+Affects: export view, find_matching_transactions receipt join, transaction formatters — each needs a LEFT JOIN receipt_links parent_rl ON parent_rl.transaction_id = t.source_transaction_id and a COALESCE.
+
+
+Unsplit: children keep any child-specific links (consistent with the deleted-keeps-receipt rule). These receipts show as "linked to a deleted transaction" in the Unlinked view filter (Phase 4 backlog) with a Release action. No warning needed before unsplit.
+
+
+If a one-receipt-many-transactions model is later preferred, drop uq_receipt_links_receipt_id in a migration and add link_source = 'split' handling in ReceiptLinkService. No table rebuild required.
 
 ### Suggested location
 

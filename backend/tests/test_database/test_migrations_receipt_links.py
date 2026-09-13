@@ -221,6 +221,18 @@ class TestReceiptLinksConstraints:
         assert row["link_source"] == "manual"
         assert row["linked_at"] is not None
 
+    def test_link_source_not_db_constrained(self, seeded):
+        conn, (r1, _), (t1, _) = seeded
+        conn.execute(
+            "INSERT INTO receipt_links (receipt_id, transaction_id) VALUES (?, ?)",
+            (r1, t1),
+        )
+        row = conn.execute(
+            "SELECT link_source, linked_at FROM receipt_links"
+        ).fetchone()
+        assert row["link_source"] == "manual"
+        assert row["linked_at"] is not None
+
     def test_deleting_receipt_cascades_link(self, seeded):
         conn, (r1, _), (t1, _) = seeded
         conn.execute(

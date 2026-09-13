@@ -116,10 +116,17 @@ MIGRATIONS: tuple[Migration, ...] = (
         ),
     ),
     Migration(
-        # Join table replaces transactions.receipt_id as the source of truth.
-        # The column is retained as a denormalised mirror maintained by
-        # ReceiptLinkService. UNIQUE constraints enforce today's 1:1 model;
-        # relax (not drop) them when split receipts / split transactions land.
+        # Join table replaces transactions.receipt_id as the source of truth;
+        # the column is retained as a denormalised mirror maintained by
+        # ReceiptLinkService.
+        #
+        # Cardinality is enforced by UNIQUE INDEXES (see INDEXES), not table
+        # constraints, so either side can be relaxed by a one-line migration
+        # when split receipts / split transactions land. SQLite cannot drop
+        # a table-level UNIQUE or CHECK without rebuilding the table.
+        #
+        # link_source is validated in ReceiptLinkService, not by CHECK, for
+        # the same reason - the set of sources is expected to grow.
         name="receipt_links",
         is_applied=_has_table("receipt_links"),
         statements=(
@@ -135,11 +142,14 @@ MIGRATIONS: tuple[Migration, ...] = (
                 linked_at       TIMESTAMP NOT NULL
                                     DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now')),
                 link_source     TEXT NOT NULL DEFAULT 'manual'
-                                    CHECK (link_source IN ('manual', 'auto', 'import')),
-                UNIQUE (receipt_id),
-                UNIQUE (transaction_id)
             )
             """,
+            # Created here rather than in INDEXES because the backfill that
+            # follows relies on INSERT OR IGNORE hitting these.
+            "CREATE UNIQUE INDEX uq_receipt_links_receipt_id "
+            "ON receipt_links(receipt_id)",
+            "CREATE UNIQUE INDEX uq_receipt_links_transaction_id "
+            "ON receipt_links(transaction_id)",
         ),
     ),
     Migration(
@@ -194,8 +204,6 @@ INDEXES: tuple[str, ...] = (
     "ON transactions(party_id, transaction_date) "
     "WHERE deleted_at IS NULL",
     # receipt_links(receipt_id) is covered by its UNIQUE constraint.
-    "CREATE INDEX IF NOT EXISTS idx_receipt_links_transaction_id "
-    "ON receipt_links(transaction_id)",
     "CREATE INDEX IF NOT EXISTS idx_receipts_status "
     "ON receipts(status)",
     # Partial index for the Unlinked view and candidate search: receipts
