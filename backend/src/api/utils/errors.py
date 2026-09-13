@@ -102,3 +102,13 @@ def invalid_value(message: str, field: str = None) -> AppError:
         status_code=400,
         field=field
     )
+
+def conflict(entity: str, message: str, **details) -> AppError:
+    """409 - the operation collides with existing state."""
+    return AppError(
+        code=ErrorCode.CONFLICT,
+        message=message,
+        status_code=409,
+        entity=entity,
+        details=details,
+    )
