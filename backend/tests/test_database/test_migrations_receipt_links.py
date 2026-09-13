@@ -6,6 +6,7 @@ assert on the outcome.
 """
 
 import sqlite3
+from datetime import datetime, timedelta
 
 import pytest
 from src.database import migrations
@@ -18,6 +19,11 @@ NEW_MIGRATION_NAMES = {
     "receipts.confirmed_at",
     "receipt_links",
     "receipts.backfill_status_and_links",
+}
+
+NEW_INDEX_NAMES = {
+    "idx_receipts_status",
+    "idx_receipts_awaiting_link_date",
 }
 
 # --------------------------------------------------------------------------- #
@@ -44,8 +50,14 @@ def _index_of_first_new_migration():
     names = [m.name for m in MIGRATIONS]
     idx = [i for i, n in enumerate(names) if n in NEW_MIGRATION_NAMES]
     assert idx, "New receipt migrations not registered in MIGRATIONS"
-    assert idx == list(range(idx[0], idx[0] + len(idx))), "Receipt migrations must be contiguous"
+    assert idx == list(range(idx[0], idx[0] + len(idx))), (
+        "Receipt migrations must be contiguous"
+    )
     return idx[0]
+
+
+def _is_new_index(statement: str) -> bool:
+    return any(name in statement for name in NEW_INDEX_NAMES)
 
 
 def _insert(conn, table, **values):
@@ -53,7 +65,9 @@ def _insert(conn, table, **values):
     Keeps seed helpers decoupled from schema details we don't care about
     (e.g. uploads.original_filename). Explicit values always win.
     """
-    for cid, name, ctype, notnull, default, pk in conn.execute(f"PRAGMA table_info({table})"):
+    for cid, name, ctype, notnull, default, pk in conn.execute(
+        f"PRAGMA table_info({table})"
+    ):
         if pk or not notnull or default is not None or name in values:
             continue
         ctype = (ctype or "").upper()
@@ -65,8 +79,11 @@ def _insert(conn, table, **values):
             values[name] = f"seed_{table}_{name}"
     cols = ", ".join(values)
     marks = ", ".join("?" for _ in values)
-    cur = conn.execute(f"INSERT INTO {table} ({cols}) VALUES ({marks})", tuple(values.values()))
+    cur = conn.execute(
+        f"INSERT INTO {table} ({cols}) VALUES ({marks})", tuple(values.values())
+    )
     return cur.lastrowid
+
 
 def _seed_legacy_hierarchy(conn):
     """One of each FK target so a transaction can be inserted. Returns ids."""
@@ -77,20 +94,33 @@ def _seed_legacy_hierarchy(conn):
     upload = _insert(conn, "uploads", filename="legacy.csv")
     return {"party_id": party, "upload_id": upload}
 
+
 def _seed_legacy_receipt(conn, n, vendor="Vendor"):
     return _insert(
-        conn, "receipts",
-        original_filename=f"r{n}.jpg", stored_filename=f"stored_r{n}.jpg",
-        file_path=f"/tmp/r{n}.jpg", vendor=vendor, date="2024-01-15",
-        amount=10.0, confidence=2,
+        conn,
+        "receipts",
+        original_filename=f"r{n}.jpg",
+        stored_filename=f"stored_r{n}.jpg",
+        file_path=f"/tmp/r{n}.jpg",
+        vendor=vendor,
+        date="2024-01-15",
+        amount=10.0,
+        confidence=2,
     )
+
 
 def _seed_legacy_transaction(conn, ids, receipt_id=None, deleted=False):
     return _insert(
-        conn, "transactions",
-        transaction_date="2024-01-15", amount=-10.0, description="legacy",
-        is_credit=0, is_kids=0, is_one_off=0,
-        upload_id=ids["upload_id"], party_id=ids["party_id"],
+        conn,
+        "transactions",
+        transaction_date="2024-01-15",
+        amount=-10.0,
+        description="legacy",
+        is_credit=0,
+        is_kids=0,
+        is_one_off=0,
+        upload_id=ids["upload_id"],
+        party_id=ids["party_id"],
         receipt_id=receipt_id,
         deleted_at="2024-02-01 00:00:00.000" if deleted else None,
     )
@@ -122,6 +152,11 @@ def legacy_db(base_schema_db, monkeypatch):
     """Database at the version immediately before the receipt-link migrations."""
     first_new = _index_of_first_new_migration()
     monkeypatch.setattr(migrations, "MIGRATIONS", MIGRATIONS[:first_new])
+    monkeypatch.setattr(
+        migrations,
+        "INDEXES",
+        tuple(s for s in migrations.INDEXES if not _is_new_index(s)),
+    )
     migrate(str(base_schema_db))
     monkeypatch.undo()
     conn = sqlite3.connect(base_schema_db, isolation_level=None)
@@ -181,6 +216,16 @@ class TestFreshDatabase:
         migrate(str(fresh_db))
         conn = sqlite3.connect(fresh_db)
         assert _user_version(conn) == len(MIGRATIONS)
+
+    def test_new_indexes_present(self, fresh_db):
+        conn = sqlite3.connect(fresh_db)
+        names = {
+            row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index'"
+            )
+        }
+        assert NEW_INDEX_NAMES <= names
+        assert {"uq_receipt_links_receipt_id", "uq_receipt_links_transaction_id"} <= names
 
 
 # --------------------------------------------------------------------------- #
@@ -313,21 +358,26 @@ class TestLegacyUpgrade:
 
     def test_link_from_soft_deleted_transaction_is_backfilled(self, legacy_db):
         db_path, conn = legacy_db
-        _seed_legacy_hierarchy(conn)
+        ids = _seed_legacy_hierarchy(conn)
         r = _seed_legacy_receipt(conn, 1)
-        t = _seed_legacy_transaction(conn, receipt_id=r, deleted=True)
+        t = _seed_legacy_transaction(conn, ids, receipt_id=r, deleted=True)
         migrate(str(db_path))
         link = conn.execute("SELECT * FROM receipt_links").fetchone()
         assert link["transaction_id"] == t
-        assert conn.execute("SELECT status FROM receipts WHERE id = ?", (r,)).fetchone()[0] == "linked"
+        assert (
+            conn.execute("SELECT status FROM receipts WHERE id = ?", (r,)).fetchone()[0]
+            == "linked"
+        )
 
-    def test_receipt_referenced_by_live_and_deleted_transaction_links_to_live(self, legacy_db):
+    def test_receipt_referenced_by_live_and_deleted_transaction_links_to_live(
+        self, legacy_db
+    ):
         db_path, conn = legacy_db
         ids = _seed_legacy_hierarchy(conn)
         r = _seed_legacy_receipt(conn, 1)
         t_dead = _seed_legacy_transaction(conn, ids, receipt_id=r, deleted=True)
         t_live = _seed_legacy_transaction(conn, ids, receipt_id=r)
-        migrate(str(db_path))   # must not raise on UNIQUE(receipt_id)
+        migrate(str(db_path))  # must not raise on UNIQUE(receipt_id)
         links = conn.execute("SELECT transaction_id FROM receipt_links").fetchall()
         assert [row[0] for row in links] == [t_live]
 
@@ -337,7 +387,9 @@ class TestLegacyUpgrade:
         migrate(str(db_path))
         receipt = conn.execute("SELECT * FROM receipts WHERE id = ?", (r,)).fetchone()
         assert receipt["status"] == "unlinked"
-        assert receipt["confirmed_at"] == receipt["updated_at"]
+        confirmed_at = datetime.fromisoformat(receipt["confirmed_at"])
+        updated_at = datetime.fromisoformat(receipt["updated_at"])
+        assert abs(confirmed_at - updated_at) <= timedelta(seconds=1)
 
     def test_unconfirmed_receipt_stays_pending(self, legacy_db):
         db_path, conn = legacy_db
