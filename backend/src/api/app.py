@@ -50,10 +50,10 @@ def create_app(config=None):
         # OCR settings
         RECEIPT_EXTRACTION_METHOD=os.getenv("RECEIPT_EXTRACTION_METHOD", "ocr"),
         OCR_METHOD=os.getenv("OCR_METHOD", "paddle"),
-        MAX_WORKERS=os.getenv("MAX_WORKERS", 2), # You can push this higher if using tesseract
+        MAX_WORKERS=int(os.getenv("MAX_WORKERS", 2)), # You can push this higher if using tesseract
         # LLM settings
         GEMINI_MODEL=os.getenv("GEMINI_MODEL", "gemini-3.5-flash"),
-        GEMINI_MAX_CONCURRENCY=os.getenv("GEMINI_MAX_CONCURRENCY", 4),
+        GEMINI_MAX_CONCURRENCY=int(os.getenv("GEMINI_MAX_CONCURRENCY", 4)),
         RECEIPT_MATCH_DATE_TOLERANCE_DAYS=int(
             os.getenv("RECEIPT_MATCH_DATE_TOLERANCE_DAYS", 5)
         ),
@@ -103,7 +103,7 @@ def create_app(config=None):
     _register_blueprints(app)
 
     for rule in sorted(app.url_map.iter_rules(), key=lambda r: r.rule):
-        print(f"{rule.rule:50s} {sorted(rule.methods)}")
+        logger.debug(f"{rule.rule:50s} {sorted(rule.methods)}")
         
     # Register error handlers
     register_error_handlers(app)
