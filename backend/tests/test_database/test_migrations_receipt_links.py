@@ -48,35 +48,52 @@ def _index_of_first_new_migration():
     return idx[0]
 
 
-def _seed_legacy_hierarchy(conn):
-    conn.execute("INSERT INTO categories (category) VALUES ('Cat')")
-    conn.execute(
-        "INSERT INTO sub_categories (sub_category, category_id) VALUES ('Sub', 1)"
-    )
-    conn.execute("INSERT INTO types (type, sub_category_id) VALUES ('Type', 1)")
-    conn.execute("INSERT INTO parties (name, type_id) VALUES ('Party', 1)")
-    conn.execute("INSERT INTO uploads (filename) VALUES ('legacy.csv')")
+def _insert(conn, table, **values):
+    """Insert a row, auto-filling NOT NULL columns that have no default.
+    Keeps seed helpers decoupled from schema details we don't care about
+    (e.g. uploads.original_filename). Explicit values always win.
+    """
+    for cid, name, ctype, notnull, default, pk in conn.execute(f"PRAGMA table_info({table})"):
+        if pk or not notnull or default is not None or name in values:
+            continue
+        ctype = (ctype or "").upper()
+        if "INT" in ctype:
+            values[name] = 0
+        elif "REAL" in ctype or "NUM" in ctype:
+            values[name] = 0.0
+        else:
+            values[name] = f"seed_{table}_{name}"
+    cols = ", ".join(values)
+    marks = ", ".join("?" for _ in values)
+    cur = conn.execute(f"INSERT INTO {table} ({cols}) VALUES ({marks})", tuple(values.values()))
+    return cur.lastrowid
 
+def _seed_legacy_hierarchy(conn):
+    """One of each FK target so a transaction can be inserted. Returns ids."""
+    cat = _insert(conn, "categories", category="Cat")
+    sub = _insert(conn, "sub_categories", sub_category="Sub", category_id=cat)
+    typ = _insert(conn, "types", type="Type", sub_category_id=sub)
+    party = _insert(conn, "parties", name="Party", type_id=typ)
+    upload = _insert(conn, "uploads", filename="legacy.csv")
+    return {"party_id": party, "upload_id": upload}
 
 def _seed_legacy_receipt(conn, n, vendor="Vendor"):
-    cur = conn.execute(
-        """INSERT INTO receipts (original_filename, stored_filename, file_path,
-                                 vendor, date, amount, confidence)
-           VALUES (?, ?, ?, ?, '2024-01-15', 10.0, 2)""",
-        (f"r{n}.jpg", f"stored_r{n}.jpg", f"/tmp/r{n}.jpg", vendor),
+    return _insert(
+        conn, "receipts",
+        original_filename=f"r{n}.jpg", stored_filename=f"stored_r{n}.jpg",
+        file_path=f"/tmp/r{n}.jpg", vendor=vendor, date="2024-01-15",
+        amount=10.0, confidence=2,
     )
-    return cur.lastrowid
 
-
-def _seed_legacy_transaction(conn, receipt_id=None, deleted=False):
-    cur = conn.execute(
-        """INSERT INTO transactions (transaction_date, amount, description,
-                                     is_credit, is_kids, is_one_off,
-                                     upload_id, party_id, receipt_id, deleted_at)
-           VALUES ('2024-01-15', -10.0, 'legacy', 0, 0, 0, 1, 1, ?, ?)""",
-        (receipt_id, "2024-02-01 00:00:00.000" if deleted else None),
+def _seed_legacy_transaction(conn, ids, receipt_id=None, deleted=False):
+    return _insert(
+        conn, "transactions",
+        transaction_date="2024-01-15", amount=-10.0, description="legacy",
+        is_credit=0, is_kids=0, is_one_off=0,
+        upload_id=ids["upload_id"], party_id=ids["party_id"],
+        receipt_id=receipt_id,
+        deleted_at="2024-02-01 00:00:00.000" if deleted else None,
     )
-    return cur.lastrowid
 
 
 # --------------------------------------------------------------------------- #
@@ -177,11 +194,11 @@ class TestReceiptLinksConstraints:
         conn = sqlite3.connect(fresh_db, isolation_level=None)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
-        _seed_legacy_hierarchy(conn)
+        ids = _seed_legacy_hierarchy(conn)
         r1 = _seed_legacy_receipt(conn, 1)
         r2 = _seed_legacy_receipt(conn, 2)
-        t1 = _seed_legacy_transaction(conn)
-        t2 = _seed_legacy_transaction(conn)
+        t1 = _seed_legacy_transaction(conn, ids)
+        t2 = _seed_legacy_transaction(conn, ids)
         yield conn, (r1, r2), (t1, t2)
         conn.close()
 
@@ -275,9 +292,9 @@ class TestLegacyUpgrade:
 
     def test_linked_receipt_backfilled(self, legacy_db):
         db_path, conn = legacy_db
-        _seed_legacy_hierarchy(conn)
+        ids = _seed_legacy_hierarchy(conn)
         r = _seed_legacy_receipt(conn, 1)
-        t = _seed_legacy_transaction(conn, receipt_id=r)
+        t = _seed_legacy_transaction(conn, ids, receipt_id=r)
         migrate(str(db_path))
         link = conn.execute("SELECT * FROM receipt_links").fetchone()
         assert link["receipt_id"] == r
@@ -306,10 +323,10 @@ class TestLegacyUpgrade:
 
     def test_receipt_referenced_by_live_and_deleted_transaction_links_to_live(self, legacy_db):
         db_path, conn = legacy_db
-        _seed_legacy_hierarchy(conn)
+        ids = _seed_legacy_hierarchy(conn)
         r = _seed_legacy_receipt(conn, 1)
-        t_dead = _seed_legacy_transaction(conn, receipt_id=r, deleted=True)
-        t_live = _seed_legacy_transaction(conn, receipt_id=r)
+        t_dead = _seed_legacy_transaction(conn, ids, receipt_id=r, deleted=True)
+        t_live = _seed_legacy_transaction(conn, ids, receipt_id=r)
         migrate(str(db_path))   # must not raise on UNIQUE(receipt_id)
         links = conn.execute("SELECT transaction_id FROM receipt_links").fetchall()
         assert [row[0] for row in links] == [t_live]
@@ -332,9 +349,9 @@ class TestLegacyUpgrade:
 
     def test_mixed_population(self, legacy_db):
         db_path, conn = legacy_db
-        _seed_legacy_hierarchy(conn)
+        ids = _seed_legacy_hierarchy(conn)
         linked = _seed_legacy_receipt(conn, 1)
-        _seed_legacy_transaction(conn, receipt_id=linked)
+        _seed_legacy_transaction(conn, ids, receipt_id=linked)
         unlinked = _seed_legacy_receipt(conn, 2)
         pending = _seed_legacy_receipt(conn, 3, vendor=None)
         migrate(str(db_path))
@@ -344,9 +361,9 @@ class TestLegacyUpgrade:
 
     def test_backfill_is_idempotent(self, legacy_db):
         db_path, conn = legacy_db
-        _seed_legacy_hierarchy(conn)
+        ids = _seed_legacy_hierarchy(conn)
         r = _seed_legacy_receipt(conn, 1)
-        _seed_legacy_transaction(conn, receipt_id=r)
+        _seed_legacy_transaction(conn, ids, receipt_id=r)
         migrate(str(db_path))
         migrate(str(db_path))
         assert conn.execute("SELECT COUNT(*) FROM receipt_links").fetchone()[0] == 1
