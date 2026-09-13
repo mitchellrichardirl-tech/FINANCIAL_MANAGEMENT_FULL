@@ -34,6 +34,16 @@ def _has_column(table: str, column: str) -> Callable[[sqlite3.Cursor], bool]:
         return column in _table_columns(cursor, table)
     return check
 
+def _has_table(table: str) -> Callable[[sqlite3.Cursor], bool]:
+    """Build a guard that reports whether `table` already exists."""
+    def check(cursor: sqlite3.Cursor) -> bool:
+        row = cursor.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (table,),
+        ).fetchone()
+        return row is not None
+    return check
+
 @dataclass(frozen=True)
 class Migration:
     name: str
@@ -87,6 +97,83 @@ MIGRATIONS: tuple[Migration, ...] = (
             "ALTER TABLE transactions ADD COLUMN source_relationship TEXT DEFAULT NULL",
         ),
     ),
+    Migration(
+        # Persisted lifecycle state. Previously only existed as React state
+        # in ProcessReceipts ('pending' | 'saved' | 'linked').
+        # Non-NULL default is still metadata-only in SQLite - no table rewrite.
+        name="receipts.status",
+        is_applied=_has_column("receipts", "status"),
+        statements=(
+            "ALTER TABLE receipts ADD COLUMN status TEXT NOT NULL DEFAULT 'pending' "
+            "CHECK (status IN ('pending', 'unlinked', 'linked'))",
+        ),
+    ),
+    Migration(
+        name="receipts.confirmed_at",
+        is_applied=_has_column("receipts", "confirmed_at"),
+        statements=(
+            "ALTER TABLE receipts ADD COLUMN confirmed_at TIMESTAMP DEFAULT NULL",
+        ),
+    ),
+    Migration(
+        # Join table replaces transactions.receipt_id as the source of truth.
+        # The column is retained as a denormalised mirror maintained by
+        # ReceiptLinkService. UNIQUE constraints enforce today's 1:1 model;
+        # relax (not drop) them when split receipts / split transactions land.
+        name="receipt_links",
+        is_applied=_has_table("receipt_links"),
+        statements=(
+            """
+            CREATE TABLE receipt_links (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                receipt_id      INTEGER NOT NULL
+                                    REFERENCES receipts(id)
+                                    ON DELETE CASCADE ON UPDATE CASCADE,
+                transaction_id  INTEGER NOT NULL
+                                    REFERENCES transactions(id)
+                                    ON DELETE CASCADE ON UPDATE CASCADE,
+                linked_at       TIMESTAMP NOT NULL
+                                    DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now')),
+                link_source     TEXT NOT NULL DEFAULT 'manual'
+                                    CHECK (link_source IN ('manual', 'auto', 'import')),
+                UNIQUE (receipt_id),
+                UNIQUE (transaction_id)
+            )
+            """,
+        ),
+    ),
+    Migration(
+        # Populate receipt_links and receipts.status from the legacy
+        # transactions.receipt_id column. Soft-deleted transactions keep
+        # their receipts (restore must not lose the link). If a receipt is
+        # referenced by more than one transaction, the live one wins;
+        # INSERT OR IGNORE absorbs the remainder under UNIQUE(receipt_id).
+        # No is_applied guard: receipt_links cannot pre-exist this code, so
+        # an unversioned DB has never run this.
+        name="receipts.backfill_status_and_links",
+        statements=(
+            """
+            INSERT OR IGNORE INTO receipt_links (receipt_id, transaction_id, link_source)
+            SELECT receipt_id, id, 'manual'
+            FROM transactions
+            WHERE receipt_id IS NOT NULL
+            ORDER BY (deleted_at IS NULL) DESC, id ASC
+            """,
+            """
+            UPDATE receipts
+            SET status = 'linked',
+                confirmed_at = COALESCE(confirmed_at, updated_at)
+            WHERE id IN (SELECT receipt_id FROM receipt_links)
+            """,
+            """
+            UPDATE receipts
+            SET status = 'unlinked',
+                confirmed_at = COALESCE(confirmed_at, updated_at)
+            WHERE status = 'pending'
+              AND vendor IS NOT NULL
+            """,
+        ),
+    ),
 )
 
 
@@ -106,6 +193,16 @@ INDEXES: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_transactions_active_party_date "
     "ON transactions(party_id, transaction_date) "
     "WHERE deleted_at IS NULL",
+    # receipt_links(receipt_id) is covered by its UNIQUE constraint.
+    "CREATE INDEX IF NOT EXISTS idx_receipt_links_transaction_id "
+    "ON receipt_links(transaction_id)",
+    "CREATE INDEX IF NOT EXISTS idx_receipts_status "
+    "ON receipts(status)",
+    # Partial index for the Unlinked view and candidate search: receipts
+    # still awaiting a link, ordered by date.
+    "CREATE INDEX IF NOT EXISTS idx_receipts_awaiting_link_date "
+    "ON receipts(date) "
+    "WHERE status != 'linked'",
 )
 
 
