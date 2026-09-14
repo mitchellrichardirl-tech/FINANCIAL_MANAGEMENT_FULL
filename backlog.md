@@ -45,16 +45,17 @@ Three distinct drift points, none blocking Phase 1:
 ## 3. Repository layer
 
 ### `ReceiptRepository`
-- [ ] Include `status`, `confirmed_at`, and `linked_transaction_id` (via `LEFT JOIN receipt_links`) in `get_by_id` and all row reads.
+~~- [ ] Include `status`, `confirmed_at`, and `linked_transaction_id` (via `LEFT JOIN receipt_links`) in `get_by_id` and all row reads.~~
 - [ ] Extend `update()` with `status` and `confirmed_at` sentinel params.
 - [ ] Add `list(status: list[str] | None, vendor, date_from, date_to, amount_min, amount_max, q, limit, offset, sort, direction)` → `(rows, total)`.
 - [ ] Add `count_by_status()` → `{pending, unlinked, linked}`.
 - [ ] Ensure `save()` (called from stream processors) writes `status='pending'` explicitly.
 
-### New `ReceiptLinkRepository`
-- [ ] `get_by_receipt(receipt_id)`, `get_by_transaction(transaction_id)`.
-- [ ] `create(receipt_id, transaction_id, link_source)`.
-- [ ] `delete_by_receipt(receipt_id)`, `delete_by_transaction(transaction_id)`.
+ReceiptLinkService owns the SQL - it's the single write to the table
+~~### New `ReceiptLinkRepository`~~
+~~- [ ] `get_by_receipt(receipt_id)`, `get_by_transaction(transaction_id)`.~~
+~~- [ ] `create(receipt_id, transaction_id, link_source)`.~~
+~~- [ ] `delete_by_receipt(receipt_id)`, `delete_by_transaction(transaction_id)`.~~
 
 ### `TransactionRepository`
 - [ ] Change `find_matching_transactions` default `date_tolerance_days` to read from config at call site (route), not hard-coded `7`.

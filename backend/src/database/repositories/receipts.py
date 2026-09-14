@@ -24,6 +24,32 @@ from src.utils.logging import ContextLogger
 # Sentinel for update(): distinguishes "not provided" from "set to None".
 _UNSET = object()
 
+# Every read goes through this projection so callers see a consistent
+# shape. receipt_links is 1:1 today (unique indexes), so the LEFT JOIN
+# yields at most one row per receipt. If that cardinality is relaxed,
+# switch to a correlated subquery or GROUP BY here.
+_BASE_SELECT = '''
+    SELECT
+        r.*,
+        rl.transaction_id AS linked_transaction_id,
+        rl.linked_at,
+        rl.link_source
+    FROM receipts r
+    LEFT JOIN receipt_links rl ON rl.receipt_id = r.id
+'''
+
+VALID_STATUSES = ('pending', 'unlinked', 'linked')
+
+# list() sort keys -> ORDER BY expressions. NULL dates/amounts sort last in
+# either direction so receipts missing data don't float to the top.
+_SORT_COLUMNS = {
+    'created_at': 'r.created_at {dir}',
+    'date':       '(r.date IS NULL), r.date {dir}',
+    'amount':     '(r.amount IS NULL), r.amount {dir}',
+    'vendor':     'r.vendor COLLATE NOCASE {dir}',
+    'status':     'r.status {dir}',
+}
+
 logger = ContextLogger(__name__)
 
 
@@ -48,6 +74,13 @@ class ReceiptRepository:
         """
         self.db = get_manager()
 
+    @staticmethod
+    def _to_date_str(value: datetime | str) -> str:
+        """Normalise a datetime or ISO string to YYYY-MM-DD for comparison."""
+        if isinstance(value, datetime):
+            return value.date().isoformat()
+        return str(value)[:10]
+    
     def save(self, receipt: Receipt) -> int | None:
         """Insert a new receipt row from a `Receipt` model instance.
 
@@ -186,9 +219,9 @@ class ReceiptRepository:
                 where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
                 query = f'''
-                    SELECT * FROM receipts 
+                    {_BASE_SELECT}
                     {where_clause}
-                    ORDER BY created_at DESC 
+                    ORDER BY r.created_at DESC
                     LIMIT ? OFFSET ?
                 '''
                 params.extend([limit, offset])
@@ -222,7 +255,7 @@ class ReceiptRepository:
         try:
             with self.db.get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute('SELECT * FROM receipts WHERE id = ?', (receipt_id,))
+                cursor.execute(f'{_BASE_SELECT} WHERE r.id = ?', (receipt_id,))
                 row = cursor.fetchone()
 
                 if not row:
@@ -235,6 +268,132 @@ class ReceiptRepository:
             logger.error(f"Failed to get receipt {receipt_id}: {e}")
             raise DatabaseError(f"Failed to get receipt: {e}") from e
 
+    def list(
+        self,
+        status: Optional[List[str] | str] = None,
+        vendor: Optional[str] = None,
+        date_from: Optional[datetime | str] = None,
+        date_to: Optional[datetime | str] = None,
+        amount_min: Optional[float] = None,
+        amount_max: Optional[float] = None,
+        q: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+        sort: str = 'created_at',
+        direction: str = 'desc',
+    ) -> tuple[List[Dict[str, Any]], int]:
+        """Filtered, paged listing with a total count.
+        Drives the Unlinked-receipts view. Filters are ANDed. Unlike
+        `get_all()`, returns the unpaged total alongside the page so the
+        UI can render pagination.
+        Args:
+            status: One status or a list of statuses to include. None
+                means all.
+            vendor: Case-insensitive substring match on vendor.
+            date_from / date_to: Inclusive bounds on receipt date. Rows
+                with a NULL date are excluded when either bound is set.
+            amount_min / amount_max: Inclusive bounds on amount. Rows
+                with a NULL amount are excluded when either bound is set.
+            q: Free text; case-insensitive substring match on vendor OR
+                original_filename.
+            limit: Page size (>= 1).
+            offset: Rows to skip (>= 0).
+            sort: One of `_SORT_COLUMNS`.
+            direction: 'asc' or 'desc'.
+        Returns:
+            `(rows, total)` where `total` is the count of rows matching
+            the filters irrespective of `limit`/`offset`.
+        Raises:
+            ValueError: Invalid status, sort, direction, limit or offset.
+            DatabaseError: On query failure.
+        """
+        if isinstance(status, str):
+            status = [status]
+        if status:
+            bad = set(status) - set(VALID_STATUSES)
+            if bad:
+                raise ValueError(f"Invalid status value(s): {sorted(bad)}")
+        if sort not in _SORT_COLUMNS:
+            raise ValueError(f"Invalid sort {sort!r}; must be one of {sorted(_SORT_COLUMNS)}")
+        direction = direction.lower()
+        if direction not in ('asc', 'desc'):
+            raise ValueError("direction must be 'asc' or 'desc'")
+        if limit < 1:
+            raise ValueError("limit must be >= 1")
+        if offset < 0:
+            raise ValueError("offset must be >= 0")
+        conditions: list[str] = []
+        params: list[Any] = []
+        if status:
+            marks = ', '.join('?' for _ in status)
+            conditions.append(f'r.status IN ({marks})')
+            params.extend(status)
+        if vendor:
+            conditions.append('r.vendor LIKE ? COLLATE NOCASE')
+            params.append(f'%{vendor}%')
+        if date_from is not None:
+            conditions.append('r.date >= ?')
+            params.append(self._to_date_str(date_from))
+        if date_to is not None:
+            conditions.append('r.date <= ?')
+            params.append(self._to_date_str(date_to))
+        if amount_min is not None:
+            conditions.append('r.amount >= ?')
+            params.append(amount_min)
+        if amount_max is not None:
+            conditions.append('r.amount <= ?')
+            params.append(amount_max)
+        if q:
+            conditions.append(
+                '(r.vendor LIKE ? COLLATE NOCASE OR r.original_filename LIKE ? COLLATE NOCASE)'
+            )
+            params.extend([f'%{q}%', f'%{q}%'])
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ''
+        order_by = _SORT_COLUMNS[sort].format(dir=direction.upper())
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    f'SELECT COUNT(*) FROM receipts r {where_clause}', params
+                )
+                total = cursor.fetchone()[0]
+                cursor.execute(
+                    f'''
+                    {_BASE_SELECT}
+                    {where_clause}
+                    ORDER BY {order_by}, r.id {direction.upper()}
+                    LIMIT ? OFFSET ?
+                    ''',
+                    [*params, limit, offset],
+                )
+                rows = [self._row_to_dict(row) for row in cursor.fetchall()]
+                logger.debug(
+                    f"Listed {len(rows)}/{total} receipts "
+                    f"(status={status}, sort={sort} {direction}, offset={offset})"
+                )
+                return rows, total
+        except Exception as e:
+            logger.error(f"Failed to list receipts: {e}")
+
+    def count_by_status(self) -> Dict[str, int]:
+        """Receipt counts keyed by status. Every status key is present.
+        Raises:
+            DatabaseError: On query failure.
+        """
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'SELECT status, COUNT(*) AS n FROM receipts GROUP BY status'
+                )
+                counts = {s: 0 for s in VALID_STATUSES}
+                for row in cursor.fetchall():
+                    counts[row['status']] = row['n']
+                return counts
+        except Exception as e:
+            logger.error(f"Failed to count receipts by status: {e}")
+            raise DatabaseError(f"Failed to count receipts by status: {e}") from e
+        
     def update(
         self,
         id: int,
