@@ -426,13 +426,15 @@ class TestDeleteReceipt:
         
         deleted = repo.delete(receipt_id)
         
-        assert deleted is True
+        assert deleted is not None
+        assert deleted['id'] == receipt_id
+        assert deleted['vendor'] == sample_receipt.vendor
         assert repo.get_by_id(receipt_id) is None
     
     def test_delete_not_exists(self, repo):
         """Test deleting non-existent receipt"""
         deleted = repo.delete(999)
-        assert deleted is False
+        assert deleted is None
     
     def test_delete_removes_from_list(self, repo, multiple_receipts):
         """Test that deleted receipt is removed from lists"""
@@ -448,6 +450,24 @@ class TestDeleteReceipt:
         
         assert ids[2] not in remaining_ids
         assert len(receipts) == len(multiple_receipts) - 1
+
+    def test_delete_linked_receipt_cascades_link_and_clears_mirror(
+        self, repo, sample_receipt, app_with_db, make_transaction
+    ):
+        """Deleting a receipt removes its link row and nulls transactions.receipt_id."""
+        from src.services.receipt_links import ReceiptLinkService
+        receipt_id = repo.save(sample_receipt)
+        txn_id = make_transaction()
+        with app_with_db.app_context():
+            ReceiptLinkService().link(receipt_id, txn_id)
+        repo.delete(receipt_id)
+        with repo.db.get_connection() as conn:
+            assert conn.execute(
+                "SELECT COUNT(*) FROM receipt_links WHERE receipt_id = ?", (receipt_id,)
+            ).fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT receipt_id FROM transactions WHERE id = ?", (txn_id,)
+            ).fetchone()[0] is None
 
 
 class TestGetReceiptStats:
