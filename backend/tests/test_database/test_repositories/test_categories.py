@@ -4,6 +4,7 @@ from datetime import datetime
 
 from src.database.connection import ConnectionManager, DatabaseError, init as init_connection
 from src.database.schema import initialize_schema
+from src.database.migrations import migrate
 from src.database.repositories.categories import CategoryRepository
 
 
@@ -15,11 +16,13 @@ def temp_db_path(tmp_path):
 
 @pytest.fixture
 def connection_manager(temp_db_path):
-    """Create and initialize connection manager"""
+    """Create and initialize connection manager (base schema + migrations)."""
     manager = ConnectionManager(temp_db_path)
-    init_connection(temp_db_path)
+    init_connection(temp_db_path)  # Set as default manager
     initialize_schema(manager)
+    migrate(str(temp_db_path))
     return manager
+
 
 
 @pytest.fixture

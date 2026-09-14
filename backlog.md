@@ -730,3 +730,4 @@ These are deliberate decisions deferred to avoid blocking leaf migrations. Resol
 
 # Test drift
 - TestDataFactory.create_upload was inserting only filename, so any API test touching transactions has been failing against the current schema since original_filename/file_type were made NOT NULL. Worth a quick pytest tests/test_api -x after this fix to see what else in that suite is stale before we rely on it for the service tests — I'd rather know now than debug schema drift disguised as link-service bugs.
+- Single schema-build entry point in src/database/ — e.g. build_schema(db_path) that runs initialize_schema + migrate, called by both connection.init_app() and tests. Then "schema without migrations" becomes impossible to construct by accident.
