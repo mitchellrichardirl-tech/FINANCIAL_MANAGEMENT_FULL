@@ -66,13 +66,19 @@ class ReceiptRepository:
     """
 
     def __init__(self):
-        """Initialize with the default connection manager.
+        """Initialize. The connection manager is resolved lazily on each
+        access so module-level instances (e.g. in route modules) follow
+        `connection.init_app()` rather than pinning the manager that was
+        live at import time."""
+        pass
 
+    @property
+    def db(self):
+        """The current default `ConnectionManager`.
         Raises:
-            DatabaseError: If the connection manager has not been
-                initialized via `connection.init()` / `init_app()`.
+            DatabaseError: If `connection.init()` / `init_app()` has not run.
         """
-        self.db = get_manager()
+        return get_manager()
 
     @staticmethod
     def _to_date_str(value: datetime | str) -> str:
@@ -277,6 +283,7 @@ class ReceiptRepository:
         amount_min: Optional[float] = None,
         amount_max: Optional[float] = None,
         q: Optional[str] = None,
+        min_confidence: Optional[int] = None,
         limit: int = 50,
         offset: int = 0,
         sort: str = 'created_at',
@@ -348,6 +355,9 @@ class ReceiptRepository:
                 '(r.vendor LIKE ? COLLATE NOCASE OR r.original_filename LIKE ? COLLATE NOCASE)'
             )
             params.extend([f'%{q}%', f'%{q}%'])
+        if min_confidence is not None:
+            conditions.append('r.confidence >= ?')
+            params.append(min_confidence)
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ''
         order_by = _SORT_COLUMNS[sort].format(dir=direction.upper())
         try:

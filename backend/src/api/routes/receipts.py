@@ -13,15 +13,15 @@ from src.receipts.receipt_extractor import ReceiptExtractor
 from src.receipts.receipt_loader import ReceiptLoader
 
 from src.api.utils.file_handling import FileHandler, TempFileManager
-from src.api.utils.response_helpers import success_response
+from src.api.utils.response_helpers import success_response, search_response
 from src.api.utils.sse import create_sse_response, create_error_sse_response
 from src.api.utils.route_helpers import handle_errors, require_json
 from src.api.utils.errors import (
-    AppError, ErrorCode, required, invalid_value, not_found,
+    AppError, ErrorCode, required, invalid_value, not_found, has_dependencies,
 )
 from src.api.utils.validators import (
     RequestValidator, parse_date, parse_float, parse_int,
-    validate_pagination, validate_date_range_filters,
+    parse_bool_from_string, validate_pagination, validate_date_range_filters,
     add_string_filters, require_at_least_one,
 )
 from src.api.formatters.receipt_formatter import ReceiptFormatter
@@ -29,13 +29,17 @@ from src.api.services.receipt_processor import ReceiptStreamProcessor
 from src.api.services.async_processor import AsyncReceiptStreamProcessor
 from src.utils.logging import ContextLogger, log_route
 
+from src.services.receipt_links import ReceiptLinkService
+from src.database.repositories.receipts import VALID_STATUSES, _SORT_COLUMNS
+from src.database.repositories.transactions import TransactionRepository
+
 bp = Blueprint('receipts', __name__)
 logger = ContextLogger(__name__)
 
 receipt_repository = ReceiptRepository()
 receipt_loader = ReceiptLoader()
 receipt_extractor = ReceiptExtractor()
-
+receipt_link_service = ReceiptLinkService()
 
 # =============================================================================
 # Helper Functions
@@ -242,6 +246,75 @@ def _cleanup_temp_files(temp_files):
                 logger.debug(f"Cleaned up temp file: {temp_path}")
             except Exception as e:
                 logger.error(f"Failed to cleanup {temp_path}: {e}")
+
+def _parse_list_params(args) -> dict:
+    """Parse/validate GET /receipts query params. Field-scoped errors."""
+    def _int(name, default, lo=None, hi=None):
+        raw = args.get(name)
+        if raw is None:
+            return default
+        try:
+            value = parse_int(raw)
+        except (ValueError, TypeError):
+            raise invalid_value(f'{name} must be an integer', field=name)
+        if (lo is not None and value < lo) or (hi is not None and value > hi):
+            raise invalid_value(f'{name} must be between {lo} and {hi}', field=name)
+        return value
+    
+    def _float(name):
+        raw = args.get(name)
+        if raw is None:
+            return None
+        try:
+            return parse_float(raw)
+        except (ValueError, TypeError):
+            raise invalid_value(f'{name} must be a number', field=name)
+        
+    def _date(name, *aliases):
+        raw = next((args.get(n) for n in (name, *aliases) if args.get(n)), None)
+        if raw is None:
+            return None
+        try:
+            return parse_date(raw)
+        except (ValueError, TypeError):
+            raise invalid_value(f'{name} must be YYYY-MM-DD', field=name)
+    status = None
+    if args.get('status'):
+        status = [s.strip() for s in args['status'].split(',') if s.strip()]
+        bad = sorted(set(status) - set(VALID_STATUSES))
+        if bad:
+            raise invalid_value(
+                f"Invalid status {bad}. Must be one of: {', '.join(VALID_STATUSES)}",
+                field='status',
+            )
+    sort = args.get('sort', 'created_at')
+    if sort not in _SORT_COLUMNS:
+        raise invalid_value(
+            f"Invalid sort {sort!r}. Must be one of: {', '.join(sorted(_SORT_COLUMNS))}",
+            field='sort',
+        )
+    
+    direction = args.get('direction', 'desc').lower()
+    if direction not in ('asc', 'desc'):
+        raise invalid_value("direction must be 'asc' or 'desc'", field='direction')
+    date_from = _date('date_from', 'start_date')
+    date_to = _date('date_to', 'end_date')
+    if date_from and date_to and date_from > date_to:
+        raise invalid_value('date_from cannot be after date_to', field='date_from')
+    return {
+        'status': status,
+        'vendor': args.get('vendor') or None,
+        'q': args.get('q') or None,
+        'date_from': date_from,
+        'date_to': date_to,
+        'amount_min': _float('amount_min'),
+        'amount_max': _float('amount_max'),
+        'min_confidence': _int('min_confidence', None, 0, 3),
+        'limit': _int('limit', 50, 1, 500),
+        'offset': _int('offset', 0, 0),
+        'sort': sort,
+        'direction': direction,
+    }
 
 # =============================================================================
 # Streaming Upload Endpoint
@@ -460,42 +533,37 @@ def upload_receipt():
 @bp.route('/receipts', methods=['GET'])
 @handle_errors(entity='Receipt')
 @log_route(logger)
-def get_receipts():
-    """Get list of receipts with optional filters and pagination."""
-    filters = validate_receipt_filters(request.args)
-
-    limit = filters.pop('limit')
-    offset = filters.pop('offset')
-
-    active_filters = {k: v for k, v in filters.items() if v is not None}
-    if active_filters:
-        logger.debug(f"Active filters: {active_filters}")
-
-    receipts = receipt_repository.get_all(limit=limit, offset=offset, **filters)
-    formatted_receipts = ReceiptFormatter.summary_list(receipts)
-
-    response = {
-        'receipts': formatted_receipts,
+def list_receipts():
+    """List receipts with filtering, sorting and pagination.
+    Drives the Unlinked-receipts view. `status` is comma-separated;
+    omitted means all. `start_date`/`end_date` are accepted as legacy
+    aliases for `date_from`/`date_to`.
+    """
+    params = _parse_list_params(request.args)
+    receipts, total = receipt_repository.list(**params)
+    limit, offset = params['limit'], params['offset']
+    return success_response({
+        'receipts': ReceiptFormatter.summary_list(receipts),
         'pagination': {
             'limit': limit,
             'offset': offset,
-            'count': len(formatted_receipts),
-            'has_more': len(formatted_receipts) == limit
+            'total': total,
+            'count': len(receipts),
+            'has_more': offset + len(receipts) < total,
         },
         'filters': {
-            'vendor': filters.get('vendor'),
-            'min_confidence': filters.get('min_confidence'),
-            'start_date': request.args.get('start_date'),
-            'end_date': request.args.get('end_date')
-        }
-    }
+            k: (ReceiptFormatter.format_date(v) if k in ('date_from', 'date_to') else v)
+            for k, v in params.items()
+            if k not in ('limit', 'offset', 'sort', 'direction')
+        },
+    })
 
-    logger.info(
-        f"Retrieved {len(formatted_receipts)} receipts "
-        f"(offset={offset}, limit={limit})"
-    )
-    return jsonify(response), 200
-
+@bp.route('/receipts/summary', methods=['GET'])
+@handle_errors(entity='Receipt')
+@log_route(logger)
+def receipts_summary():
+    """Receipt counts by status. Drives the nav badge."""
+    return success_response(receipt_repository.count_by_status())
 
 @bp.route('/receipts/<int:receipt_id>', methods=['GET'])
 @handle_errors(entity='Receipt')
@@ -509,6 +577,35 @@ def get_receipt(receipt_id: int):
 
     return success_response({'receipt': ReceiptFormatter.detail(receipt)})
 
+@bp.route('/receipts/<int:receipt_id>/candidates', methods=['GET'])
+@handle_errors(entity='Receipt')
+@log_route(logger)
+def receipt_candidates(receipt_id: int):
+    """Transactions that could match this receipt, from its stored fields.
+    Matches on date and amount only; vendor-aware ranking is Phase 2
+    (receipt_matching scorer). Receipt amounts are positive spend, so the
+    amount is negated to match debit transactions. Already-linked
+    transactions are excluded.
+    """
+    receipt = receipt_repository.get_by_id(receipt_id)
+    if receipt is None:
+        raise not_found('Receipt', receipt_id)
+    date = receipt.get('date')
+    amount = receipt.get('amount')
+    if date is None and amount is None:
+        return search_response([], {'receipt_id': receipt_id}, results_key='transactions')
+    search_params = {
+        'transaction_date': date.date().isoformat() if isinstance(date, datetime) else date,
+        'amount': -amount if amount is not None else None,
+        'amount_tolerance': current_app.config['RECEIPT_MATCH_AMOUNT_TOLERANCE'],
+        'date_tolerance_days': current_app.config['RECEIPT_MATCH_DATE_TOLERANCE_DAYS'],
+        'include_matched': False,
+    }
+    transactions = TransactionRepository().find_matching_transactions(
+        limit=50, **search_params
+    )
+    search_params['receipt_id'] = receipt_id
+    return search_response(transactions, search_params, results_key='transactions')
 
 @bp.route('/receipts/<int:receipt_id>', methods=['PUT'])
 @handle_errors(entity='Receipt')
@@ -550,6 +647,15 @@ def delete_receipt(receipt_id: int):
     receipt = receipt_repository.get_by_id(receipt_id)
     if receipt is None:
         raise not_found('Receipt', receipt_id)
+
+    if receipt.get('status') == 'linked':
+        force = parse_bool_from_string(request.args.get('force', 'false'))
+        if not force:
+            error = has_dependencies('Receipt', 'transaction')
+            error.details['transaction_id'] = receipt.get('linked_transaction_id')
+            raise error
+        receipt_link_service.unlink_receipt(receipt_id)
+        logger.info(f"Force-unlinked receipt {receipt_id} before delete")
 
     deleted = receipt_repository.delete(receipt_id)
 
@@ -844,66 +950,80 @@ def cancel_receipt(receipt_id: int):
         message=file_deletion_message
     )
 
+def _link_payload(result: dict) -> dict:
+    """Shape a ReceiptLinkService result for the API."""
+    txn = result.get('transaction')
+    return {
+        'receipt': ReceiptFormatter.detail(
+            receipt_repository.get_by_id(result['receipt']['id'])
+        ),
+        'transaction': (
+            TransactionRepository().get_transaction_with_hierarchy(
+                txn['id'], include_deleted=True
+            ) if txn else None
+        ),
+    }
+
+@bp.route('/receipts/<int:receipt_id>/link', methods=['POST'])
+@handle_errors(entity='Receipt')
+@require_json
+@log_route(logger)
+def link_receipt_to_transaction(receipt_id: int):
+    """Link this receipt to a transaction."""
+    data = request.get_json() or {}
+    transaction_id = data.get('transaction_id')
+    if transaction_id is None:
+        raise required('transaction_id')
+    if isinstance(transaction_id, bool) or not isinstance(transaction_id, int) or transaction_id < 1:
+        raise invalid_value('transaction_id must be a positive integer', field='transaction_id')
+    result = receipt_link_service.link(receipt_id, transaction_id, source='manual')
+    return success_response(_link_payload(result))
+
+@bp.route('/receipts/<int:receipt_id>/link', methods=['DELETE'])
+@handle_errors(entity='Receipt')
+@log_route(logger)
+def unlink_receipt(receipt_id: int):
+    """Remove this receipt's transaction link. Idempotent."""
+    result = receipt_link_service.unlink_receipt(receipt_id)
+    return success_response(_link_payload(result))
+
 
 @bp.route('/receipts/confirm', methods=['POST'])
 @handle_errors(entity='Receipt')
 @require_json
 @log_route(logger)
 def confirm_receipt():
-    """Save receipt data to database after processing/preview."""
-    file_handler = FileHandler.from_app_config()
+    """Persist reviewed fields; promotes 'pending' to 'unlinked'."""
     data = request.get_json()
-
-    validated_data = validate_confirm_receipt(data)
-    receipt_id = validated_data.get('id')
-
-    file_path = validated_data.get('file_path')
-    if not file_path:
-        existing_receipt = receipt_repository.get_by_id(receipt_id)
-        if not existing_receipt:
-            raise not_found('Receipt', receipt_id)
-        file_path = existing_receipt.get('file_path')
-
+    validated = validate_confirm_receipt(data)
+    receipt_id = validated.get('id')
+    if receipt_id is None:
+        raise required('id')
+    existing = receipt_repository.get_by_id(receipt_id)
+    if existing is None:
+        raise not_found('Receipt', receipt_id)
+    file_path = validated.get('file_path') or existing.get('file_path')
     if not file_path or not Path(file_path).exists():
         logger.warning(f"File not found at: {file_path}")
-        raise invalid_value(
-            f'Receipt file not found at {file_path}',
-            field='file_path',
-        )
-
-    stored_filename = validated_data.get('stored_filename')
-    if not stored_filename:
-        stored_filename = file_handler.generate_stored_filename(validated_data['original_filename'])
-        logger.debug(f"Generated stored filename: {stored_filename}")
-
-    saved_receipt = receipt_repository.update(
-        id=receipt_id,
-        vendor=validated_data['vendor'],
-        amount=validated_data.get('amount'),
-        date=validated_data.get('date'),
-        confidence=validated_data.get('confidence', 0),
-        raw_text=validated_data.get('raw_text')
+        raise invalid_value(f'Receipt file not found at {file_path}', field='file_path')
+    receipt = receipt_link_service.confirm(
+        receipt_id,
+        vendor=validated['vendor'],
+        amount=validated.get('amount'),
+        date=validated.get('date'),
+        confidence=validated.get('confidence', 0),
+        raw_text=validated.get('raw_text'),
     )
-
-    if saved_receipt is None:
-        logger.error(f"Failed to confirm receipt {receipt_id}")
-        raise AppError(
-            code=ErrorCode.DATABASE_ERROR,
-            message='Failed to save receipt',
-            status_code=500,
-        )
-
     logger.info(
-        f"Confirmed receipt {receipt_id}: {validated_data['original_filename']} "
-        f"| vendor={validated_data['vendor']}"
+        f"Confirmed receipt {receipt_id}: {validated['original_filename']} "
+        f"| vendor={validated['vendor']} | status={receipt['status']}"
     )
-
     return success_response(
         {
-            'receipt': ReceiptFormatter.summary(saved_receipt),
-            'message': 'Receipt saved successfully'
+            'receipt': ReceiptFormatter.detail(receipt_repository.get_by_id(receipt_id)),
+            'message': 'Receipt saved successfully',
         },
-        status_code=201
+        status_code=201,
     )
 
 

@@ -1,7 +1,7 @@
 import csv
 import io
 
-from flask import Blueprint, Response, request
+from flask import Blueprint, Response, request, current_app
 
 from src.database.repositories.transactions import TransactionRepository
 from src.database.errors import DELETED_REASON_USER
@@ -26,6 +26,7 @@ from src.api.utils.validators import (
     apply_defaults,
     parse_bool_from_string,
 )
+from src.services.receipt_links import ReceiptLinkService
 from src.utils.logging import ContextLogger, log_route
 
 bp = Blueprint('transactions', __name__)
@@ -164,8 +165,8 @@ def validate_transaction_search(data: dict) -> dict:
         validator.validated['include_matched'] = parse_bool_from_string(data['include_matched'])
 
     apply_defaults(validator.validated, {
-        'amount_tolerance': 0.01,
-        'date_tolerance_days': 7,
+        'amount_tolerance': current_app.config['RECEIPT_MATCH_AMOUNT_TOLERANCE'],
+        'date_tolerance_days': current_app.config['RECEIPT_MATCH_DATE_TOLERANCE_DAYS'],
         'include_matched': True,
         'limit': 50,
     })
@@ -357,16 +358,12 @@ def link_receipt(transaction_id: int):
             field='receipt_id',
         )
 
-    repo = TransactionRepository()
     # ValueError from repo (e.g. receipt doesn't exist) is caught by
     # @handle_errors and mapped to INVALID_VALUE / 400.
-    updated_transaction = repo.link_receipt_to_transaction(
-        transaction_id=transaction_id,
-        receipt_id=receipt_id,
+    result = ReceiptLinkService().link(receipt_id, transaction_id, source='manual')
+    updated_transaction = TransactionRepository().get_transaction_with_hierarchy(
+        transaction_id=transaction_id
     )
-
-    if updated_transaction is None:
-        raise not_found('Transaction', transaction_id)
 
     logger.info(f"Linked receipt {receipt_id} to transaction {transaction_id}")
     return success_response(

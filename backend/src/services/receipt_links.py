@@ -12,6 +12,8 @@ receipts land, relax the index and extend VALID_LINK_SOURCES - the service
 API is deliberately shaped so callers never assume a single link.
 """
 
+from datetime import datetime
+
 from src.api.utils.errors import conflict, invalid_value, not_found, required
 from src.database import connection as db
 from src.utils.logging import ContextLogger
@@ -169,6 +171,10 @@ class ReceiptLinkService:
             receipt = self._get_receipt(conn, receipt_id)
             if receipt["status"] == "pending" and not (vendor and str(vendor).strip()):
                 raise required("vendor")
+            if isinstance(date, datetime):
+                date = date.date().isoformat()
+            elif date is not None:
+                date = str(date)[:10]
             updates, params = [], []
             for column, value in (
                 ("vendor", vendor),

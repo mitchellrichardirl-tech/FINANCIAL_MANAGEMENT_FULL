@@ -17,6 +17,31 @@ class ReceiptFormatter:
         return str(date_value)
     
     @classmethod
+    def summary_list(cls, receipts: List[Dict]) -> List[Dict]:
+        """Format a list of receipts for list views."""
+        return [cls.summary(r) for r in receipts]
+    
+    @classmethod
+    def extracted_data(cls, receipt) -> Dict:
+        """Format extracted data from a processed receipt object."""
+        return {
+            'vendor': receipt.vendor,
+            'amount': receipt.amount,
+            'date': cls.format_date(receipt.date),
+            'confidence': getattr(receipt, 'confidence', None),
+            'selected_method': getattr(receipt, 'selected_method', None),
+            'raw_text': getattr(receipt, 'extracted_text', None),
+        }
+
+    @staticmethod
+    def _link_state(receipt: Dict) -> Dict:
+        return {
+            'status': receipt.get('status', 'pending'),
+            'confirmed_at': receipt.get('confirmed_at'),
+            'linked_transaction_id': receipt.get('linked_transaction_id'),
+        }
+    
+    @classmethod
     def summary(cls, receipt: Dict) -> Dict:
         """Format receipt for list views (minimal data)."""
         return {
@@ -27,6 +52,7 @@ class ReceiptFormatter:
             'date': cls.format_date(receipt.get('date')),
             'confidence': receipt['confidence'],
             'created_at': receipt.get('created_at'),
+            **cls._link_state(receipt),
         }
     
     @classmethod
@@ -45,21 +71,7 @@ class ReceiptFormatter:
             'metadata': receipt.get('metadata', {}),
             'created_at': receipt.get('created_at'),
             'updated_at': receipt.get('updated_at'),
-        }
-    
-    @classmethod
-    def summary_list(cls, receipts: List[Dict]) -> List[Dict]:
-        """Format a list of receipts for list views."""
-        return [cls.summary(r) for r in receipts]
-    
-    @classmethod
-    def extracted_data(cls, receipt) -> Dict:
-        """Format extracted data from a processed receipt object."""
-        return {
-            'vendor': receipt.vendor,
-            'amount': receipt.amount,
-            'date': cls.format_date(receipt.date),
-            'confidence': getattr(receipt, 'confidence', None),
-            'selected_method': getattr(receipt, 'selected_method', None),
-            'raw_text': getattr(receipt, 'extracted_text', None),
+            'linked_at': receipt.get('linked_at'),
+            'link_source': receipt.get('link_source'),
+            **cls._link_state(receipt),
         }

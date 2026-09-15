@@ -1305,56 +1305,10 @@ class TransactionRepository:
         transaction_id: int,
         receipt_id: int
     ) -> Optional[Dict[str, Any]]:
-        """Link a receipt to a transaction by setting `receipt_id`.
-
-        Validates that the receipt exists before updating. A transaction
-        can only be linked to one receipt at a time; calling this
-        replaces any existing link.
-
-        Args:
-            transaction_id: Primary key of the transaction.
-            receipt_id: Primary key of the receipt to link.
-
-        Returns:
-            The updated transaction dict with full hierarchy, or None
-            if the transaction doesn't exist.
-
-        Raises:
-            not_found: (HTTP 404 via `api.utils.errors`) if the receipt
-                does not exist.
-            DatabaseError: On any other database failure.
-        """
-        logger.debug(f"Linking receipt {receipt_id} to transaction {transaction_id}")
-
-        try:
-            with self.db.transaction() as conn:
-                cursor = conn.cursor()
-
-                cursor.execute('SELECT id FROM receipts WHERE id = ?', (receipt_id,))
-                if not cursor.fetchone():
-                    logger.warning(f"Receipt {receipt_id} not found for linking")
-                    raise ValueError(f"Receipt {receipt_id} does not exist")
-
-                cursor.execute(
-                    'UPDATE transactions SET receipt_id = ? '
-                    'WHERE id = ? AND deleted_at IS NULL',
-                    (receipt_id, transaction_id)
-                )
-
-                if cursor.rowcount == 0:
-                    logger.debug(f"Transaction {transaction_id} not found for receipt link")
-                    return None
-
-            logger.info(f"Linked receipt {receipt_id} to transaction {transaction_id}")
-            return self.get_transaction_with_hierarchy(transaction_id)
-
-        except ValueError:
-            raise not_found(entity="Receipt", identifier=receipt_id)
-        except Exception as e:
-            logger.error(
-                f"Failed to link receipt {receipt_id} to transaction {transaction_id}: {e}"
-            )
-            raise DatabaseError(f"Failed to link receipt to transaction: {e}") from e
+        """Deprecated: delegates to ReceiptLinkService (single writer)."""
+        from src.services.receipt_links import ReceiptLinkService
+        ReceiptLinkService(self.db).link(receipt_id, transaction_id)
+        return self.get_transaction_with_hierarchy(transaction_id)
 
     def _fetch_delete_state(self, cursor, transaction_id: int):
         """Read the columns needed to reason about deletion for one row.
