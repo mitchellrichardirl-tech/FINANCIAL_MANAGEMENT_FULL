@@ -17,7 +17,8 @@ from src.api.utils.response_helpers import success_response, search_response
 from src.api.utils.sse import create_sse_response, create_error_sse_response
 from src.api.utils.route_helpers import handle_errors, require_json
 from src.api.utils.errors import (
-    AppError, ErrorCode, required, invalid_value, not_found, has_dependencies,
+    AppError, ErrorCode,
+    required, invalid_value, not_found, has_dependencies, conflict,
 )
 from src.api.utils.validators import (
     RequestValidator, parse_date, parse_float, parse_int,
@@ -902,13 +903,25 @@ def process_receipt():
 @log_route(logger)
 def cancel_receipt(receipt_id: int):
     """Cancel receipt upload and delete temporary file."""
-    file_handler = FileHandler.from_app_config()
 
+    receipt = receipt_repository.get_by_id(receipt_id)
+
+    if receipt is None:
+        raise not_found('Receipt', receipt_id)
+    if receipt['status'] != 'pending':
+        raise conflict(
+            'Receipt',
+            f"Receipt {receipt_id} is {receipt['status']}; "
+            f"use DELETE /receipts/{receipt_id} instead of cancel",
+            status=receipt['status'],
+        )
+    
     receipt = receipt_repository.delete(receipt_id)
 
     if not receipt:
         raise not_found('Receipt', receipt_id)
 
+    file_handler = FileHandler.from_app_config()
     receipt_deleted = True
     file_deleted = False
     stored_filename = receipt.get('stored_filename')
@@ -943,7 +956,7 @@ def cancel_receipt(receipt_id: int):
 
     return success_response(
         data={
-            'deleted_receipt': receipt,
+            'deleted_receipt': ReceiptFormatter.detail(receipt),
             'receipt_deleted': receipt_deleted,
             'file_deleted': file_deleted,
         },

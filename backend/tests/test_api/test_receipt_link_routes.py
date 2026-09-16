@@ -607,3 +607,42 @@ class TestTransactionRoutes:
         )
         ids = {t["id"] for t in d["transactions"]}
         assert inside in ids and outside not in ids
+
+
+class TestCancel:
+    def test_cancel_pending(self, client, pending):
+        r = client.post(f'/api/receipts/{pending}/cancel')
+        assert r.status_code == 200
+        assert data(r)['deleted_receipt']['id'] == pending
+        assert 'file_path' not in data(r)['deleted_receipt']
+        assert client.get(f'/api/receipts/{pending}').status_code == 404
+
+    def test_cancel_unlinked_is_409(self, client, unlinked):
+        r = client.post(f'/api/receipts/{unlinked}/cancel')
+        assert r.status_code == 409
+        assert err(r)['code'] == 'CONFLICT'
+        assert client.get(f'/api/receipts/{unlinked}').status_code == 200
+
+    def test_cancel_linked_is_409_and_link_intact(self, client, app_with_db, test_data, unlinked, live_transaction, link):
+        link(unlinked, live_transaction)
+        assert client.post(f'/api/receipts/{unlinked}/cancel').status_code == 409
+        assert test_data.fetch_one(app_with_db, 'SELECT COUNT(*) AS n FROM receipt_links')['n'] == 1
+
+    def test_cancel_not_found(self, client):
+        assert client.post('/api/receipts/999999/cancel').status_code == 404
+
+
+class TestUpdateReceipt:
+    def test_put_ignores_link_state_fields(self, client, app_with_db, test_data, unlinked, live_transaction, link):
+        link(unlinked, live_transaction)
+        r = client.put(f'/api/receipts/{unlinked}', json={'vendor': 'Edited', 'status': 'pending',
+                                                          'confirmed_at': None, 'linked_transaction_id': None})
+        assert r.status_code == 200
+        d = data(r)['receipt']
+        assert d['vendor'] == 'Edited'
+        assert d['status'] == 'linked'
+        assert d['linked_transaction_id'] == live_transaction
+        
+    def test_put_only_link_state_fields_is_400(self, client, unlinked):
+        e = err(client.put(f'/api/receipts/{unlinked}', json={'status': 'linked'}))
+        assert e['code'] == 'INVALID_VALUE'   # "No valid fields to update", not a 500
