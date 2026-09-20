@@ -10,7 +10,19 @@
  * `AppError` on network failure or `ApiError` on non-2xx responses.
  */
 
-import { apiCall } from '@/lib/apiClient';
+import { apiCall, unwrap } from '@/lib/apiClient';
+import { API_BASE_URL } from '@/lib/apiClient';
+
+/** Build a query string, omitting null/undefined/'' values. */
+function qs(params = {}) {
+  const sp = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => {
+    if (v === null || v === undefined || v === '') return;
+    sp.set(k, Array.isArray(v) ? v.join(',') : String(v));
+  });
+  const s = sp.toString();
+  return s ? `?${s}` : '';
+}
 
 /**
  * Upload a single receipt file for server-side extraction.
@@ -35,18 +47,6 @@ export async function processReceiptImage(file) {
 }
 
 /**
- * Fetch the stored image metadata/URL for a previously uploaded receipt.
- *
- * @async
- * @param {number|string} receiptId - Receipt identifier.
- * @returns {Promise<Object>} Raw API response.
- * @throws {AppError|ApiError}
- */
-export async function getReceiptImage(receiptId) {
-  return await apiCall(`/receipts/${receiptId}/image`);
-}
-
-/**
  * Confirm (persist) a receipt's extracted attributes and link it to a
  * transaction.
  *
@@ -66,20 +66,6 @@ export const confirmReceipt = (receiptData) =>
     method: 'POST',
     body: receiptData,
   });
-
-/**
- * Discard a pending receipt and its uploaded file.
- *
- * @async
- * @param {number|string} receiptId - Receipt identifier.
- * @returns {Promise<Object>} Raw API response.
- * @throws {AppError|ApiError}
- */
-export const deleteReceipt = async (receiptId) => {
-  return await apiCall(`/receipts/${receiptId}/cancel`, {
-    method: 'POST'
-  });
-};
 
 /**
  * Search for bank transactions likely to match a parsed receipt.
@@ -190,3 +176,68 @@ export async function createCashTransactionFromReceipt({
     },
   });
 }
+
+/**
+ * List receipts with filters/paging.
+ * @param {Object} params - status (string|string[]), vendor, q, date_from, date_to,
+ *        amount_min, amount_max, min_confidence, limit, offset, sort, direction
+ * @returns {Promise<{receipts: Object[], pagination: Object, filters: Object}>}
+ */
+
+export async function listReceipts(params = {}) {
+  const res = await apiCall(`/receipts${qs(params)}`);
+  return res?.data ?? res;
+}
+
+/** @returns {Promise<{pending:number, unlinked:number, linked:number}>} */
+export async function getReceiptsSummary() {
+  const res = await apiCall('/receipts/summary');
+  return res?.data ?? res;
+}
+
+/** Full receipt detail (includes raw_text, link state). */
+export async function getReceipt(receiptId) {
+  return unwrap(await apiCall(`/receipts/${receiptId}`), 'receipt');
+}
+
+/** Edit vendor/date/amount on a receipt. Never changes link state. */
+export async function updateReceipt(receiptId, fields) {
+  return unwrap(await apiCall(`/receipts/${receiptId}`, { method: 'PUT', body: fields }), 'receipt');
+}
+
+/** Candidate transactions computed server-side from the stored receipt. */
+export async function getReceiptCandidates(receiptId) {
+  return unwrap(await apiCall(`/receipts/${receiptId}/candidates`), 'transactions');
+}
+
+/** @returns {Promise<{receipt: Object, transaction: Object}>} */
+export async function linkReceipt(receiptId, transactionId) {
+  const res = await apiCall(`/receipts/${receiptId}/link`, {
+    method: 'POST',
+    body: { transaction_id: transactionId },
+  });
+  return res?.data ?? res;
+}
+
+/** @returns {Promise<{receipt: Object, transaction: ?Object}>} */
+export async function unlinkReceipt(receiptId) {
+  const res = await apiCall(`/receipts/${receiptId}/link`, { method: 'DELETE' });
+  return res?.data ?? res;
+}
+
+/**
+ * Discard a *pending* receipt and its file (409 for unlinked/linked).
+ * Use {@link deleteReceipt} for confirmed receipts.
+ */
+export const cancelReceipt = (receiptId) =>
+  apiCall(`/receipts/${receiptId}/cancel`, { method: 'POST' });
+
+/**
+ * Delete a receipt in any status. Linked receipts require `force`, which
+ * unlinks first.
+ */
+export const deleteReceipt = (receiptId, { force = false } = {}) =>
+  apiCall(`/receipts/${receiptId}${force ? '?force=true' : ''}`, { method: 'DELETE' });
+
+/** URL of the receipt image for <img src>. Not a JSON endpoint. */
+export const receiptImageUrl = (receiptId) => `${API_BASE_URL}/receipts/${receiptId}/image`;
