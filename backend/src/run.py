@@ -23,7 +23,7 @@ def api_docs(path):
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
-    debug = os.getenv('FLASK_ENV') == 'development'
+    debug = os.getenv('API_ENV') == 'development'
     
     logger.info(f"Starting application on port {port}, debug={debug}")
     
