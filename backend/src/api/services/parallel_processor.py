@@ -3,29 +3,11 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, Tuple
 
+from src.api.models.processing import ProcessingResult, ProcessingTask
 from src.api.utils.stream_reporter import StreamEventReporter
-
 from src.utils.logging import ContextLogger
 
 logger = ContextLogger(__name__)
-
-
-@dataclass
-class ProcessingTask:
-   """Represents a single processing task."""
-   index: int
-   identifier: str
-   data: Any  # Task-specific data
-
-
-@dataclass
-class ProcessingResult:
-   """Result from processing a single task."""
-   index: int
-   identifier: str
-   success: bool
-   data: Optional[Dict[str, Any]] = None
-   error: Optional[str] = None
 
 
 def get_optimal_workers(max_workers: Optional[int] = None, cpu_limit: int = 4) -> int:
