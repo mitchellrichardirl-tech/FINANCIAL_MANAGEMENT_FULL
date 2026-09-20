@@ -5,9 +5,9 @@ services:
     volumes:
       # Windows path - use forward slashes, works in Docker Desktop
       - ./data:/app/data
+    env-file: .env.prod
     environment:
-      - DATABASE_PATH=/app/data/financial_data.db
-      - UPLOAD_FOLDER=/app/data/uploads
+      - DATA_DIR=/app/data
     restart: unless-stopped
 
   frontend:

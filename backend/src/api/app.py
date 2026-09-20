@@ -4,7 +4,8 @@ from pathlib import Path
 from flask import Flask
 from flask_cors import CORS
 
-from .middleware.error_handlers import register_error_handlers
+from src.config import load_settings
+from src.api.middleware.error_handlers import register_error_handlers
 from src.api.scheduler import init_scheduler
 from src.utils.logging import ContextLogger
 
@@ -22,16 +23,13 @@ def create_app(config=None):
         Configured Flask application
     """
     app = Flask(__name__)
-    BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
-    logger.info(f"Initializing application | base_dir={BASE_DIR}")
+    settings = load_settings()
+    settings.log_summary()
 
-    # Default configuration
     app.config.update(
         # File upload settings
         MAX_CONTENT_LENGTH=50 * 1024 * 1024,  # 50MB max file size
-        MAX_RECEIPT_BATCH_SIZE = int(os.environ.get("MAX_RECEIPT_BATCH_SIZE", 50)),
-        UPLOAD_FOLDER=os.getenv("UPLOAD_FOLDER", str(Path(BASE_DIR, "data", "uploads"))),
         ALLOWED_EXTENSIONS={
             "png",
             "jpg",
@@ -43,34 +41,16 @@ def create_app(config=None):
             "tsv",
             "txt",
         },
-        # Database settings
-        DATABASE_PATH=os.getenv("DATABASE_PATH", str(Path(BASE_DIR, "data", "financial_data.db"))),
-        # JSON settings
         JSON_SORT_KEYS=False,
-        # OCR settings
-        RECEIPT_EXTRACTION_METHOD=os.getenv("RECEIPT_EXTRACTION_METHOD", "ocr"),
-        OCR_METHOD=os.getenv("OCR_METHOD", "paddle"),
-        MAX_WORKERS=int(os.getenv("MAX_WORKERS", 2)), # You can push this higher if using tesseract
-        # LLM settings
-        GEMINI_MODEL=os.getenv("GEMINI_MODEL", "gemini-3.5-flash"),
-        GEMINI_MAX_CONCURRENCY=int(os.getenv("GEMINI_MAX_CONCURRENCY", 4)),
-        RECEIPT_MATCH_DATE_TOLERANCE_DAYS=int(
-            os.getenv("RECEIPT_MATCH_DATE_TOLERANCE_DAYS", 5)
-        ),
-        RECEIPT_MATCH_AMOUNT_TOLERANCE=float(
-            os.getenv("RECEIPT_MATCH_AMOUNT_TOLERANCE", 0.01)
-        ),
-        # Reserved for Phase 3. 0.98 is effectively "suggest only" until
-        # the scorer is trusted; set to 1.01 to disable auto-link outright.
-        RECEIPT_AUTO_LINK_THRESHOLD=float(
-            os.getenv("RECEIPT_AUTO_LINK_THRESHOLD", 0.98)
-        ),
+        **settings.to_flask_config(),
     )
 
     if config:
         logger.info(f"Applying config overrides: {list(config.keys())}")
         app.config.update(config)
         _validate_receipt_match_config(app)
+
+    os.makedirs(app.config["DATA_DIR"], exist_ok=True)
 
     logger.debug(
         f"Config: upload_folder={app.config['UPLOAD_FOLDER']}, "
