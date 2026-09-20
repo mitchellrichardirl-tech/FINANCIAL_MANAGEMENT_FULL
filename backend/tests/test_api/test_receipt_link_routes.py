@@ -47,18 +47,6 @@ def receipt_file(tmp_path):
 
 
 @pytest.fixture
-def unlinked(app_with_db, test_data):
-    return test_data.create_receipt(
-        app_with_db,
-        status="unlinked",
-        vendor="Tesco",
-        date="2024-01-15",
-        amount=23.40,
-        confirmed_at="2024-01-16 10:00:00.000",
-    )
-
-
-@pytest.fixture
 def pending(app_with_db, test_data, receipt_file):
     return test_data.create_receipt(
         app_with_db,
@@ -608,6 +596,28 @@ class TestTransactionRoutes:
         ids = {t["id"] for t in d["transactions"]}
         assert inside in ids and outside not in ids
 
+    def test_put_rejects_receipt_id(self, client, app_with_db, test_data, unlinked, live_transaction):
+        r = client.put(f'/api/transactions/{live_transaction}', json={'receipt_id': unlinked})
+        assert r.status_code == 400
+        e = err(r)
+        assert e['code'] == 'INVALID_VALUE'
+        assert e['field'] == 'receipt_id'
+        assert test_data.fetch_one(app_with_db, 'SELECT COUNT(*) AS n FROM receipt_links')['n'] == 0
+        assert test_data.fetch_one(app_with_db, 'SELECT receipt_id FROM transactions WHERE id = ?',
+                                   (live_transaction,))['receipt_id'] is None
+
+    def test_put_rejects_receipt_id_null_too(self, client, unlinked, live_transaction, link):
+        """Unlinking via update is also off-limits."""
+        link(unlinked, live_transaction)
+        r = client.put(f'/api/transactions/{live_transaction}', json={'receipt_id': None})
+        assert r.status_code == 400
+        assert err(r)['field'] == 'receipt_id'
+
+    def test_put_other_fields_leave_link_alone(self, client, unlinked, live_transaction, link):
+        link(unlinked, live_transaction)
+        d = data(client.put(f'/api/transactions/{live_transaction}', json={'is_kids': True}))
+        assert d['receipt_id'] == unlinked
+
 
 class TestCancel:
     def test_cancel_pending(self, client, pending):
@@ -646,3 +656,4 @@ class TestUpdateReceipt:
     def test_put_only_link_state_fields_is_400(self, client, unlinked):
         e = err(client.put(f'/api/receipts/{unlinked}', json={'status': 'linked'}))
         assert e['code'] == 'INVALID_VALUE'   # "No valid fields to update", not a 500
+

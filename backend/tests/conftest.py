@@ -304,3 +304,14 @@ def live_transaction(app_with_db, test_data, test_hierarchy):
         app_with_db, upload_id, test_hierarchy['party_id'],
         transaction_date='2024-01-15', amount=-10.00,
     )
+
+@pytest.fixture
+def unlinked(app_with_db, test_data):
+    return test_data.create_receipt(
+        app_with_db,
+        status="unlinked",
+        vendor="Tesco",
+        date="2024-01-15",
+        amount=23.40,
+        confirmed_at="2024-01-16 10:00:00.000",
+    )
