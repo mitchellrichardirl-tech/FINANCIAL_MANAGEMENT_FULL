@@ -2,19 +2,45 @@ services:
   backend:
     build: ./backend
     container_name: finance-backend
-    volumes:
-      # Windows path - use forward slashes, works in Docker Desktop
-      - ./data:/app/data
-    env-file: .env.prod
+    init: true
+    env_file: .env.prod
     environment:
-      - DATA_DIR=/app/data
+      # Trust X-Forwarded-* from the frontend's nginx on the compose network.
+      GUNICORN_FORWARDED_ALLOW_IPS: "172.16.0.0/12"
+    volumes:
+      # Host ./data (next to this file) → DATA_DIR in the image
+      - ./data:/app/data
+    # Longer than gunicorn's graceful_timeout (30s), so in-flight streams
+    # can cancel cleanly before Docker sends SIGKILL.
+    stop_grace_period: 40s
+    healthcheck:
+      # Kept short and separate from upload duration. A failing healthcheck
+      # must never be the thing that kills a long upload.
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/api/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    mem_limit: 2g   # a clean OOMKilled signal if memory ever does run out
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     restart: unless-stopped
-
+  
   frontend:
     build: ./frontend
     container_name: finance-frontend
     ports:
       - "8080:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
