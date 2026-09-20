@@ -56,6 +56,26 @@ const FIELD_MAP = {
   amount: 'amount',
   original_filename: null,
 };
+
+/* ── Batch summary helpers ─────────────────────────────────────────── */
+const MAX_NAMES_IN_TOAST = 3;
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+/** "a.pdf, b.jpg, c.png and 4 more" */
+const listFilenames = (items) => {
+  const names = items.map((i) => i.filename ?? `file ${i.file_index + 1}`);
+  if (names.length <= MAX_NAMES_IN_TOAST) return names.join(', ');
+  const shown = names.slice(0, MAX_NAMES_IN_TOAST).join(', ');
+  return `${shown} and ${names.length - MAX_NAMES_IN_TOAST} more`;
+};
+/** "5 processed, 2 failed, 3 not processed" */
+const summariseCounts = ({ succeeded, failed, cancelled }) => {
+  const parts = [];
+  if (succeeded) parts.push(`${succeeded} processed`);
+  if (failed) parts.push(`${failed} failed`);
+  if (cancelled) parts.push(`${cancelled} not processed`);
+  return parts.length ? parts.join(', ') : 'nothing processed';
+};
+
 /* ── Reused class strings ──────────────────────────────────────────── */
 const GRID = [
   'grid grid-cols-1 gap-5 flex-1 min-h-0',
@@ -216,20 +236,60 @@ function ProcessReceipts() {
     setIsUploading(true);
     hasAutoSelectedRef.current = false;
   };
-  const handleProcessingComplete = ({ succeeded, failed }) => {
+  
+  const handleProcessingComplete = ({
+    outcome,
+    succeeded = 0,
+    failed = 0,
+    cancelled = 0,
+    failures = [],
+    cancellations = [],
+    error = null,
+  }) => {
     setIsUploading(false);
-    if (failed > 0) {
-      addToast({
-        message: `${succeeded} processed, ${failed} failed`,
-        type: failed === succeeded + failed ? 'error' : 'info',
-      });
-    } else if (succeeded > 0) {
-      addToast({
-        message: `${succeeded} receipt${succeeded === 1 ? '' : 's'} processed`,
-        type: 'success',
-      });
+    // Log the full lists. The toast only has room for a few names.
+    if (failures.length) logger.warn('Receipts that failed:', failures);
+    if (cancellations.length) logger.info('Receipts not processed:', cancellations);
+    const counts = summariseCounts({ succeeded, failed, cancelled });
+    const failedNames = failed ? ` Failed: ${listFilenames(failures)}.` : '';
+    switch (outcome) {
+      case 'rejected':
+        // onError already showed the reason.
+        return;
+      case 'completed':
+        if (failed === 0) {
+          addToast({
+            message: `${plural(succeeded, 'receipt')} processed`,
+            type: 'success',
+          });
+        } else {
+          addToast({
+            message: `${counts}.${failedNames}`,
+            type: succeeded > 0 ? 'info' : 'error',
+            duration: 8000,
+          });
+        }
+        return;
+      case 'aborted':
+        addToast({
+          message: succeeded + failed > 0 ? `Upload cancelled: ${counts}.` : 'Upload cancelled',
+          type: 'info',
+        });
+        return;
+      case 'fatal':
+      case 'disconnected':
+        addToast({
+          message: `${error ?? 'Processing stopped unexpectedly'}: ${counts}.${failedNames}`,
+          type: 'error',
+          duration: 10000,
+        });
+        return;
+      default:
+        logger.warn(`Unknown processing outcome: ${outcome}`);
+        addToast({ message: counts, type: 'info' });
     }
   };
+
   const makeCreateHandler =
     (label, createFn, refetchFn, setFn, findFn) =>
     async (...args) => {

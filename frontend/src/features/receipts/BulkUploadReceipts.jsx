@@ -22,15 +22,31 @@
  *  - extraction engine per batch.
  */
 
-import { useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
+
 import FilePreview from '@/components/FilePreview';
 import Checkbox from '@/components/Checkbox';
 import { API_BASE_URL } from '@/lib/apiClient';
 import { createLogger } from '@/lib/logger';
 import { AppError } from '@/lib/errors';
 import { getErrorMessage } from '@/lib/apiErrors';
+
+import { readEventStream } from '@/lib/sse';
+
 /** @type {import('@/lib/logger').Logger} */
 const logger = createLogger('BulkUploadReceipts');
+
+/**
+ * @typedef {Object} ProcessingSummary
+ * @property {'completed'|'fatal'|'disconnected'|'aborted'|'rejected'} outcome
+ * @property {number} succeeded
+ * @property {number} failed      Files the backend reported as failed.
+ * @property {number} cancelled   Files with no result (cancelled, aborted, or dropped).
+ * @property {Object[]} failures
+ * @property {Object[]} cancellations
+ * @property {string|null} error  Stream-level error message, if any.
+ */
+
 /**
  * Bulk receipt uploader with streaming progress.
  *
@@ -38,7 +54,7 @@ const logger = createLogger('BulkUploadReceipts');
  * @param {Object} props
  * @param {(result: Object) => void} [props.onReceiptProcessed]
  * @param {() => void} [props.onProcessingStart]
- * @param {(summary: {succeeded: number, failed: number, failures: Object[]}) => void} [props.onProcessingComplete]
+ * @param {(summary: ProcessingSummary) => void} [props.onProcessingComplete]
  * @param {(message: string) => void} [props.onError]
  * @param {boolean} [props.compact=false]
  * @returns {JSX.Element}
@@ -67,12 +83,14 @@ function BulkUploadReceipts({
   const failedRef = useRef([]);
   /** When true, the backend uses the multimodal (LLM) extractor instead of OCR. */
   const [useMultimodal, setUseMultimodal] = useState(false);
+
   // ── File selection ────────────────────────────────────────────────
   /** Append files chosen via the native picker. */
   const handleFileSelect = (event) => {
     const selectedFiles = Array.from(event.target.files);
     setFiles((prev) => [...prev, ...selectedFiles]);
   };
+
   /**
    * Handle drag-and-drop. Only image/* and PDF types are accepted;
    * others are silently ignored.
@@ -85,17 +103,21 @@ function BulkUploadReceipts({
     );
     setFiles((prev) => [...prev, ...droppedFiles]);
   };
+
   const handleDragOver = (event) => {
     event.preventDefault();
     setIsDragOver(true);
   };
+
   const handleDragLeave = () => {
     setIsDragOver(false);
   };
+
   /** Remove a single queued file by index. */
   const removeFile = (index) => {
     setFiles((prev) => prev.filter((_, i) => i !== index));
   };
+
   /** Clear the queue and reset the native input so the same file can be re-picked. */
   const clearFiles = () => {
     setFiles([]);
@@ -103,100 +125,230 @@ function BulkUploadReceipts({
       fileInputRef.current.value = '';
     }
   };
+
   // ── Upload + stream parse ─────────────────────────────────────────
   /** Indices of tasks that have reached a terminal state (success or failure). */
   const completedIndicesRef = useRef(new Set());
-  const handleStreamEvent = (result, totalFiles) => {
-    const isTerminal = result.status === 'success' || result.status === 'error';
-    if (!isTerminal || result.file_index == null) return;
-    if (completedIndicesRef.current.has(result.file_index)) return;
-    completedIndicesRef.current.add(result.file_index);
-    if (result.status === 'success') {
-      onReceiptProcessed?.(result);
-    } else {
-      failedRef.current.push(result);
-      logger.warn(`Receipt ${result.identifier ?? result.file_index} failed to process:`, result);
+  const streamOutcomeRef = useRef(null);
+  const cancelledRef = useRef([]);
+  const abortControllerRef = useRef(null);
+  /**
+   * Treat the stream as dead after this long with no data. Must be well above
+   * the backend's RECEIPT_STREAM_HEARTBEAT (10s). Change both together.
+   */
+  const STREAM_IDLE_TIMEOUT_MS = 30_000;
+  const handleStreamEvent = (event, totalFiles) => {
+    switch (event.status) {
+      case 'success':
+      case 'error':
+        // Stream-level failure. The backend sets `fatal`. The missing
+        // file_index check also catches older fatal events.
+        if (event.status === 'error' && (event.fatal || event.file_index == null)) {
+          handleFatalEvent(event);
+        } else {
+          handleFileResult(event, totalFiles);
+        }
+        return;
+      case 'completed':
+        streamOutcomeRef.current = {
+          type: 'completed',
+          summary: {
+            processed: event.total_processed,
+            successes: event.successes,
+            errors: event.errors,
+          },
+        };
+        return;
+      default:
+        // 'starting', 'processing', 'heartbeat', or anything added later.
+        return;
     }
+  };
+  const handleFileResult = (event, totalFiles) => {
+    if (event.file_index == null) return;
+    if (completedIndicesRef.current.has(event.file_index)) return;
+    completedIndicesRef.current.add(event.file_index);
+    if (event.status === 'success') {
+      onReceiptProcessed?.(event);
+    } else if (event.cancelled) {
+      cancelledRef.current.push(event);
+      logger.info(`Receipt ${event.filename ?? event.file_index} was cancelled:`, event);
+    } else {
+      failedRef.current.push(event);
+      logger.warn(`Receipt ${event.filename ?? event.file_index} failed to process:`, event);
+    }
+
     setProgress((prev) => ({
       ...prev,
       current: Math.min(completedIndicesRef.current.size, totalFiles),
     }));
   };
+  const handleFatalEvent = (event) => {
+    // Keep the first fatal event, since it's the real cause.
+    if (streamOutcomeRef.current?.type === 'fatal') return;
+    streamOutcomeRef.current = {
+      type: 'fatal',
+      error: event.error ?? 'Processing failed',
+      details: event.details,
+      summary: {
+        processed: event.total_processed,
+        successes: event.successes,
+        errors: event.errors,
+        cancelled: event.cancelled,
+      },
+    };
+    logger.error('Receipt processing aborted:', event);
+  };
+  // Abort any in-flight upload when the component unmounts.
+  useEffect(() => () => abortControllerRef.current?.abort(), []);
+  const cancelProcessing = () => {
+    abortControllerRef.current?.abort();
+  };
+  /** Mark every file the backend never reported as cancelled. */
+  const markUnreportedAsCancelled = (batch, reason) => {
+    let count = 0;
+    batch.forEach((file, index) => {
+      if (completedIndicesRef.current.has(index)) return;
+      completedIndicesRef.current.add(index);
+      cancelledRef.current.push({
+        status: 'error',
+        cancelled: true,
+        file_index: index,
+        filename: file.name,
+        error: reason,
+      });
+      count += 1;
+    });
+    return count;
+  };
+  /** Decide the final outcome and notify the parent. */
+  const finishProcessing = (batch, aborted) => {
+    const outcome = streamOutcomeRef.current;
+    let outcomeType;
+    let errorMessage = null;
+    let unreportedReason;
+    if (aborted) {
+      outcomeType = 'aborted';
+      unreportedReason = 'Cancelled by user';
+    } else if (outcome?.type === 'fatal') {
+      outcomeType = 'fatal';
+      errorMessage = outcome.error;
+      unreportedReason = `Not processed: ${outcome.error}`;
+    } else if (outcome?.type === 'completed') {
+      outcomeType = 'completed';
+      unreportedReason = 'No result received from server';
+    } else {
+      // The stream ended with no 'completed' and no fatal event.
+      outcomeType = 'disconnected';
+      errorMessage =
+        'Lost connection to the server';
+      unreportedReason = 'Connection lost before a result was received';
+    }
+    const unreported = markUnreportedAsCancelled(batch, unreportedReason);
+    if (unreported > 0 && outcomeType === 'completed') {
+      logger.warn(`Stream completed but ${unreported} file(s) were never reported`);
+    }
+    const failed = failedRef.current.length;
+    const cancelled = cancelledRef.current.length;
+    const succeeded = completedIndicesRef.current.size - failed - cancelled;
+    logger.info(
+      `Receipt processing ${outcomeType}: ` +
+      `succeeded=${succeeded} failed=${failed} cancelled=${cancelled}`
+    );
+    onProcessingComplete?.({
+      outcome: outcomeType, // 'completed' | 'fatal' | 'disconnected' | 'aborted'
+      succeeded,
+      failed,
+      cancelled,
+      failures: failedRef.current,
+      cancellations: cancelledRef.current,
+      error: errorMessage,
+    });
+    // Some receipts may already be saved, so clear the selection to
+    // prevent duplicate uploads. The failures and cancellations lists
+    // tell the user which files to check.
+    clearFiles();
+  };
   const processReceipts = async () => {
     if (files.length === 0) return;
-    const totalFiles = files.length;
+    if ( abortControllerRef.current ) {
+      // Check the ref, not state, for the reason given earlier.
+      logger.warn('Processing already in progress; ignoring click');
+      return;
+    };
+    const batch = [...files]; // snapshot; indices match the backend's file_index
+    const totalFiles = batch.length;
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
     failedRef.current = [];
+    cancelledRef.current = [];
+    completedIndicesRef.current = new Set();
+    streamOutcomeRef.current = null;
     setIsProcessing(true);
     setProgress({ current: 0, total: totalFiles });
-    completedIndicesRef.current = new Set();
     onProcessingStart?.();
+    const extractionMethod = useMultimodal ? 'multimodal' : 'ocr';
     const formData = new FormData();
-    files.forEach((file) => {
+    batch.forEach((file) => {
       logger.debug(`Adding file ${file.name} to payload`);
       formData.append('files', file);
     });
-    formData.append('extraction_method', useMultimodal ? 'multimodal' : 'ocr');
-    logger.debug(`Extraction method: ${useMultimodal ? 'multimodal' : 'ocr'}`);
+    formData.append('extraction_method', extractionMethod);
+    logger.debug(`Extraction method: ${extractionMethod}`);
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/receipts/upload-stream`,
-        { method: 'POST', body: formData }
-      );
-      if (!response.ok) {
-        throw response;
-        // const errorBody = await response.json().catch(() => null);
-        // throw new AppError({
-        //   message: `Upload failed: ${response.status} ${response.statusText}`,
-        //   userMessage: errorBody?.user_message, // falls back to STATUS_MESSAGES via AppError
-        //   status: response.status,
-        // });
-      }
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      // Stream loop: accumulate chunks, split on newline, parse each `data:` line.
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // keep the trailing partial line
-        for (const line of lines) {
-          const trimmedLine = line.trim();
-          if (trimmedLine.startsWith('data: ')) {
-            try {
-              const jsonStr = trimmedLine.slice(6);
-              const result = JSON.parse(jsonStr);
-              logger.debug('Receipt result:', result);
-              handleStreamEvent(result, totalFiles)
-            } catch (parseError) {
-              logger.error('Failed to parse SSE data:', parseError, trimmedLine);
-            }
-          }
+      // Phase 1: the request. If this fails, nothing was processed.
+      let response;
+      try {
+        response = await fetch(`${API_BASE_URL}/receipts/upload-stream`, {
+          method: 'POST',
+          body: formData,
+          signal: controller.signal,
+        });
+        if (!response.ok) throw response;
+      } catch (error) {
+        const aborted = controller.signal.aborted;
+        let message = null;
+        if (aborted) {
+          logger.info('Receipt upload cancelled before processing started');
+        } else {
+          logger.error('Receipt upload request failed:', error);
+          message = await getErrorMessage(error, 'Receipt upload');
+          onError?.(message);
         }
+        // Always pair onProcessingStart with onProcessingComplete, so the
+        // parent can reset its state.
+        onProcessingComplete?.({
+          outcome: aborted ? 'aborted' : 'rejected',
+          succeeded: 0,
+          failed: 0,
+          cancelled: 0,
+          failures: [],
+          cancellations: [],
+          error: message,
+        });
+        return; // keep the files so the user can retry
       }
-      // Flush any trailing `data:` line left in the buffer
-      if (buffer.trim().startsWith('data: ')) {
-        try {
-          const jsonStr = buffer.trim().slice(6);
-          const result = JSON.parse(jsonStr);
-          logger.debug('Receipt result:', result);
-          handleStreamEvent(result, totalFiles);
-        } catch (parseError) {
-          logger.error('Failed to parse final SSE data:', parseError);
+      // Phase 2: the stream. Failures here mean partial results.
+      try {
+        await readEventStream(
+          response,
+          (event) => {
+            logger.debug('Stream event:', event);
+            handleStreamEvent(event, totalFiles);
+          },
+          { idleTimeoutMs: STREAM_IDLE_TIMEOUT_MS },
+        );
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          logger.error('Receipt stream interrupted:', error);
         }
+        // finishProcessing handles this. The outcome is still null.
       }
-      onProcessingComplete?.({
-        succeeded: completedIndicesRef.current.size - failedRef.current.length,
-        failed: failedRef.current.length,
-        failures: failedRef.current,
-      });
-      clearFiles();
-    } catch (error) {
-      logger.error('Bulk upload error:', error);
-      const message = await getErrorMessage(error, 'Receipt upload')
-      onError?.(message);
+      finishProcessing(batch, controller.signal.aborted);
     } finally {
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
       setIsProcessing(false);
       setProgress({ current: 0, total: 0 });
       completedIndicesRef.current = new Set();
@@ -253,6 +405,7 @@ function BulkUploadReceipts({
               {files.length} file{files.length !== 1 ? 's' : ''}
             </span>
             <button
+              type="button"
               onClick={clearFiles}
               className="cursor-pointer rounded-[3px] border border-gray-400 bg-transparent px-2 py-0.5 text-xs text-muted hover:border-[#dc3545] hover:text-[#dc3545] disabled:cursor-not-allowed disabled:opacity-50"
               disabled={isProcessing}
@@ -268,15 +421,24 @@ function BulkUploadReceipts({
               disabled={isProcessing}
               label="AI extraction"
             />
-            <button
-              onClick={processReceipts}
-              disabled={isProcessing || files.length === 0}
-              className="flex-1 cursor-pointer rounded bg-[#007bff] px-4 py-2 text-sm font-medium text-white hover:bg-[#0056b3] disabled:cursor-not-allowed disabled:bg-gray-300"
-            >
-              {isProcessing
-                ? `Processing ${progress.current}/${progress.total}...`
-                : `Process ${files.length} Receipt${files.length !== 1 ? 's' : ''}`}
-            </button>
+            {isProcessing ? (
+              <button
+                type="button"
+                onClick={cancelProcessing}
+                className="flex-1 cursor-pointer rounded border border-[#dc3545] bg-white px-4 py-2 text-sm font-medium text-[#dc3545] hover:bg-[#dc3545] hover:text-white"
+              >
+                Cancel ({progress.current}/{progress.total})
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={processReceipts}
+                disabled={files.length === 0}
+                className="flex-1 cursor-pointer rounded bg-[#007bff] px-4 py-2 text-sm font-medium text-white hover:bg-[#0056b3] disabled:cursor-not-allowed disabled:bg-gray-300"
+              >
+                Process {files.length} receipt{files.length === 1 ? '' : 's'}
+              </button>
+            )}
           </div>
         </div>
       )}
