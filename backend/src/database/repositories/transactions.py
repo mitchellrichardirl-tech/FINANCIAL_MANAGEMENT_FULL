@@ -34,6 +34,29 @@ from src.api.utils.errors import not_found
 
 logger = ContextLogger(__name__)
 
+# Fields a client may change via update_transaction / bulk_update.
+# Single source of truth: the validator imports this. Must never contain
+# link state (receipt_id — ReceiptLinkService only) or lifecycle fields
+# (deleted_at, deleted_reason, source_transaction_id, source_relationship).
+TRANSACTION_UPDATABLE_FIELDS: frozenset[str] = frozenset({
+    'amount', 'description', 'cleaned_description',
+    'is_credit', 'is_kids', 'is_one_off',
+    'party_id', 'transaction_date',
+})
+
+# Fields that are locked on split children (inherited from parent).
+# Reserved for the split-transactions work; enforced in update_transaction
+# once source_relationship = 'split' rows exist.
+SPLIT_LOCKED_FIELDS: frozenset[str] = frozenset({
+    'amount', 'transaction_date', 'account_id', 'is_credit',
+})
+
+# Never updatable through any user-facing path.
+TRANSACTION_PROTECTED_FIELDS: frozenset[str] = frozenset({
+    'id', 'created_at', 'upload_id', 'account_id', 'receipt_id',
+    'deleted_at', 'deleted_reason', 'source_transaction_id', 'source_relationship',
+})
+assert not TRANSACTION_UPDATABLE_FIELDS & TRANSACTION_PROTECTED_FIELDS
 
 class TransactionRepository:
     """Data-access layer for the `transactions` table.
@@ -756,18 +779,12 @@ class TransactionRepository:
             with self.db.transaction() as conn:
                 cursor = conn.cursor()
 
-                allowed_fields = [
-                    'amount', 'description', 'cleaned_description',
-                    'is_credit', 'is_kids', 'is_one_off',
-                    'party_id', 'receipt_id', 'transaction_date'
-                ]
-
                 updates = []
                 params = []
                 updated_fields = []
 
                 for field, value in kwargs.items():
-                    if field in allowed_fields:
+                    if field in TRANSACTION_UPDATABLE_FIELDS:
                         updates.append(f"{field} = ?")
                         params.append(value)
                         updated_fields.append(field)
@@ -839,7 +856,7 @@ class TransactionRepository:
                 allowed_fields = [
                     'amount', 'description', 'cleaned_description',
                     'is_credit', 'is_kids', 'is_one_off',
-                    'party_id', 'receipt_id', 'transaction_date'
+                    'party_id', 'transaction_date'
                 ]
 
                 updates = []

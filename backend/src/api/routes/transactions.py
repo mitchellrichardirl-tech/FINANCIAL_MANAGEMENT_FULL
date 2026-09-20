@@ -3,7 +3,11 @@ import io
 
 from flask import Blueprint, Response, request, current_app
 
-from src.database.repositories.transactions import TransactionRepository
+from src.database.repositories.transactions import (
+  TransactionRepository,
+  TRANSACTION_UPDATABLE_FIELDS,
+  TRANSACTION_PROTECTED_FIELDS,
+)
 from src.database.errors import DELETED_REASON_USER
 
 from src.api.utils.response_helpers import (
@@ -48,7 +52,6 @@ TRANSACTION_SORT_FIELDS = {
     'has_receipt',
 }
 
-
 # =============================================================================
 # Validation Helpers
 # =============================================================================
@@ -67,7 +70,7 @@ def validate_transaction_filters(args: dict) -> dict:
 
     is_valid, sort_params, error = validate_sort_params(
         args,
-        allowed_fields=TRANSACTION_SORT_FIELDS,
+        allowed_fields=TRANSACTION_UPDATABLE_FIELDS,
         default_field='transaction_date',
         default_dir='desc',
     )
@@ -115,6 +118,15 @@ def validate_transaction_update(data: dict) -> dict:
     """
     logger.debug(f"Validating update data with keys: {list(data.keys())}")
 
+    protected = set(data) & TRANSACTION_PROTECTED_FIELDS
+    if protected:
+        field = sorted(protected)[0]
+        hint = (
+            ' Use POST /transactions/<id>/link-receipt or DELETE /receipts/<id>/link.'
+            if field == 'receipt_id' else ''
+        )
+        raise invalid_value(f'{field} cannot be set via update.{hint}', field=field)
+    
     validator = RequestValidator(data)
 
     validator.validate_field('transaction_date',
