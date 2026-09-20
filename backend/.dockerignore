@@ -1,11 +1,21 @@
+# Local environments and secrets: never bake into the image
+.venv/
+.env
+.env.*
+!.env.example
+# Local data: the container gets /app/data from a volume
+data/
+data-dev/
+# Build and tooling noise
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+docs/
 .git/
 .gitignore
-.env
-data/
+*.log
 *.db
-.pytest_cache/
-.venv/
-venv/
