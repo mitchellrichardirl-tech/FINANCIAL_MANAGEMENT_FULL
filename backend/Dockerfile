@@ -62,7 +62,7 @@ ENV APP_ENV=production \
     PORT=5000 \
     PATH="/app/.venv/bin:$PATH"
 
-RUN mkdir -p /app/data/uploads && chown -R appuser:appuser /app/data
+RUN mkdir -p /app/data/uploads && chown -R appuser:appuser /app
 
 USER appuser
 
