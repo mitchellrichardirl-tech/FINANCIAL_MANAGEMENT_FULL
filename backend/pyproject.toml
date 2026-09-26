@@ -26,6 +26,7 @@ dependencies = [
     "pyarrow>=22.0.0",
     "pydantic>=2.13.4",
     "pytesseract>=0.3.13",
+    "pytest-xdist>=3.8.0",
     "python-dotenv>=1.2.3",
     "python-levenshtein>=0.27.3",
     "pyxlsb>=1.0.10",
