@@ -785,7 +785,7 @@ class TestUploadsSchema:
             columns = {row[1] for row in cursor.fetchall()}
             
             expected_columns = {
-                'id', 'filename', 'file_type', 'row_count', 
+                'id', 'filename', 'original_filename', 'file_type', 'row_count', 
                 'column_count', 'columns', 'upload_date', 'created_at'
             }
             assert expected_columns == columns
@@ -815,12 +815,12 @@ class TestUploadsSchema:
         with initialized_db.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO uploads (filename, file_type) VALUES (?, ?)",
-                ("test.csv", "csv")
+                "INSERT INTO uploads (filename, original_filename, file_type) VALUES (?, ?, ?)",
+                ("new_test.csv", "old_test.csv", "csv")
             )
             conn.commit()
             
-            cursor.execute("SELECT row_count FROM uploads WHERE filename = ?", ("test.csv",))
+            cursor.execute("SELECT row_count FROM uploads WHERE filename = ?", ("new_test.csv",))
             result = cursor.fetchone()
             assert result[0] == 0
     
@@ -829,8 +829,8 @@ class TestUploadsSchema:
         with initialized_db.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO uploads (filename, file_type) VALUES (?, ?)",
-                ("test.csv", "csv")
+                "INSERT INTO uploads (filename, original_filename, file_type) VALUES (?, ?, ?)",
+                ("test.csv", "old_test.csv", "csv")
             )
             conn.commit()
             
@@ -843,8 +843,8 @@ class TestUploadsSchema:
         with initialized_db.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO uploads (filename, file_type) VALUES (?, ?)",
-                ("test.csv", "csv")
+                "INSERT INTO uploads (filename, original_filename, file_type) VALUES (?, ?, ?)",
+                ("test.csv", "old_test.csv", "csv")
             )
             conn.commit()
             
@@ -860,8 +860,8 @@ class TestUploadsSchema:
             columns_json = json.dumps(['col1', 'col2', 'col3'])
             
             cursor.execute(
-                "INSERT INTO uploads (filename, file_type, columns) VALUES (?, ?, ?)",
-                ("test.csv", "csv", columns_json)
+                "INSERT INTO uploads (filename, original_filename, file_type, columns) VALUES (?, ?, ?, ?)",
+                ("test.csv", "old_test.csv", "csv", columns_json)
             )
             conn.commit()
             
@@ -874,8 +874,8 @@ class TestUploadsSchema:
         with initialized_db.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO uploads (filename, file_type) VALUES (?, ?)",
-                ("test.csv", "csv")
+                "INSERT INTO uploads (filename, original_filename, file_type) VALUES (?, ?, ?)",
+                ("test.csv", "old_test.csv", "csv")
             )
             conn.commit()
             
@@ -888,8 +888,8 @@ class TestUploadsSchema:
         with initialized_db.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO uploads (filename, file_type) VALUES (?, ?)",
-                ("test.csv", "csv")
+                "INSERT INTO uploads (filename, original_filename, file_type) VALUES (?, ?, ?)",
+                ("test.csv", "old_test.csv", "csv")
             )
             conn.commit()
             
@@ -905,9 +905,9 @@ class TestUploadsSchema:
             columns_json = json.dumps(['date', 'amount', 'description'])
             
             cursor.execute('''
-                INSERT INTO uploads (filename, file_type, row_count, column_count, columns)
-                VALUES (?, ?, ?, ?, ?)
-            ''', ("transactions.csv", "csv", 100, 3, columns_json))
+                INSERT INTO uploads (filename, original_filename, file_type, row_count, column_count, columns)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', ("transactions.csv", "old_name.csv", "csv", 100, 3, columns_json))
             conn.commit()
             
             cursor.execute("SELECT * FROM uploads WHERE filename = ?", ("transactions.csv",))
@@ -915,22 +915,23 @@ class TestUploadsSchema:
             
             assert result is not None
             # Access by column name if row_factory is set, otherwise by index
-            assert result[1] == "transactions.csv"  # filename
-            assert result[2] == "csv"  # file_type
-            assert result[3] == 100  # row_count
-            assert result[4] == 3  # column_count
+            assert result[2] == "transactions.csv"  # filename
+            assert result[1] == "old_name.csv" # original_filename
+            assert result[3] == "csv"  # file_type
+            assert result[4] == 100  # row_count
+            assert result[5] == 3  # column_count
     
     def test_uploads_allows_duplicate_filenames(self, initialized_db):
         """Test that same filename can be uploaded multiple times"""
         with initialized_db.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO uploads (filename, file_type) VALUES (?, ?)",
-                ("data.csv", "csv")
+                "INSERT INTO uploads (filename, original_filename, file_type) VALUES (?, ?, ?)",
+                ("data.csv", "old.csv", "csv")
             )
             cursor.execute(
-                "INSERT INTO uploads (filename, file_type) VALUES (?, ?)",
-                ("data.csv", "csv")
+                "INSERT INTO uploads (filename, original_filename, file_type) VALUES (?, ?, ?)",
+                ("data.csv", "old.csv", "csv")
             )
             conn.commit()
             
@@ -991,8 +992,8 @@ class TestUploadDataSchema:
             cursor = conn.cursor()
             # First create an upload
             cursor.execute(
-                "INSERT INTO uploads (filename, file_type) VALUES (?, ?)",
-                ("test.csv", "csv")
+                "INSERT INTO uploads (filename, original_filename, file_type) VALUES (?, ?, ?)",
+                ("test.csv", "old_test.csv", "csv")
             )
             upload_id = cursor.lastrowid
             conn.commit()
@@ -1009,8 +1010,8 @@ class TestUploadDataSchema:
             cursor = conn.cursor()
             # First create an upload
             cursor.execute(
-                "INSERT INTO uploads (filename, file_type) VALUES (?, ?)",
-                ("test.csv", "csv")
+                "INSERT INTO uploads (filename, original_filename, file_type) VALUES (?, ?, ?)",
+                ("test.csv", "old_test.csv", "csv")
             )
             upload_id = cursor.lastrowid
             conn.commit()
@@ -1026,8 +1027,8 @@ class TestUploadDataSchema:
         with initialized_db.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO uploads (filename, file_type) VALUES (?, ?)",
-                ("test.csv", "csv")
+                "INSERT INTO uploads (filename, original_filename, file_type) VALUES (?, ?, ?)",
+                ("test.csv", "old_test.csv", "csv")
             )
             upload_id = cursor.lastrowid
             
@@ -1055,8 +1056,8 @@ class TestUploadDataSchema:
         with initialized_db.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO uploads (filename, file_type) VALUES (?, ?)",
-                ("test.csv", "csv")
+                "INSERT INTO uploads (filename, original_filename, file_type) VALUES (?, ?, ?)",
+                ("test.csv", "old_test.csv", "csv")
             )
             upload_id = cursor.lastrowid
             
@@ -1077,14 +1078,14 @@ class TestUploadDataSchema:
         with initialized_db.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO uploads (filename, file_type) VALUES (?, ?)",
-                ("test1.csv", "csv")
+                "INSERT INTO uploads (filename, original_filename, file_type) VALUES (?, ?, ?)",
+                ("test.csv", "old_test.csv", "csv")
             )
             upload_id_1 = cursor.lastrowid
             
             cursor.execute(
-                "INSERT INTO uploads (filename, file_type) VALUES (?, ?)",
-                ("test2.csv", "csv")
+                "INSERT INTO uploads (filename, original_filename, file_type) VALUES (?, ?, ?)",
+                ("test2.csv", "old_test2.csv", "csv")
             )
             upload_id_2 = cursor.lastrowid
             
@@ -1108,8 +1109,8 @@ class TestUploadDataSchema:
             import json
             
             cursor.execute(
-                "INSERT INTO uploads (filename, file_type) VALUES (?, ?)",
-                ("test.csv", "csv")
+                "INSERT INTO uploads (filename, original_filename, file_type) VALUES (?, ?, ?)",
+                ("test.csv", "old_test.csv", "csv")
             )
             upload_id = cursor.lastrowid
             
@@ -1130,8 +1131,8 @@ class TestUploadDataSchema:
         with initialized_db.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO uploads (filename, file_type) VALUES (?, ?)",
-                ("test.csv", "csv")
+                "INSERT INTO uploads (filename, original_filename, file_type) VALUES (?, ?, ?)",
+                ("test.csv", "old_test.csv", "csv")
             )
             upload_id = cursor.lastrowid
             
@@ -1150,8 +1151,8 @@ class TestUploadDataSchema:
         with initialized_db.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO uploads (filename, file_type) VALUES (?, ?)",
-                ("test.csv", "csv")
+                "INSERT INTO uploads (filename, original_filename, file_type) VALUES (?, ?, ?)",
+                ("test.csv", "old_test.csv", "csv")
             )
             upload_id = cursor.lastrowid
             
@@ -1193,8 +1194,8 @@ class TestUploadDataSchema:
         with initialized_db.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO uploads (filename, file_type) VALUES (?, ?)",
-                ("test.csv", "csv")
+                "INSERT INTO uploads (filename, original_filename, file_type) VALUES (?, ?, ?)",
+                ("test.csv", "old_test.csv", "csv")
             )
             upload_id = cursor.lastrowid
             
@@ -1227,9 +1228,9 @@ class TestUploadsUploadDataIntegration:
             # Create upload
             columns = ['date', 'amount', 'description']
             cursor.execute('''
-                INSERT INTO uploads (filename, file_type, row_count, column_count, columns)
-                VALUES (?, ?, ?, ?, ?)
-            ''', ("transactions.csv", "csv", 3, 3, json.dumps(columns)))
+                INSERT INTO uploads (filename, original_filename, file_type, row_count, column_count, columns)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', ("transactions.csv", "old_name.csv", "csv", 3, 3, json.dumps(columns)))
             upload_id = cursor.lastrowid
             
             # Insert data rows
@@ -1250,7 +1251,7 @@ class TestUploadsUploadDataIntegration:
             cursor.execute("SELECT * FROM uploads WHERE id = ?", (upload_id,))
             upload = cursor.fetchone()
             assert upload is not None
-            assert upload[3] == 3  # row_count
+            assert upload[4] == 3  # row_count
             
             # Verify data
             cursor.execute(
@@ -1280,15 +1281,15 @@ class TestUploadsUploadDataIntegration:
             
             # Create first upload
             cursor.execute(
-                "INSERT INTO uploads (filename, file_type, row_count) VALUES (?, ?, ?)",
-                ("file1.csv", "csv", 2)
+                "INSERT INTO uploads (filename, original_filename, file_type) VALUES (?, ?, ?)",
+                ("test_1.csv", "old_test.csv", "csv")
             )
             upload_id_1 = cursor.lastrowid
             
             # Create second upload
             cursor.execute(
-                "INSERT INTO uploads (filename, file_type, row_count) VALUES (?, ?, ?)",
-                ("file2.xlsx", "xlsx", 3)
+                "INSERT INTO uploads (filename, original_filename, file_type) VALUES (?, ?, ?)",
+                ("test_2.csv", "old_test.csv", "csv")
             )
             upload_id_2 = cursor.lastrowid
             
@@ -1337,8 +1338,8 @@ class TestUploadsUploadDataIntegration:
             import json
             
             cursor.execute(
-                "INSERT INTO uploads (filename, file_type, row_count) VALUES (?, ?, ?)",
-                ("large_file.csv", "csv", 1000)
+                "INSERT INTO uploads (filename, original_filename, file_type, row_count) VALUES (?, ?, ?, ?)",
+                ("large_file.csv", "old_name.csv", "csv", 1000)
             )
             upload_id = cursor.lastrowid
             
@@ -1377,8 +1378,8 @@ class TestUploadsUploadDataIntegration:
             import json
             
             cursor.execute(
-                "INSERT INTO uploads (filename, file_type) VALUES (?, ?)",
-                ("test.csv", "csv")
+                "INSERT INTO uploads (filename, original_filename, file_type) VALUES (?, ?, ?)",
+                ("test.csv", "old_test.csv", "csv")
             )
             upload_id = cursor.lastrowid
             
@@ -1411,8 +1412,8 @@ class TestUploadsUploadDataIntegration:
             import json
             
             cursor.execute(
-                "INSERT INTO uploads (filename, file_type) VALUES (?, ?)",
-                ("test.csv", "csv")
+                "INSERT INTO uploads (filename, original_filename, file_type) VALUES (?, ?, ?)",
+                ("test.csv", "old_test.csv", "csv")
             )
             upload_id = cursor.lastrowid
             
@@ -1447,8 +1448,8 @@ class TestUploadsUploadDataIntegration:
             
             for file_type in file_types:
                 cursor.execute(
-                    "INSERT INTO uploads (filename, file_type) VALUES (?, ?)",
-                    (f"test.{file_type}", file_type)
+                    "INSERT INTO uploads (filename, original_filename, file_type) VALUES (?, ?, ?)",
+                    (f"test.{file_type}", f"old.{file_type}", file_type)
                 )
             conn.commit()
             
