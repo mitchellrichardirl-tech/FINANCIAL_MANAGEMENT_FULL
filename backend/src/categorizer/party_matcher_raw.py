@@ -17,29 +17,25 @@ class PartyMatcherRaw(PartyMatcher):
 
     def __init__(
         self,
-        similarity_threshold: int = 70
+        similarity_threshold: int = 70,
+        known_aliases: Optional[dict[str, int]]=None,
+        canonical_parties: Optional[dict[str, int]]=None
     ):
+        self.known_aliases = dict(known_aliases) if known_aliases else {}
+        self.canonical_parties = dict(canonical_parties) if canonical_parties else {}
         super().__init__(db=None, similarity_threshold=similarity_threshold)
 
     def _intialize_database(self, db: Optional[CategoryRepository] = None):
         # Override to skip DB initialization
         return
-    
-    def _load_known_parties(self) -> Dict[str, int]:
-        logger.debug("Initializing empty party mapping (no DB)")
-        self.alias_mapping = {}
 
-        # Pre-build the list once; we'll refresh it when aliases are added
-        self._alias_keys = []
-
-        total_unique = 0
-
-        logger.info(
-            f"Loaded {total_unique} unique parties "
-            f"with {len(self.alias_mapping)} total aliases"
-        )
-
-        return self.alias_mapping
+    def _get_raw_mapping(self) -> Dict[str, int]:
+        all_aliases = dict()
+        if self.known_aliases:
+            all_aliases.update(self.known_aliases)
+        if self.canonical_parties:
+            all_aliases.update(self.canonical_parties)
+        return all_aliases
     
     def _add_unknown_party(self, party_name: str) -> int:
         self.alias_mapping[party_name] = max(list(self.alias_mapping.values()), default=0) + 1
@@ -48,3 +44,10 @@ class PartyMatcherRaw(PartyMatcher):
     
     def _prime_unknown_type_cache(self):
         return
+
+    def _get_new_ids(self, needs_new_party):
+        try:
+            max_pid = max(self.alias_mapping.values())
+        except ValueError:
+            max_pid = 0
+        return {new_party: max_pid + n + 1 for n, new_party in enumerate(needs_new_party)}
