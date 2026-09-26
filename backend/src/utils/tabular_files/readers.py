@@ -121,6 +121,8 @@ class FileReader:
             FileReadError: If reading fails for any reason (missing
                 engine, encoding issues, malformed file, etc.).
         """
+        if isinstance(file_path, str):
+            file_path = Path(file_path)
         logger.debug(
             f"Reading {file_path.name}: type={file_type.value}, "
             f"nrows={nrows}, skiprows={skiprows}, usecols={usecols}"
