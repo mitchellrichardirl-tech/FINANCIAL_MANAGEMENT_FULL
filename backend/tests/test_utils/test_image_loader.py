@@ -114,14 +114,11 @@ class TestImageLoader:
             ImageLoader.load(image_path)
         assert "PIL failed" in str(exc_info.value)
     
-    @patch('pdf2image.convert_from_path')
+    @patch('src.utils.image_loader.pdf2image.convert_from_path')
     def test_load_pdf_single_page(self, mock_convert):
         """Test loading a single-page PDF."""
         # Create mock PIL image
-        print("debugging")
-        mock_pil_image = MagicMock()
-        mock_array = np.zeros((100, 100, 3), dtype=np.uint8)
-        mock_pil_image.__array__ = lambda *args, **kwargs: mock_array
+        mock_pil_image =Image.fromarray(np.zeros((100, 100, 3), dtype=np.uint8))
         mock_convert.return_value = [mock_pil_image]
         
         # Create dummy PDF path
@@ -135,15 +132,14 @@ class TestImageLoader:
         assert images[0].shape == (100, 100, 3)
         mock_convert.assert_called_once_with(pdf_path)
     
-    @patch('pdf2image.convert_from_path')
+    @patch('src.utils.image_loader.pdf2image.convert_from_path')
     def test_load_pdf_multiple_pages(self, mock_convert):
         """Test loading a multi-page PDF."""
         # Create mock PIL images for 3 pages
         mock_images = []
+        
         for i in range(3):
-            mock_pil_image = MagicMock()
-            mock_array = np.zeros((100 + i*10, 100, 3), dtype=np.uint8)
-            mock_pil_image.__array__ = lambda *args, arr=mock_array, **kwargs: arr
+            mock_pil_image =Image.fromarray(np.zeros((100+i*10, 100, 3), dtype=np.uint8))
             mock_images.append(mock_pil_image)
         
         mock_convert.return_value = mock_images
