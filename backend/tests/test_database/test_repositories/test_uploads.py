@@ -52,7 +52,7 @@ class TestCreateUpload:
         mock_cursor.execute.assert_called_once()
         call_args = mock_cursor.execute.call_args
         assert 'INSERT INTO uploads' in call_args[0][0]
-        assert call_args[0][1] == ('test.csv', 'csv', 10, 3, None)
+        assert list(call_args)[0][1] == ('test.csv', 'test.csv', 'csv', 10, 3, None)
     
     def test_create_upload_with_columns(self, repo, mock_db_manager):
         """Test creating upload with column names."""
@@ -70,10 +70,10 @@ class TestCreateUpload:
         )
         
         assert upload_id == 2
-        call_args = mock_cursor.execute.call_args[0][1]
+        call_args = list(mock_cursor.execute.call_args)[0][1]
         assert call_args[0] == 'test.xlsx'
-        assert call_args[1] == 'xlsx'
-        assert call_args[4] == json.dumps(columns)
+        assert call_args[2] == 'xlsx'
+        assert call_args[5] == json.dumps(columns)
     
     def test_create_upload_default_counts(self, repo, mock_db_manager):
         """Test creating upload with default row/column counts."""
@@ -88,8 +88,8 @@ class TestCreateUpload:
         
         assert upload_id == 3
         call_args = mock_cursor.execute.call_args[0][1]
-        assert call_args[2] == 0  # row_count
-        assert call_args[3] == 0  # column_count
+        assert call_args[3] == 0  # row_count
+        assert call_args[4] == 0  # column_count
     
     def test_create_upload_integrity_error(self, repo, mock_db_manager):
         """Test handling of integrity errors."""
