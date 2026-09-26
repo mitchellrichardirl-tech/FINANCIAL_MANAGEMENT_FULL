@@ -1,7 +1,12 @@
 from .party_matcher import PartyMatcher
 from .party_matcher_raw import PartyMatcherRaw
 
-def get_party_matcher(similarity_threshold: int = 70, use_db: bool = True) -> PartyMatcher:
+def get_party_matcher(
+        similarity_threshold: int = 70,
+        use_db: bool = True,
+        known_aliases = None,
+        canonical_parties = None
+        ) -> PartyMatcher:
     """
     Factory for obtaining a PartyMatcher.
 
@@ -15,5 +20,13 @@ def get_party_matcher(similarity_threshold: int = 70, use_db: bool = True) -> Pa
         `PartyMatcher` or `PartyMatcherRaw` depending on `use_db`.
     """
     if use_db:
+        if known_aliases or canonical_parties:
+            raise ValueError(
+                'Known Aliases and Canonical Parties cannot be provided if use_db = True'
+                )
         return PartyMatcher(similarity_threshold=similarity_threshold)
-    return PartyMatcherRaw(similarity_threshold=similarity_threshold)
+    return PartyMatcherRaw(
+        similarity_threshold=similarity_threshold,
+        known_aliases=known_aliases,
+        canonical_parties=canonical_parties
+        )

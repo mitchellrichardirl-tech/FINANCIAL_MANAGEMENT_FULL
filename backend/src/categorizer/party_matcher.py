@@ -72,7 +72,7 @@ class PartyMatcher:
         self.last_match_score: int = 0
         self.new_aliases = 0
         self.new_parties = 0
-        self._load_known_parties()
+        self._load_known_parties(self._get_raw_mapping())
         self.log_freq = 10  # Log every N fuzzy matches
 
         logger.debug(
@@ -89,7 +89,10 @@ class PartyMatcher:
     def _intialize_database(self, db: Optional[CategoryRepository] = None):
         self.db = db if db else CategoryRepository()
 
-    def _load_known_parties(self) -> Dict[str, int]:
+    def _get_raw_mapping(self) -> Dict[str, int]:
+        return self.db.get_all_party_aliases()
+    
+    def _load_known_parties(self, raw_mapping) -> Dict[str, int]:
         """
         Load all known party aliases from the DB into `self.alias_mapping`.
 
@@ -102,7 +105,6 @@ class PartyMatcher:
         `process.extractOne` and `process.cdist`.
         """
         logger.debug("Loading known parties from database")
-        raw_mapping = self.db.get_all_party_aliases()
         self.alias_mapping = {
             self._normalize(alias): pid
             for alias, pid
@@ -268,6 +270,9 @@ class PartyMatcher:
         logger.info(f"Created new party '{party_name}' with id {party_id}")
         return party_id, 100
 
+    def _get_new_ids(self, needs_new_party):
+        return self.db.bulk_add_parties_unknown_type(needs_new_party)
+    
     def find_matches_batch(self, party_names: pd.Series) -> pd.DataFrame:
         """
         Identify parties for a Series of description strings.
@@ -374,7 +379,7 @@ class PartyMatcher:
             # One transaction for all new parties
             if needs_new_party:
                 logger.info(f"Creating {len(needs_new_party)} new parties in one transaction")
-                new_ids = self.db.bulk_add_parties_unknown_type(needs_new_party)
+                new_ids = self._get_new_ids(needs_new_party)
                 for name in needs_new_party:
                     pid = new_ids.get(name)
                     if pid is not None:

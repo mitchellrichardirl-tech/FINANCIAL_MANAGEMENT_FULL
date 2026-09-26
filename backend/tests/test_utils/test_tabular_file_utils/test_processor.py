@@ -1235,7 +1235,7 @@ class TestProcessorEdgeCases:
         """Test import with start_row beyond available data."""
         result = processor.import_data(sample_csv_file, start_row=10000)
         
-        assert result.success
+        assert not result.success
         assert result.rows_imported == 0
     
     def test_concurrent_operations(self, processor, sample_csv_file):

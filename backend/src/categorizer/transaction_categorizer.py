@@ -43,11 +43,23 @@ class TransactionCategorizer:
             DB reads or writes. Useful for tests and offline scripts.
     """
 
-    def __init__(self, similarity_threshold: int = 80, use_db: bool = True):
+    def __init__(
+            self,
+            similarity_threshold: int = 80,
+            use_db: bool = True,
+            known_aliases = None,
+            canonical_parties = None
+            ):
+        if use_db and (known_aliases or canonical_parties):
+            raise ValueError(
+                'Known Aliases and Canonical Parties cannot be provided if use_db = True'
+                )
         self.extractor = PartyExtractor()
         self.matcher = get_party_matcher(
             similarity_threshold=similarity_threshold,
-            use_db=use_db
+            use_db=use_db,
+            known_aliases=known_aliases,
+            canonical_parties=canonical_parties
             )
         logger.info(
             f"Initialized TransactionCategorizer: threshold={similarity_threshold}"

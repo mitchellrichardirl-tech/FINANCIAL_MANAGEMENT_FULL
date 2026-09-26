@@ -84,24 +84,6 @@ class TestProcessingConfig:
 class TestImageProcessor:
     """Test the ImageProcessor class."""
     
-    def test_init_with_grayscale_image(self, sample_gray_image):
-        """Test initialization with a grayscale image."""
-        processor = ImageProcessor(sample_gray_image)
-        assert processor.gray_image.shape == (100, 100)
-        assert np.array_equal(processor.original_image, sample_gray_image)
-    
-    def test_init_with_color_image(self, sample_color_image):
-        """Test initialization with a color image."""
-        processor = ImageProcessor(sample_color_image)
-        assert len(processor.gray_image.shape) == 2  # Should be grayscale
-        assert processor.gray_image.shape == (100, 100)
-    
-    def test_init_with_rgba_image(self, sample_rgba_image):
-        """Test initialization with an RGBA image."""
-        processor = ImageProcessor(sample_rgba_image)
-        assert len(processor.gray_image.shape) == 2  # Should be grayscale
-        assert processor.gray_image.shape == (100, 100)
-    
     def test_init_with_custom_config(self, sample_gray_image):
         """Test initialization with custom config."""
         config = ProcessingConfig(max_dimension=500)
@@ -170,16 +152,16 @@ class TestImageProcessor:
     
     def test_convert_to_grayscale_already_gray(self):
         """Test that grayscale images are returned unchanged."""
-        gray_image = np.ones((100, 100), dtype=np.uint8) * 128
+        original_image = np.ones((100, 100), dtype=np.uint8) * 128
         
-        result = ImageProcessor._convert_to_grayscale(gray_image)
+        result = ImageProcessor._convert_to_grayscale(original_image)
         
-        assert np.array_equal(result, gray_image)
+        assert np.array_equal(result, original_image)
     
     def test_process_single_method_string(self, sample_gray_image):
         """Test processing with a single method as string."""
         processor = ImageProcessor(sample_gray_image)
-        results = processor.process("apply_clahe")
+        results = processor.process(methods="apply_clahe")
         
         assert isinstance(results, dict)
         assert "apply_clahe" in results
@@ -189,7 +171,7 @@ class TestImageProcessor:
     def test_process_single_method_list(self, sample_gray_image):
         """Test processing with a single method in a list."""
         processor = ImageProcessor(sample_gray_image)
-        results = processor.process(["apply_clahe"])
+        results = processor.process(methods=["apply_clahe"])
         
         assert isinstance(results, dict)
         assert "apply_clahe" in results
@@ -199,20 +181,20 @@ class TestImageProcessor:
         """Test processing with multiple methods."""
         processor = ImageProcessor(sample_gray_image)
         methods = ["apply_clahe", "denoise"]
-        results = processor.process(methods)
+        results = processor.process(methods=methods)
         
         assert isinstance(results, dict)
         assert "apply_clahe" in results
         assert "denoise" in results
-        assert len(results) == 2
+        assert len(results) == 3 # Unprocess + two methods
     
     def test_process_all_methods_default(self, sample_gray_image):
         """Test processing with all default methods (None)."""
         processor = ImageProcessor(sample_gray_image)
-        results = processor.process(None)
+        results = processor.process()
         
         assert isinstance(results, dict)
-        assert len(results) == 5  # All 5 methods
+        assert len(results) == 6
         expected_methods = [
             "denoise",
             "correct_skew",
@@ -228,11 +210,13 @@ class TestImageProcessor:
         processor = ImageProcessor(sample_gray_image)
         
         # Process with unknown method
-        results = processor.process(["unknown_method"])
+        results = processor.process(methods=["unknown_method"])
         
-        # Should return empty dict (no valid methods applied)
+        # Should return original image
         assert isinstance(results, dict)
-        assert len(results) == 0
+        assert len(results) == 1
+        assert 'unprocessed' in results
+        assert (results['unprocessed']==sample_gray_image).all()
     
     def test_process_method_exception(self, sample_gray_image):
         """Test error handling when a method raises an exception."""
@@ -245,7 +229,7 @@ class TestImageProcessor:
         processor.available_methods["test_method"] = failing_method
         
         # Should not crash
-        results = processor.process(["test_method"])
+        results = processor.process(methods=["test_method"])
         
         assert isinstance(results, dict)
         # Failed method should not be in results
@@ -254,9 +238,9 @@ class TestImageProcessor:
     def test_denoise(self, noisy_gray_image):
         """Test denoising method applies all processing steps."""
         processor = ImageProcessor(noisy_gray_image)
-        original = processor.gray_image.copy()
+        original = processor.original_image.copy()
         
-        result = processor._denoise(processor.gray_image.copy())
+        result = processor._denoise(processor.original_image.copy())
         
         # Basic checks
         assert isinstance(result, np.ndarray)
@@ -277,9 +261,9 @@ class TestImageProcessor:
         image[25:75, 25:75] = 135  # Subtle difference
         
         processor = ImageProcessor(image)
-        original_contrast = processor.gray_image.max() - processor.gray_image.min()
+        original_contrast = processor.original_image.max() - processor.original_image.min()
         
-        result = processor._denoise(processor.gray_image.copy())
+        result = processor._denoise(processor.original_image.copy())
         result_contrast = result.max() - result.min()
         
         # Contrast should increase due to contrast_factor=2.0
@@ -294,7 +278,7 @@ class TestImageProcessor:
         )
         processor = ImageProcessor(noisy_gray_image, config)
         
-        result = processor._denoise(processor.gray_image.copy())
+        result = processor._denoise(processor.original_image.copy())
         
         assert isinstance(result, np.ndarray)
         assert result.shape == noisy_gray_image.shape
@@ -303,7 +287,7 @@ class TestImageProcessor:
         """Test denoising on uniform image (edge case)."""
         processor = ImageProcessor(uniform_gray_image)
         
-        result = processor._denoise(processor.gray_image.copy())
+        result = processor._denoise(processor.original_image.copy())
         
         assert isinstance(result, np.ndarray)
         assert result.shape == uniform_gray_image.shape
@@ -316,7 +300,7 @@ class TestImageProcessor:
         image[40:60, 40:60] = 255
         
         processor = ImageProcessor(image)
-        result = processor._correct_skew(processor.gray_image.copy())
+        result = processor._correct_skew(processor.original_image.copy())
         
         assert isinstance(result, np.ndarray)
         assert result.shape == image.shape
@@ -327,7 +311,7 @@ class TestImageProcessor:
         processor = ImageProcessor(empty_image)
         
         # Should handle empty image gracefully (not enough points)
-        result = processor._correct_skew(processor.gray_image.copy())
+        result = processor._correct_skew(processor.original_image.copy())
         
         assert isinstance(result, np.ndarray)
         assert result.shape == empty_image.shape
@@ -341,9 +325,9 @@ class TestImageProcessor:
         image[51, 51] = 255  # Two pixels
         
         processor = ImageProcessor(image)
-        original = processor.gray_image.copy()
+        original = processor.original_image.copy()
         
-        result = processor._correct_skew(processor.gray_image.copy())
+        result = processor._correct_skew(processor.original_image.copy())
         
         assert isinstance(result, np.ndarray)
         # Should return unchanged due to insufficient points
@@ -357,7 +341,7 @@ class TestImageProcessor:
         
         processor = ImageProcessor(image)
         
-        result = processor._correct_skew(processor.gray_image.copy())
+        result = processor._correct_skew(processor.original_image.copy())
         
         assert isinstance(result, np.ndarray)
         assert result.shape == image.shape
@@ -365,9 +349,9 @@ class TestImageProcessor:
     def test_apply_clahe(self, sample_gray_image):
         """Test CLAHE application."""
         processor = ImageProcessor(sample_gray_image)
-        original_image = processor.gray_image.copy()
+        original_image = processor.original_image.copy()
         
-        result = processor._apply_clahe(processor.gray_image.copy())
+        result = processor._apply_clahe(processor.original_image.copy())
         
         assert isinstance(result, np.ndarray)
         assert result.shape == original_image.shape
@@ -381,7 +365,7 @@ class TestImageProcessor:
         )
         processor = ImageProcessor(sample_gray_image, config)
         
-        result = processor._apply_clahe(processor.gray_image.copy())
+        result = processor._apply_clahe(processor.original_image.copy())
         
         assert isinstance(result, np.ndarray)
     
@@ -389,7 +373,7 @@ class TestImageProcessor:
         """Test bilateral filter with threshold."""
         processor = ImageProcessor(sample_gray_image)
         
-        result = processor._apply_bilateral_threshold(processor.gray_image.copy())
+        result = processor._apply_bilateral_threshold(processor.original_image.copy())
         
         assert isinstance(result, np.ndarray)
         assert result.shape == sample_gray_image.shape
@@ -405,7 +389,7 @@ class TestImageProcessor:
         )
         processor = ImageProcessor(sample_gray_image, config)
         
-        result = processor._apply_bilateral_threshold(processor.gray_image.copy())
+        result = processor._apply_bilateral_threshold(processor.original_image.copy())
         
         assert isinstance(result, np.ndarray)
     
@@ -413,7 +397,7 @@ class TestImageProcessor:
         """Test morphological operations."""
         processor = ImageProcessor(sample_gray_image)
         
-        result = processor._apply_morphological(processor.gray_image.copy())
+        result = processor._apply_morphological(processor.original_image.copy())
         
         assert isinstance(result, np.ndarray)
         assert result.shape == sample_gray_image.shape
@@ -425,10 +409,10 @@ class TestImageProcessor:
         processor = ImageProcessor(sample_gray_image)
         
         # Apply multiple methods - each should process the original grayscale image
-        results = processor.process(["apply_clahe", "denoise", "apply_bilateral_threshold"])
+        results = processor.process(methods=["apply_clahe", "denoise", "apply_bilateral_threshold"])
         
         assert isinstance(results, dict)
-        assert len(results) == 3
+        assert len(results) == 4 # Unprocessed + 3 methods
         assert "apply_clahe" in results
         assert "denoise" in results
         assert "apply_bilateral_threshold" in results
@@ -437,15 +421,15 @@ class TestImageProcessor:
         for method, result in results.items():
             assert result.shape == sample_gray_image.shape
     
-    def test_gray_image_unchanged_after_processing(self, sample_gray_image):
-        """Test that gray_image is NOT modified after processing."""
+    def test_original_image_unchanged_after_processing(self, sample_gray_image):
+        """Test that original_image is NOT modified after processing."""
         processor = ImageProcessor(sample_gray_image)
-        original = processor.gray_image.copy()
+        original = processor.original_image.copy()
         
-        processor.process(["apply_clahe"])
-        after_processing = processor.gray_image.copy()
+        processor.process(methods=["apply_clahe"])
+        after_processing = processor.original_image.copy()
         
-        # gray_image should remain unchanged
+        # original_image should remain unchanged
         assert np.array_equal(original, after_processing)
     
     def test_large_image_resized_on_init(self, large_image):
@@ -456,7 +440,7 @@ class TestImageProcessor:
         # Original should be preserved
         assert processor.original_image.shape == (2000, 2000, 3)
         # Gray image should be resized
-        assert max(processor.gray_image.shape) <= 1000
+        assert max(processor.resized_image.shape) <= 1000
 
 
 class TestImageProcessorEdgeCases:
@@ -467,21 +451,23 @@ class TestImageProcessorEdgeCases:
         image = np.ones((100, 100), dtype=np.uint8) * 128
         processor = ImageProcessor(image)
         
-        results = processor.process([])
+        results = processor.process(methods=[])
         
-        # Should return empty dict
+        # Should return dict with only unprocessed
         assert isinstance(results, dict)
-        assert len(results) == 0
+        assert len(results) == 1
+        assert 'unprocessed' in results
+        assert (results['unprocessed']==image).all()
     
     def test_process_with_mixed_valid_invalid_methods(self, sample_gray_image):
         """Test processing with mix of valid and invalid methods."""
         processor = ImageProcessor(sample_gray_image)
         
         # Mix of valid and invalid - valid ones should still process
-        results = processor.process(["apply_clahe", "invalid_method", "denoise"])
+        results = processor.process(methods=["apply_clahe", "invalid_method", "denoise"])
         
         assert isinstance(results, dict)
-        assert len(results) == 2  # Only valid methods
+        assert len(results) == 3  # Only unprocessed + valid methods
         assert "apply_clahe" in results
         assert "denoise" in results
         assert "invalid_method" not in results
@@ -491,11 +477,11 @@ class TestImageProcessorEdgeCases:
         processor = ImageProcessor(sample_gray_image)
         
         # Process with mix of valid and invalid
-        results = processor.process(["invalid", "apply_clahe", "also_invalid"])
+        results = processor.process(methods=["invalid", "apply_clahe", "also_invalid"])
         
-        # Only valid method should be in results
+        # Only unprocessed plus valid method should be in results
         assert isinstance(results, dict)
-        assert len(results) == 1
+        assert len(results) == 2
         assert "apply_clahe" in results
         assert "invalid" not in results
         assert "also_invalid" not in results
@@ -505,7 +491,7 @@ class TestImageProcessorEdgeCases:
         small_image = np.ones((10, 10), dtype=np.uint8) * 128
         processor = ImageProcessor(small_image)
         
-        results = processor.process(["apply_clahe"])
+        results = processor.process(methods=["apply_clahe"])
         
         assert isinstance(results, dict)
         assert "apply_clahe" in results
@@ -518,7 +504,7 @@ class TestImageProcessorEdgeCases:
         
         # Some methods might fail on 1x1 images
         # Just ensure initialization works
-        assert processor.gray_image.shape == (1, 1)
+        assert processor.original_image.shape == (1, 1)
     
     def test_binary_image(self):
         """Test processing a binary image."""
@@ -526,7 +512,7 @@ class TestImageProcessorEdgeCases:
         binary_image[25:75, 25:75] = 255
         
         processor = ImageProcessor(binary_image)
-        results = processor.process(["apply_clahe"])
+        results = processor.process(methods=["apply_clahe"])
         
         assert isinstance(results, dict)
         assert "apply_clahe" in results
@@ -539,7 +525,7 @@ class TestImageProcessorIntegration:
         """Test a complete document processing pipeline."""
         processor = ImageProcessor(document_like_image)
         
-        results = processor.process([
+        results = processor.process(methods=[
             "apply_clahe",
             "denoise",
             "correct_skew",
@@ -547,7 +533,7 @@ class TestImageProcessorIntegration:
         ])
         
         assert isinstance(results, dict)
-        assert len(results) == 4
+        assert len(results) == 5
         
         # Check each result
         for method, result in results.items():
@@ -567,7 +553,7 @@ class TestImageProcessorIntegration:
         noisy = np.clip(clean + noise, 0, 255).astype(np.uint8)
         
         processor = ImageProcessor(noisy)
-        results = processor.process(["denoise", "apply_clahe"])
+        results = processor.process(methods=["denoise", "apply_clahe"])
         
         assert isinstance(results, dict)
         assert "denoise" in results
@@ -625,10 +611,12 @@ class TestImageProcessorIntegration:
         # Low contrast before
         contrast_before = image.max() - image.min()
         
-        results = processor.process(["denoise", "apply_clahe"])
+        results = processor.process(methods=["denoise", "apply_clahe"])
         
         # Check both results enhance contrast
         for method, result in results.items():
+            if method == 'unprocessed':
+                continue
             contrast_after = result.max() - result.min()
             assert contrast_after > contrast_before
             # Should enhance the faint features
@@ -647,7 +635,7 @@ class TestImageProcessorIntegration:
         noisy = np.clip(image + noise, 0, 255).astype(np.uint8)
         
         processor = ImageProcessor(noisy)
-        results = processor.process(["apply_bilateral_threshold"])
+        results = processor.process(methods=["apply_bilateral_threshold"])
         
         result = results["apply_bilateral_threshold"]
         

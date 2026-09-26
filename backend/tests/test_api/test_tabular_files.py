@@ -6,7 +6,7 @@ import io
 class TestValidateEndpoint:
     """Tests for POST /api/tabular/validate endpoint."""
     
-    def test_validate_csv_success(self, client, sample_csv_bytes):
+    def test_validate_csv_success(self, client, sample_csv_bytes, unwrap):
         """Test successful CSV validation."""
         response = client.post(
             '/api/tabular/validate',
@@ -15,7 +15,7 @@ class TestValidateEndpoint:
         )
         
         assert response.status_code == 200
-        data = response.get_json()
+        data = unwrap(response)
         
         assert 'is_valid' in data
         assert data['is_valid'] is True
@@ -23,7 +23,7 @@ class TestValidateEndpoint:
         assert data['row_count'] == 5
         assert data['column_count'] == 5
     
-    def test_validate_xlsx_success(self, client, sample_xlsx_bytes):
+    def test_validate_xlsx_success(self, client, sample_xlsx_bytes, unwrap):
         """Test successful XLSX validation."""
         response = client.post(
             '/api/tabular/validate',
@@ -32,14 +32,14 @@ class TestValidateEndpoint:
         )
         
         assert response.status_code == 200
-        data = response.get_json()
+        data = unwrap(response)
         
         assert data['is_valid'] is True
         assert data['file_type'] == 'xlsx'
         assert data['row_count'] == 4
         assert data['column_count'] == 3
     
-    def test_validate_tsv_success(self, client, sample_tsv_bytes):
+    def test_validate_tsv_success(self, client, sample_tsv_bytes, unwrap):
         """Test successful TSV validation."""
         response = client.post(
             '/api/tabular/validate',
@@ -48,12 +48,12 @@ class TestValidateEndpoint:
         )
         
         assert response.status_code == 200
-        data = response.get_json()
+        data = unwrap(response)
         
         assert data['is_valid'] is True
         assert data['file_type'] == 'tsv'
     
-    def test_validate_no_file(self, client):
+    def test_validate_no_file(self, client, unwrap):
         """Test validation without file."""
         response = client.post(
             '/api/tabular/validate',
@@ -62,11 +62,10 @@ class TestValidateEndpoint:
         )
         
         assert response.status_code == 400
-        data = response.get_json()
-        assert 'error' in data
-        assert 'no file' in data['error'].lower()
+        data = unwrap(response)
+        assert 'no file' in data['message'].lower()
     
-    def test_validate_empty_filename(self, client):
+    def test_validate_empty_filename(self, client, unwrap):
         """Test validation with empty filename."""
         response = client.post(
             '/api/tabular/validate',
@@ -75,10 +74,10 @@ class TestValidateEndpoint:
         )
         
         assert response.status_code == 400
-        data = response.get_json()
-        assert 'error' in data
+        data = unwrap(response)
+        assert 'message' in data
     
-    def test_validate_with_min_rows(self, client, sample_csv_bytes):
+    def test_validate_with_min_rows(self, client, sample_csv_bytes, unwrap):
         """Test validation with min_rows parameter."""
         response = client.post(
             '/api/tabular/validate',
@@ -90,10 +89,10 @@ class TestValidateEndpoint:
         )
         
         assert response.status_code == 200
-        data = response.get_json()
+        data = unwrap(response)
         assert data['is_valid'] is True
     
-    def test_validate_min_rows_fail(self, client, sample_csv_bytes):
+    def test_validate_min_rows_fail(self, client, sample_csv_bytes, unwrap):
         """Test validation fails with insufficient rows."""
         response = client.post(
             '/api/tabular/validate',
@@ -105,11 +104,11 @@ class TestValidateEndpoint:
         )
         
         assert response.status_code == 200
-        data = response.get_json()
+        data = unwrap(response)
         assert data['is_valid'] is False
         assert len(data['errors']) > 0
     
-    def test_validate_with_min_columns(self, client, sample_csv_bytes):
+    def test_validate_with_min_columns(self, client, sample_csv_bytes, unwrap):
         """Test validation with min_columns parameter."""
         response = client.post(
             '/api/tabular/validate',
@@ -121,10 +120,10 @@ class TestValidateEndpoint:
         )
         
         assert response.status_code == 200
-        data = response.get_json()
+        data = unwrap(response)
         assert data['is_valid'] is True
     
-    def test_validate_with_required_columns(self, client, sample_csv_bytes):
+    def test_validate_with_required_columns(self, client, sample_csv_bytes, unwrap):
         """Test validation with required columns."""
         response = client.post(
             '/api/tabular/validate',
@@ -136,10 +135,10 @@ class TestValidateEndpoint:
         )
         
         assert response.status_code == 200
-        data = response.get_json()
+        data = unwrap(response)
         assert data['is_valid'] is True
     
-    def test_validate_required_columns_missing(self, client, sample_csv_bytes):
+    def test_validate_required_columns_missing(self, client, sample_csv_bytes, unwrap):
         """Test validation fails with missing required columns."""
         response = client.post(
             '/api/tabular/validate',
@@ -151,11 +150,11 @@ class TestValidateEndpoint:
         )
         
         assert response.status_code == 200
-        data = response.get_json()
+        data = unwrap(response)
         assert data['is_valid'] is False
         assert any('missing' in e.lower() for e in data['errors'])
     
-    def test_validate_excel_sheet_by_name(self, client, multi_sheet_xlsx_bytes):
+    def test_validate_excel_sheet_by_name(self, client, multi_sheet_xlsx_bytes, unwrap):
         """Test validation of specific Excel sheet by name."""
         response = client.post(
             '/api/tabular/validate',
@@ -167,10 +166,10 @@ class TestValidateEndpoint:
         )
         
         assert response.status_code == 200
-        data = response.get_json()
+        data = unwrap(response)
         assert data['is_valid'] is True
     
-    def test_validate_excel_sheet_by_index(self, client, multi_sheet_xlsx_bytes):
+    def test_validate_excel_sheet_by_index(self, client, multi_sheet_xlsx_bytes, unwrap):
         """Test validation of specific Excel sheet by index."""
         response = client.post(
             '/api/tabular/validate',
@@ -182,10 +181,10 @@ class TestValidateEndpoint:
         )
         
         assert response.status_code == 200
-        data = response.get_json()
+        data = unwrap(response)
         assert data['is_valid'] is True
     
-    def test_validate_returns_column_info(self, client, sample_csv_bytes):
+    def test_validate_returns_column_info(self, client, sample_csv_bytes, unwrap):
         """Test that validation returns column information."""
         response = client.post(
             '/api/tabular/validate',
@@ -193,7 +192,7 @@ class TestValidateEndpoint:
             content_type='multipart/form-data'
         )
         
-        data = response.get_json()
+        data = unwrap(response)
         assert 'columns' in data
         assert len(data['columns']) > 0
         
@@ -203,7 +202,7 @@ class TestValidateEndpoint:
         assert 'data_type' in col
         assert 'nullable' in col
     
-    def test_validate_returns_metadata(self, client, sample_csv_bytes):
+    def test_validate_returns_metadata(self, client, sample_csv_bytes, unwrap):
         """Test that validation returns file metadata."""
         response = client.post(
             '/api/tabular/validate',
@@ -211,7 +210,7 @@ class TestValidateEndpoint:
             content_type='multipart/form-data'
         )
         
-        data = response.get_json()
+        data = unwrap(response)
         assert 'file_name' in data
         assert 'file_path' in data
         assert 'file_size_bytes' in data
@@ -222,7 +221,7 @@ class TestValidateEndpoint:
 class TestPreviewEndpoint:
     """Tests for POST /api/tabular/preview endpoint."""
     
-    def test_preview_csv_success(self, client, sample_csv_bytes):
+    def test_preview_csv_success(self, client, sample_csv_bytes, unwrap):
         """Test successful CSV preview."""
         response = client.post(
             '/api/tabular/preview',
@@ -231,7 +230,7 @@ class TestPreviewEndpoint:
         )
         
         assert response.status_code == 200
-        data = response.get_json()
+        data = unwrap(response)
         
         assert 'success' in data
         assert data['success'] is True
@@ -239,7 +238,7 @@ class TestPreviewEndpoint:
         assert 'columns' in data
         assert 'data' in data
     
-    def test_preview_default_num_rows(self, client, sample_csv_bytes):
+    def test_preview_default_num_rows(self, client, sample_csv_bytes, unwrap):
         """Test preview returns default number of rows."""
         response = client.post(
             '/api/tabular/preview',
@@ -247,12 +246,12 @@ class TestPreviewEndpoint:
             content_type='multipart/form-data'
         )
         
-        data = response.get_json()
+        data = unwrap(response)
         # Default is 10 rows, but file only has 5
         assert data['preview_row_count'] <= 10
         assert data['preview_row_count'] == min(data['total_rows'], 10)
     
-    def test_preview_custom_num_rows(self, client, sample_csv_bytes):
+    def test_preview_custom_num_rows(self, client, sample_csv_bytes, unwrap):
         """Test preview with custom number of rows."""
         response = client.post(
             '/api/tabular/preview',
@@ -263,11 +262,11 @@ class TestPreviewEndpoint:
             content_type='multipart/form-data'
         )
         
-        data = response.get_json()
+        data = unwrap(response)
         assert data['preview_row_count'] <= 3
         assert len(data['data']) <= 3
     
-    def test_preview_with_types(self, client, sample_csv_bytes):
+    def test_preview_with_types(self, client, sample_csv_bytes, unwrap):
         """Test preview includes column types."""
         response = client.post(
             '/api/tabular/preview',
@@ -278,11 +277,11 @@ class TestPreviewEndpoint:
             content_type='multipart/form-data'
         )
         
-        data = response.get_json()
+        data = unwrap(response)
         assert 'column_types' in data
         assert len(data['column_types']) > 0
     
-    def test_preview_without_types(self, client, sample_csv_bytes):
+    def test_preview_without_types(self, client, sample_csv_bytes, unwrap):
         """Test preview without column types."""
         response = client.post(
             '/api/tabular/preview',
@@ -293,10 +292,10 @@ class TestPreviewEndpoint:
             content_type='multipart/form-data'
         )
         
-        data = response.get_json()
+        data = unwrap(response)
         assert data['column_types'] == {}
     
-    def test_preview_xlsx_specific_sheet(self, client, multi_sheet_xlsx_bytes):
+    def test_preview_xlsx_specific_sheet(self, client, multi_sheet_xlsx_bytes, unwrap):
         """Test preview of specific Excel sheet."""
         response = client.post(
             '/api/tabular/preview',
@@ -307,7 +306,7 @@ class TestPreviewEndpoint:
             content_type='multipart/form-data'
         )
         
-        data = response.get_json()
+        data = unwrap(response)
         assert data['success'] is True
         assert 'name' in data['columns']
     
@@ -321,7 +320,7 @@ class TestPreviewEndpoint:
         
         assert response.status_code == 400
     
-    def test_preview_data_structure(self, client, sample_csv_bytes):
+    def test_preview_data_structure(self, client, sample_csv_bytes, unwrap):
         """Test preview data has correct structure."""
         response = client.post(
             '/api/tabular/preview',
@@ -329,7 +328,7 @@ class TestPreviewEndpoint:
             content_type='multipart/form-data'
         )
         
-        data = response.get_json()
+        data = unwrap(response)
         assert isinstance(data['data'], list)
         
         if data['data']:
@@ -338,7 +337,7 @@ class TestPreviewEndpoint:
             # Keys should match column names
             assert set(first_record.keys()).issubset(set(data['columns']))
     
-    def test_preview_returns_metadata(self, client, sample_csv_bytes):
+    def test_preview_returns_metadata(self, client, sample_csv_bytes, unwrap):
         """Test preview returns metadata."""
         response = client.post(
             '/api/tabular/preview',
@@ -346,7 +345,7 @@ class TestPreviewEndpoint:
             content_type='multipart/form-data'
         )
         
-        data = response.get_json()
+        data = unwrap(response)
         assert 'file_name' in data
         assert 'file_type' in data
         assert 'total_rows' in data
@@ -357,7 +356,7 @@ class TestPreviewEndpoint:
 class TestImportEndpoint:
     """Tests for POST /api/tabular/import endpoint."""
     
-    def test_import_csv_success(self, client, sample_csv_bytes):
+    def test_import_csv_success(self, client, sample_csv_bytes, unwrap):
         """Test successful CSV import."""
         response = client.post(
             '/api/tabular/import',
@@ -366,7 +365,7 @@ class TestImportEndpoint:
         )
         
         assert response.status_code == 200
-        data = response.get_json()
+        data = unwrap(response)
         
         assert 'success' in data
         assert data['success'] is True
@@ -374,7 +373,7 @@ class TestImportEndpoint:
         assert 'columns_imported' in data
         assert 'data' in data
     
-    def test_import_all_data_by_default(self, client, sample_csv_bytes):
+    def test_import_all_data_by_default(self, client, sample_csv_bytes, unwrap):
         """Test import returns all data by default."""
         response = client.post(
             '/api/tabular/import',
@@ -382,11 +381,11 @@ class TestImportEndpoint:
             content_type='multipart/form-data'
         )
         
-        data = response.get_json()
+        data = unwrap(response)
         assert data['rows_imported'] == 5
         assert len(data['data']) == 5
     
-    def test_import_with_start_row(self, client, sample_csv_bytes):
+    def test_import_with_start_row(self, client, sample_csv_bytes, unwrap):
         """Test import with start_row parameter."""
         response = client.post(
             '/api/tabular/import',
@@ -397,12 +396,12 @@ class TestImportEndpoint:
             content_type='multipart/form-data'
         )
         
-        data = response.get_json()
+        data = unwrap(response)
         assert data['success'] is True
         assert data['start_row'] == 2
         assert data['rows_imported'] < 5
     
-    def test_import_with_columns_by_index(self, client, sample_csv_bytes):
+    def test_import_with_columns_by_index(self, client, sample_csv_bytes, unwrap):
         """Test import with column selection by index."""
         response = client.post(
             '/api/tabular/import',
@@ -413,11 +412,11 @@ class TestImportEndpoint:
             content_type='multipart/form-data'
         )
         
-        data = response.get_json()
+        data = unwrap(response)
         assert len(data['columns_imported']) == 3
         assert data['columns_requested'] == [0, 1, 2]
     
-    def test_import_with_columns_by_name(self, client, sample_csv_bytes):
+    def test_import_with_columns_by_name(self, client, sample_csv_bytes, unwrap):
         """Test import with column selection by name."""
         response = client.post(
             '/api/tabular/import',
@@ -428,11 +427,11 @@ class TestImportEndpoint:
             content_type='multipart/form-data'
         )
         
-        data = response.get_json()
+        data = unwrap(response)
         assert data['success'] is True
         assert len(data['columns_imported']) == 3
     
-    def test_import_with_custom_column_names(self, client, sample_csv_bytes):
+    def test_import_with_custom_column_names(self, client, sample_csv_bytes, unwrap):
         """Test import with custom column names."""
         response = client.post(
             '/api/tabular/import',
@@ -443,12 +442,12 @@ class TestImportEndpoint:
             content_type='multipart/form-data'
         )
         
-        data = response.get_json()
+        data = unwrap(response)
         assert data['success'] is True
         assert 'user_id' in data['columns_imported']
         assert 'column_mapping' in data
     
-    def test_import_without_header(self, client):
+    def test_import_without_header(self, client, unwrap):
         """Test import without header."""
         csv_bytes = b"1,Alice,25\n2,Bob,30\n3,Charlie,35"
         
@@ -461,11 +460,11 @@ class TestImportEndpoint:
             content_type='multipart/form-data'
         )
         
-        data = response.get_json()
+        data = unwrap(response)
         assert data['success'] is True
         assert data['rows_imported'] == 3
     
-    def test_import_with_max_rows(self, client, sample_csv_bytes):
+    def test_import_with_max_rows(self, client, sample_csv_bytes, unwrap):
         """Test import with max_rows limit."""
         response = client.post(
             '/api/tabular/import',
@@ -476,10 +475,10 @@ class TestImportEndpoint:
             content_type='multipart/form-data'
         )
         
-        data = response.get_json()
+        data = unwrap(response)
         assert data['rows_imported'] <= 3
     
-    def test_import_skip_empty_rows(self, client):
+    def test_import_skip_empty_rows(self, client, unwrap):
         """Test import skips empty rows."""
         csv_bytes = b"a,b,c\n1,2,3\n,,\n4,5,6\n,,"
         
@@ -492,11 +491,11 @@ class TestImportEndpoint:
             content_type='multipart/form-data'
         )
         
-        data = response.get_json()
+        data = unwrap(response)
         assert data['success'] is True
         assert data['rows_skipped'] > 0
     
-    def test_import_strip_whitespace(self, client):
+    def test_import_strip_whitespace(self, client, unwrap):
         """Test import strips whitespace."""
         csv_bytes = b"name,code\n  Alice  ,  ABC123  \n  Bob  ,  XYZ789  "
         
@@ -509,11 +508,11 @@ class TestImportEndpoint:
             content_type='multipart/form-data'
         )
         
-        data = response.get_json()
+        data = unwrap(response)
         assert data['success'] is True
         assert data['data'][0]['name'] == 'Alice'
     
-    def test_import_xlsx_specific_sheet(self, client, multi_sheet_xlsx_bytes):
+    def test_import_xlsx_specific_sheet(self, client, multi_sheet_xlsx_bytes, unwrap):
         """Test import from specific Excel sheet."""
         response = client.post(
             '/api/tabular/import',
@@ -524,7 +523,7 @@ class TestImportEndpoint:
             content_type='multipart/form-data'
         )
         
-        data = response.get_json()
+        data = unwrap(response)
         assert data['success'] is True
         assert 'x' in data['columns_imported']
     
@@ -538,7 +537,7 @@ class TestImportEndpoint:
         
         assert response.status_code == 400
     
-    def test_import_combined_options(self, client, sample_csv_bytes):
+    def test_import_combined_options(self, client, sample_csv_bytes, unwrap):
         """Test import with multiple options."""
         response = client.post(
             '/api/tabular/import',
@@ -554,12 +553,12 @@ class TestImportEndpoint:
             content_type='multipart/form-data'
         )
         
-        data = response.get_json()
+        data = unwrap(response)
         assert data['success'] is True
         assert len(data['columns_imported']) == 3
         assert data['rows_imported'] <= 3
     
-    def test_import_returns_metadata(self, client, sample_csv_bytes):
+    def test_import_returns_metadata(self, client, sample_csv_bytes, unwrap):
         """Test import returns metadata."""
         response = client.post(
             '/api/tabular/import',
@@ -567,12 +566,12 @@ class TestImportEndpoint:
             content_type='multipart/form-data'
         )
         
-        data = response.get_json()
+        data = unwrap(response)
         assert 'file_name' in data
         assert 'file_type' in data
         assert 'imported_at' in data
     
-    def test_import_data_is_json_serializable(self, client, sample_csv_bytes):
+    def test_import_data_is_json_serializable(self, client, sample_csv_bytes, unwrap):
         """Test that imported data is JSON serializable."""
         response = client.post(
             '/api/tabular/import',
@@ -582,7 +581,7 @@ class TestImportEndpoint:
         
         # Response should be valid JSON
         assert response.content_type == 'application/json'
-        data = response.get_json()
+        data = unwrap(response)
         
         # Should be able to serialize again
         json_str = json.dumps(data)
@@ -592,7 +591,7 @@ class TestImportEndpoint:
 class TestGetSheetsEndpoint:
     """Tests for POST /api/tabular/sheets endpoint."""
     
-    def test_get_sheets_xlsx(self, client, multi_sheet_xlsx_bytes):
+    def test_get_sheets_xlsx(self, client, multi_sheet_xlsx_bytes, unwrap):
         """Test getting sheets from XLSX file."""
         response = client.post(
             '/api/tabular/sheets',
@@ -601,7 +600,7 @@ class TestGetSheetsEndpoint:
         )
         
         assert response.status_code == 200
-        data = response.get_json()
+        data = unwrap(response)
         
         assert 'sheet_names' in data
         assert 'sheet_count' in data
@@ -610,7 +609,7 @@ class TestGetSheetsEndpoint:
         assert 'Data' in data['sheet_names']
         assert 'People' in data['sheet_names']
     
-    def test_get_sheets_single_sheet(self, client, sample_xlsx_bytes):
+    def test_get_sheets_single_sheet(self, client, sample_xlsx_bytes, unwrap):
         """Test getting sheets from single-sheet file."""
         response = client.post(
             '/api/tabular/sheets',
@@ -618,11 +617,11 @@ class TestGetSheetsEndpoint:
             content_type='multipart/form-data'
         )
         
-        data = response.get_json()
+        data = unwrap(response)
         assert data['sheet_count'] == 1
         assert len(data['sheet_names']) == 1
     
-    def test_get_sheets_csv_file(self, client, sample_csv_bytes):
+    def test_get_sheets_csv_file(self, client, sample_csv_bytes, unwrap):
         """Test getting sheets from non-Excel file."""
         response = client.post(
             '/api/tabular/sheets',
@@ -630,9 +629,9 @@ class TestGetSheetsEndpoint:
             content_type='multipart/form-data'
         )
         
-        data = response.get_json()
-        assert data['sheet_count'] == 0
-        assert data['sheet_names'] == []
+        assert response.status_code == 400
+        data = unwrap(response)
+        assert 'Invalid file type' in data['message']
     
     def test_get_sheets_no_file(self, client):
         """Test sheets endpoint without file."""
@@ -644,7 +643,7 @@ class TestGetSheetsEndpoint:
         
         assert response.status_code == 400
     
-    def test_get_sheets_returns_filename(self, client, sample_xlsx_bytes):
+    def test_get_sheets_returns_filename(self, client, sample_xlsx_bytes, unwrap):
         """Test sheets endpoint returns temp filename."""
         response = client.post(
             '/api/tabular/sheets',
@@ -652,7 +651,7 @@ class TestGetSheetsEndpoint:
             content_type='multipart/form-data'
         )
         
-        data = response.get_json()
+        data = unwrap(response)
         assert 'file_name' in data
         assert '.xlsx' in data['file_name']
 
@@ -660,7 +659,7 @@ class TestGetSheetsEndpoint:
 class TestCheckTabularEndpoint:
     """Tests for POST /api/tabular/check endpoint."""
     
-    def test_check_csv_valid(self, client, sample_csv_bytes):
+    def test_check_csv_valid(self, client, sample_csv_bytes, unwrap):
         """Test checking valid CSV file."""
         response = client.post(
             '/api/tabular/check',
@@ -669,13 +668,13 @@ class TestCheckTabularEndpoint:
         )
         
         assert response.status_code == 200
-        data = response.get_json()
+        data = unwrap(response)
         
         assert 'is_tabular' in data
         assert data['is_tabular'] is True
         assert 'file_name' in data
     
-    def test_check_xlsx_valid(self, client, sample_xlsx_bytes):
+    def test_check_xlsx_valid(self, client, sample_xlsx_bytes, unwrap):
         """Test checking valid XLSX file."""
         response = client.post(
             '/api/tabular/check',
@@ -683,10 +682,10 @@ class TestCheckTabularEndpoint:
             content_type='multipart/form-data'
         )
         
-        data = response.get_json()
+        data = unwrap(response)
         assert data['is_tabular'] is True
     
-    def test_check_invalid_file(self, client):
+    def test_check_invalid_file(self, client, unwrap):
         """Test checking invalid file."""
         invalid_bytes = b"This is not a tabular file"
         
@@ -695,9 +694,10 @@ class TestCheckTabularEndpoint:
             data={'file': (io.BytesIO(invalid_bytes), 'test.txt')},
             content_type='multipart/form-data'
         )
-        
-        data = response.get_json()
-        assert 'is_tabular' in data
+
+        assert response.status_code == 400
+        data = unwrap(response)
+        assert 'Invalid file type' in data['message']
     
     def test_check_no_file(self, client):
         """Test check endpoint without file."""
@@ -709,7 +709,7 @@ class TestCheckTabularEndpoint:
         
         assert response.status_code == 400
     
-    def test_check_returns_filename(self, client, sample_csv_bytes):
+    def test_check_returns_filename(self, client, sample_csv_bytes, unwrap):
         """Test check returns secure filename."""
         response = client.post(
             '/api/tabular/check',
@@ -717,7 +717,7 @@ class TestCheckTabularEndpoint:
             content_type='multipart/form-data'
         )
         
-        data = response.get_json()
+        data = unwrap(response)
         assert 'file_name' in data
         # Should be sanitized
         assert ' ' not in data['file_name'] or '_' in data['file_name']
@@ -726,7 +726,7 @@ class TestCheckTabularEndpoint:
 class TestErrorHandling:
     """Tests for error handling across endpoints."""
     
-    def test_validate_handles_read_error(self, client):
+    def test_validate_handles_read_error(self, client, unwrap):
         """Test validate handles file read errors gracefully."""
         corrupted_bytes = b'\x00\x01\x02\x03\x04'
         
@@ -738,7 +738,7 @@ class TestErrorHandling:
         
         # Should return error response, not crash
         assert response.status_code in [200, 400, 500]
-        data = response.get_json()
+        data = unwrap(response)
         assert 'error' in data or 'is_valid' in data
     
     def test_preview_handles_encoding_error(self, client):
@@ -755,7 +755,7 @@ class TestErrorHandling:
         # Should handle gracefully
         assert response.status_code in [200, 400, 500]
     
-    def test_import_handles_large_file_gracefully(self, client, large_csv_bytes):
+    def test_import_handles_large_file_gracefully(self, client, large_csv_bytes, unwrap):
         """Test import handles larger files."""
         response = client.post(
             '/api/tabular/import',
@@ -767,7 +767,7 @@ class TestErrorHandling:
         )
         
         assert response.status_code == 200
-        data = response.get_json()
+        data = unwrap(response)
         assert data['success'] is True
         assert data['rows_imported'] <= 100
 
@@ -775,7 +775,7 @@ class TestErrorHandling:
 class TestUnicodeHandling:
     """Tests for Unicode content handling."""
     
-    def test_validate_unicode_content(self, client, csv_with_unicode_bytes):
+    def test_validate_unicode_content(self, client, csv_with_unicode_bytes, unwrap):
         """Test validate handles unicode content."""
         response = client.post(
             '/api/tabular/validate',
@@ -784,10 +784,10 @@ class TestUnicodeHandling:
         )
         
         assert response.status_code == 200
-        data = response.get_json()
+        data = unwrap(response)
         assert data['is_valid'] is True
     
-    def test_preview_unicode_content(self, client, csv_with_unicode_bytes):
+    def test_preview_unicode_content(self, client, csv_with_unicode_bytes, unwrap):
         """Test preview handles unicode content."""
         response = client.post(
             '/api/tabular/preview',
@@ -796,14 +796,14 @@ class TestUnicodeHandling:
         )
         
         assert response.status_code == 200
-        data = response.get_json()
+        data = unwrap(response)
         assert data['success'] is True
         
         # Should preserve unicode characters
         json_str = json.dumps(data)
         assert isinstance(json_str, str)
     
-    def test_import_unicode_content(self, client, csv_with_unicode_bytes):
+    def test_import_unicode_content(self, client, csv_with_unicode_bytes, unwrap):
         """Test import handles unicode content."""
         response = client.post(
             '/api/tabular/import',
@@ -812,7 +812,7 @@ class TestUnicodeHandling:
         )
         
         assert response.status_code == 200
-        data = response.get_json()
+        data = unwrap(response)
         assert data['success'] is True
         
         # Data should be JSON serializable with unicode
@@ -823,7 +823,7 @@ class TestUnicodeHandling:
 class TestNullValueHandling:
     """Tests for null/missing value handling."""
     
-    def test_validate_with_nulls(self, client, csv_with_nulls_bytes):
+    def test_validate_with_nulls(self, client, csv_with_nulls_bytes, unwrap):
         """Test validate handles null values."""
         response = client.post(
             '/api/tabular/validate',
@@ -831,10 +831,10 @@ class TestNullValueHandling:
             content_type='multipart/form-data'
         )
         
-        data = response.get_json()
+        data = unwrap(response)
         assert data['is_valid'] is True
     
-    def test_preview_with_nulls(self, client, csv_with_nulls_bytes):
+    def test_preview_with_nulls(self, client, csv_with_nulls_bytes, unwrap):
         """Test preview handles null values."""
         response = client.post(
             '/api/tabular/preview',
@@ -842,7 +842,7 @@ class TestNullValueHandling:
             content_type='multipart/form-data'
         )
         
-        data = response.get_json()
+        data = unwrap(response)
         assert data['success'] is True
         
         # Nulls should be None in JSON
@@ -850,7 +850,7 @@ class TestNullValueHandling:
             has_null = any(v is None for record in data['data'] for v in record.values())
             assert has_null
     
-    def test_import_with_nulls(self, client, csv_with_nulls_bytes):
+    def test_import_with_nulls(self, client, csv_with_nulls_bytes, unwrap):
         """Test import handles null values."""
         response = client.post(
             '/api/tabular/import',
@@ -858,7 +858,7 @@ class TestNullValueHandling:
             content_type='multipart/form-data'
         )
         
-        data = response.get_json()
+        data = unwrap(response)
         assert data['success'] is True
         
         # Should be JSON serializable

@@ -263,7 +263,7 @@ def get_sheets(temp_path: Path, file_info: FileValidationResult):
     result = processor.get_sheet_info(temp_path)
 
     logger.info(
-        f"Found {len(result.sheets)} sheets in {file_info.secured_filename}"
+        f"Found {result.sheet_count} sheets in {file_info.secured_filename}"
     )
     return success_response(result.to_dict())
 

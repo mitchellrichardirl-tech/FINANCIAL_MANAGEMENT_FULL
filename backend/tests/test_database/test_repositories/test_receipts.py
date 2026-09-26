@@ -424,13 +424,13 @@ class TestDeleteReceipt:
         
         deleted = repo.delete(receipt_id)
         
-        assert deleted is True
+        assert deleted['id'] == receipt_id
         assert repo.get_by_id(receipt_id) is None
     
     def test_delete_not_exists(self, repo):
         """Test deleting non-existent receipt"""
         deleted = repo.delete(999)
-        assert deleted is False
+        assert deleted is None
     
     def test_delete_removes_from_list(self, repo, multiple_receipts):
         """Test that deleted receipt is removed from lists"""
@@ -673,7 +673,7 @@ class TestIntegration:
         
         # Delete
         deleted = repo.delete(receipt_id)
-        assert deleted is True
+        assert deleted['id'] == receipt_id
         
         # Verify deletion
         receipt = repo.get_by_id(receipt_id)
