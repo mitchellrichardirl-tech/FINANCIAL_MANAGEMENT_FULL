@@ -1,33 +1,18 @@
-import io
 import json
-import os
-import tempfile
-from datetime import datetime, timedelta
+
+from datetime import datetime
 from io import BytesIO
 from pathlib import Path
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
-from flask import Flask
 
 # Import your app and database
-from src.api.app import create_app
 from src.api.routes.receipts import receipt_extractor, receipt_loader
 from src.api.routes.receipts import receipt_repository as rm
-from src.database import connection as db
-from src.database.connection import ConnectionManager, DatabaseError
-from src.database.connection import init as init_connection
+from src.database.connection import DatabaseError
 from src.models.receipt import Receipt
-
-
-@pytest.fixture
-def client():
-    """Create a test client"""
-    app = create_app()
-    app.config["TESTING"] = True
-    with app.test_client() as client:
-        yield client
 
 
 @pytest.fixture
