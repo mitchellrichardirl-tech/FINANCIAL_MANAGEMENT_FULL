@@ -74,6 +74,8 @@ def success(
         success=True,
         data={
             "receipt_id": receipt_id,
+            "status": "pending",
+            "original_filename": str(receipt.original_filename),
             "extracted_data": {
                 "vendor": receipt.vendor,
                 "amount": receipt.amount,
