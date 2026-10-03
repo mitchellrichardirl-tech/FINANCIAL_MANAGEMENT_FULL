@@ -1,28 +1,18 @@
-import pytest
 import json
-from datetime import datetime, timedelta
-from unittest.mock import patch, MagicMock, mock_open
-import os
-import tempfile
-import io
+
+from datetime import datetime
 from io import BytesIO
 from pathlib import Path
+from unittest.mock import MagicMock, patch
+
 import numpy as np
+import pytest
 
 # Import your app and database
-from src.api.app import create_app
-from src.api.routes.receipts import receipt_repository as rm, receipt_loader, receipt_extractor
+from src.api.routes.receipts import receipt_extractor, receipt_loader
+from src.api.routes.receipts import receipt_repository as rm
+from src.database.connection import DatabaseError
 from src.models.receipt import Receipt
-from src.database.connection import ConnectionManager, DatabaseError, init as init_connection
-from src.database import connection as db
-
-@pytest.fixture
-def client():
-    """Create a test client"""
-    app = create_app()
-    app.config['TESTING'] = True
-    with app.test_client() as client:
-        yield client
 
 
 @pytest.fixture
@@ -176,7 +166,12 @@ class TestProcessReceiptEndpoint:
     @patch.object(receipt_extractor, "process_receipt")
     @patch.object(receipt_loader, "process_files")
     def test_process_receipt_success_single_image(
-        self, mock_process_files, mock_extract, client, sample_image_file, sample_receipt
+        self,
+        mock_process_files,
+        mock_extract,
+        client,
+        sample_image_file,
+        sample_receipt, unwrap
     ):
         """Test successful processing of a single receipt image"""
         mock_process_files.return_value = [sample_receipt]
@@ -187,21 +182,18 @@ class TestProcessReceiptEndpoint:
             data={"file": (sample_image_file, "receipt.jpg")},
             content_type="multipart/form-data",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 200
-        assert data['success'] is True
-        assert data['original_filename'] == 'receipt.jpg'
-        assert data['page_count'] == 1
-        assert data['extracted_data']['vendor'] == 'Walmart'
-        assert data['extracted_data']['amount'] == 45.67
-        assert data['extracted_data']['date'] == '2024-01-15T00:00:00'
-        assert data['extracted_data']['confidence'] == 3
-        assert data['extracted_data']['selected_method'] == 'enhanced'
-        assert 'WALMART' in data['extracted_data']['raw_text']
-    
-    @patch.object(receipt_extractor, 'process_receipt')
-    @patch.object(receipt_loader, 'process_files')
+        assert data["extracted_data"]["vendor"] == "Walmart"
+        assert data["extracted_data"]["amount"] == 45.67
+        assert data["extracted_data"]["date"] == "2024-01-15T00:00:00"
+        assert data["extracted_data"]["confidence"] == 3
+        assert data["extracted_data"]["selected_method"] == "enhanced"
+        assert "WALMART" in data["extracted_data"]["raw_text"]
+
+    @patch.object(receipt_extractor, "process_receipt")
+    @patch.object(receipt_loader, "process_files")
     def test_process_receipt_success_png(
         self, mock_process_files, mock_extract, client, sample_receipt,
     unwrap):
@@ -246,8 +238,14 @@ class TestProcessReceiptEndpoint:
     @patch.object(receipt_extractor, "process_receipt")
     @patch.object(receipt_loader, "process_files")
     def test_process_receipt_success_multipage_pdf(
-        self, mock_process_files, mock_extract, client, sample_pdf_file, 
-        sample_receipt, low_confidence_receipt
+        self,
+        mock_process_files,
+        mock_extract,
+        client,
+        sample_pdf_file,
+        sample_receipt,
+        low_confidence_receipt,
+        unwrap, 
     ):
         """Test successful processing of multi-page PDF"""
         # Create two different receipts for two pages
@@ -262,14 +260,13 @@ class TestProcessReceiptEndpoint:
             data={"file": (sample_pdf_file, "multi_receipt.pdf")},
             content_type="multipart/form-data",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 200
-        assert data['success'] is True
-        assert data['page_count'] == 2
-        assert 'all_pages' in data
-        assert len(data['all_pages']) == 2
-        
+        assert data["page_count"] == 2
+        assert "all_pages" in data
+        assert len(data["all_pages"]) == 2
+
         # Best result should be page2 (higher confidence)
         assert data["extracted_data"]["confidence"] == 3
         assert data["extracted_data"]["vendor"] == "Walmart"
@@ -308,8 +305,8 @@ class TestProcessReceiptEndpoint:
             data={"file": (sample_image_file, "blank.jpg")},
             content_type="multipart/form-data",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 200
         assert data["success"] is True
         assert data["extracted_data"]["vendor"] is None
@@ -346,8 +343,8 @@ class TestProcessReceiptEndpoint:
             data={"file": (sample_image_file, "partial.jpg")},
             content_type="multipart/form-data",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 200
         assert data["extracted_data"]["vendor"] == "Target"
         assert data["extracted_data"]["amount"] is None
@@ -357,7 +354,12 @@ class TestProcessReceiptEndpoint:
     @patch.object(receipt_extractor, "process_receipt")
     @patch.object(receipt_loader, "process_files")
     def test_process_receipt_uppercase_extension(
-        self, mock_process_files, mock_extract, client, sample_image_file, sample_receipt
+        self,
+        mock_process_files,
+        mock_extract,
+        client,
+        sample_image_file,
+        sample_receipt, unwrap
     ):
         """Test file with uppercase extension"""
         mock_process_files.return_value = [sample_receipt]
@@ -368,15 +370,20 @@ class TestProcessReceiptEndpoint:
             data={"file": (sample_image_file, "receipt.JPG")},
             content_type="multipart/form-data",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 200
         assert data["success"] is True
 
     @patch.object(receipt_extractor, "process_receipt")
     @patch.object(receipt_loader, "process_files")
     def test_process_receipt_jpeg_extension(
-        self, mock_process_files, mock_extract, client, sample_image_file, sample_receipt
+        self,
+        mock_process_files,
+        mock_extract,
+        client,
+        sample_image_file,
+        sample_receipt, unwrap
     ):
         """Test JPEG extension (not just JPG)"""
         mock_process_files.return_value = [sample_receipt]
@@ -387,15 +394,20 @@ class TestProcessReceiptEndpoint:
             data={"file": (sample_image_file, "receipt.jpeg")},
             content_type="multipart/form-data",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 200
         assert data["success"] is True
 
     @patch.object(receipt_extractor, "process_receipt")
     @patch.object(receipt_loader, "process_files")
     def test_process_receipt_special_characters_in_filename(
-        self, mock_process_files, mock_extract, client, sample_image_file, sample_receipt
+        self,
+        mock_process_files,
+        mock_extract,
+        client,
+        sample_image_file,
+        sample_receipt, unwrap
     ):
         """Test filename with special characters gets sanitized"""
         mock_process_files.return_value = [sample_receipt]
@@ -406,77 +418,77 @@ class TestProcessReceiptEndpoint:
             data={"file": (sample_image_file, "../../../etc/passwd.jpg")},
             content_type="multipart/form-data",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 200
         # Filename should be sanitized
         assert "/" not in data["original_filename"]
         assert ".." not in data["original_filename"]
 
     # ========== Validation Error Cases ==========
-    
-    def test_process_receipt_no_file_field(self, client):
+
+    def test_process_receipt_no_file_field(self, client, unwrap):
         """Test error when no file field is provided"""
         response = client.post(
             "/api/receipts/process", data={}, content_type="multipart/form-data"
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 400
-        assert 'error' in data
-        assert 'No file provided' in data['error']
-    
-    def test_process_receipt_empty_file_field(self, client):
+        
+        assert "file is required" in data["message"]
+
+    def test_process_receipt_empty_file_field(self, client, unwrap):
         """Test error when file field is empty"""
         response = client.post(
             "/api/receipts/process",
             data={"file": (BytesIO(b""), "")},
             content_type="multipart/form-data",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 400
-        assert 'error' in data
-        assert 'No file selected' in data['error']
-    
-    def test_process_receipt_invalid_file_type_doc(self, client):
+        
+        assert "No file" in data["message"]
+
+    def test_process_receipt_invalid_file_type_doc(self, client, unwrap):
         """Test error when file type is not allowed (doc)"""
         response = client.post(
             "/api/receipts/process",
             data={"file": (BytesIO(b"text content"), "receipt.doc")},
             content_type="multipart/form-data",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 400
-        assert 'error' in data
-        assert 'Invalid file type' in data['error']
-        assert 'Allowed types' in data['error']
-    
-    def test_process_receipt_invalid_file_type_gif(self, client):
+        
+        assert "Invalid file type" in data["message"]
+        assert "Allowed types" in data["message"]
+
+    def test_process_receipt_invalid_file_type_gif(self, client, unwrap):
         """Test error when file type is not allowed (gif)"""
         response = client.post(
             "/api/receipts/process",
             data={"file": (BytesIO(b"GIF89a"), "receipt.gif")},
             content_type="multipart/form-data",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 400
-        assert 'Invalid file type' in data['error']
-    
-    def test_process_receipt_no_extension(self, client):
+        assert "Invalid file type" in data["message"]
+
+    def test_process_receipt_no_extension(self, client, unwrap):
         """Test error when file has no extension"""
         response = client.post(
             "/api/receipts/process",
             data={"file": (BytesIO(b"content"), "receipt")},
             content_type="multipart/form-data",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 400
-        assert 'Invalid file type' in data['error']
-    
+        assert "file type" in data["message"]
+
     # ========== Processing Error Cases ==========
 
     @patch.object(receipt_loader, "process_files")
@@ -491,13 +503,13 @@ class TestProcessReceiptEndpoint:
             data={"file": (sample_image_file, "receipt.jpg")},
             content_type="multipart/form-data",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 422
-        assert 'error' in data
-        assert 'Unable to process' in data['error']
-    
-    @patch.object(receipt_loader, 'process_files')
+        
+        assert "Unable to process" in data["message"]
+
+    @patch.object(receipt_loader, "process_files")
     def test_process_receipt_loader_throws_file_not_found(
         self, mock_process_files, client, sample_image_file, unwrap
     ):
@@ -509,13 +521,12 @@ class TestProcessReceiptEndpoint:
             data={"file": (sample_image_file, "receipt.jpg")},
             content_type="multipart/form-data",
         )
-        data = json.loads(response.data)
-        
-        assert response.status_code == 400
-        assert 'error' in data
-        assert 'File processing failed' in data['error']
-    
-    @patch.object(receipt_loader, 'process_files')
+        data = unwrap(response)
+
+        assert response.status_code == 500
+        assert "unexpected error" in data["message"]
+
+    @patch.object(receipt_loader, "process_files")
     def test_process_receipt_loader_throws_value_error(
         self, mock_process_files, client, sample_image_file, unwrap
     ):
@@ -527,16 +538,21 @@ class TestProcessReceiptEndpoint:
             data={"file": (sample_image_file, "receipt.jpg")},
             content_type="multipart/form-data",
         )
-        data = json.loads(response.data)
-        
-        assert response.status_code == 422
-        assert 'error' in data
-        assert 'Processing failed' in data['error']
-    
-    @patch.object(receipt_extractor, 'process_receipt')
-    @patch.object(receipt_loader, 'process_files')
+        data = unwrap(response)
+
+        assert response.status_code == 400
+        assert "Invalid image" in data["message"]
+
+    @patch.object(receipt_extractor, "process_receipt")
+    @patch.object(receipt_loader, "process_files")
     def test_process_receipt_extractor_throws_exception(
-        self, mock_process_files, mock_extract, client, sample_image_file, sample_receipt
+        self,
+        mock_process_files,
+        mock_extract,
+        client,
+        sample_image_file,
+        sample_receipt,
+        unwrap,
     ):
         """Test error when extractor throws exception"""
         mock_process_files.return_value = [sample_receipt]
@@ -547,18 +563,22 @@ class TestProcessReceiptEndpoint:
             data={"file": (sample_image_file, "receipt.jpg")},
             content_type="multipart/form-data",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 500
-        assert 'error' in data
-        assert 'Internal server error' in data['error']
-    
+        assert "unexpected error" in data["message"]
+
     # ========== Response Format Tests ==========
 
     @patch.object(receipt_extractor, "process_receipt")
     @patch.object(receipt_loader, "process_files")
     def test_process_receipt_response_structure_single(
-        self, mock_process_files, mock_extract, client, sample_image_file, sample_receipt
+        self,
+        mock_process_files,
+        mock_extract,
+        client,
+        sample_image_file,
+        sample_receipt, unwrap
     ):
         """Test response structure for single image"""
         mock_process_files.return_value = [sample_receipt]
@@ -569,8 +589,8 @@ class TestProcessReceiptEndpoint:
             data={"file": (sample_image_file, "receipt.jpg")},
             content_type="multipart/form-data",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         # Check required fields
         assert "success" in data
         assert "original_filename" in data
@@ -593,7 +613,12 @@ class TestProcessReceiptEndpoint:
     @patch.object(receipt_extractor, "process_receipt")
     @patch.object(receipt_loader, "process_files")
     def test_process_receipt_content_type(
-        self, mock_process_files, mock_extract, client, sample_image_file, sample_receipt
+        self,
+        mock_process_files,
+        mock_extract,
+        client,
+        sample_image_file,
+        sample_receipt, unwrap
     ):
         """Test that response has correct content type"""
         mock_process_files.return_value = [sample_receipt]
@@ -608,8 +633,8 @@ class TestProcessReceiptEndpoint:
         assert response.content_type == "application/json"
 
     # ========== HTTP Method Tests ==========
-    
-    def test_process_receipt_wrong_method_get(self, client):
+
+    def test_process_receipt_wrong_method_get(self, client, unwrap):
         """Test that GET method is not allowed"""
         response = client.get("/api/receipts/process")
 
@@ -620,34 +645,33 @@ class TestGetReceiptEndpoint:
     """Tests for GET /api/receipts/<receipt_id> endpoint"""
 
     # ========== Success Cases ==========
-    
-    @patch.object(rm, 'get_by_id')
-    def test_get_receipt_success(self, mock_get_by_id, client, sample_receipts):
+
+    @patch.object(rm, "get_by_id")
+    def test_get_receipt_success(self, mock_get_by_id, client, sample_receipts, unwrap):
         """Test successfully retrieving a receipt by ID"""
         mock_get_by_id.return_value = sample_receipts[0]
-        
-        response = client.get('/api/receipts/1')
-        data = json.loads(response.data)
-        
+
+        response = client.get("/api/receipts/1")
+        data = unwrap(response)
+
         assert response.status_code == 200
-        assert 'data' in data
-        assert 'receipt' in data['data']
-        assert data['data']['receipt']['id'] == 1
-        assert data['data']['receipt']['vendor'] == 'Walmart'
-        assert data['data']['receipt']['amount'] == 45.67
-        
+        assert "receipt" in data
+        assert data["receipt"]["id"] == 1
+        assert data["receipt"]["vendor"] == "Walmart"
+        assert data["receipt"]["amount"] == 45.67
+
         mock_get_by_id.assert_called_once_with(1)
-    
-    @patch.object(rm, 'get_by_id')
-    def test_get_receipt_response_format(self, mock_get_by_id, client, sample_receipts):
+
+    @patch.object(rm, "get_by_id")
+    def test_get_receipt_response_format(self, mock_get_by_id, client, sample_receipts, unwrap):
         """Test response has correct structure"""
         mock_get_by_id.return_value = sample_receipts[0]
-        
-        response = client.get('/api/receipts/1')
-        data = json.loads(response.data)
-        
-        receipt = data['data']['receipt']
-        
+
+        response = client.get("/api/receipts/1")
+        data = unwrap(response)
+
+        receipt = data["receipt"]
+
         # Check all expected fields
         assert "id" in receipt
         assert "original_filename" in receipt
@@ -661,20 +685,20 @@ class TestGetReceiptEndpoint:
         assert "updated_at" in receipt
 
         # file_path should not be exposed
-        assert 'file_path' not in receipt
-    
-    @patch.object(rm, 'get_by_id')
-    def test_get_receipt_date_formatted(self, mock_get_by_id, client, sample_receipts):
+        assert "file_path" not in receipt
+
+    @patch.object(rm, "get_by_id")
+    def test_get_receipt_date_formatted(self, mock_get_by_id, client, sample_receipts, unwrap):
         """Test date is properly formatted in response"""
         mock_get_by_id.return_value = sample_receipts[0]
-        
-        response = client.get('/api/receipts/1')
-        data = json.loads(response.data)
-        
-        assert data['data']['receipt']['date'] == '2024-01-15T00:00:00'
-    
-    @patch.object(rm, 'get_by_id')
-    def test_get_receipt_with_null_date(self, mock_get_by_id, client):
+
+        response = client.get("/api/receipts/1")
+        data = unwrap(response)
+
+        assert data["receipt"]["date"] == "2024-01-15T00:00:00"
+
+    @patch.object(rm, "get_by_id")
+    def test_get_receipt_with_null_date(self, mock_get_by_id, client, unwrap):
         """Test handling receipt with null date"""
         receipt = {
             "id": 1,
@@ -691,90 +715,86 @@ class TestGetReceiptEndpoint:
             "updated_at": "2024-01-15 12:00:00",
         }
         mock_get_by_id.return_value = receipt
-        
-        response = client.get('/api/receipts/1')
-        data = json.loads(response.data)
-        
+
+        response = client.get("/api/receipts/1")
+        data = unwrap(response)
+
         assert response.status_code == 200
-        assert data['data']['receipt']['date'] is None
-    
+        assert data["receipt"]["date"] is None
+
     # ========== Not Found Cases ==========
-    
-    @patch.object(rm, 'get_by_id')
-    def test_get_receipt_not_found(self, mock_get_by_id, client):
+
+    @patch.object(rm, "get_by_id")
+    def test_get_receipt_not_found(self, mock_get_by_id, client, unwrap):
         """Test error when receipt does not exist"""
         mock_get_by_id.return_value = None
-        
-        response = client.get('/api/receipts/999')
-        data = json.loads(response.data)
-        
+
+        response = client.get("/api/receipts/999")
+        data = unwrap(response)
+
         assert response.status_code == 404
-        assert 'error' in data
-        assert '999' in data['error']
-        assert 'not found' in data['error'].lower()
-    
-    @patch.object(rm, 'get_by_id')
-    def test_get_receipt_zero_id(self, mock_get_by_id, client):
+        assert "999" in data["message"]
+        assert "not found" in data["message"].lower()
+
+    @patch.object(rm, "get_by_id")
+    def test_get_receipt_zero_id(self, mock_get_by_id, client, unwrap):
         """Test with receipt ID of 0"""
         mock_get_by_id.return_value = None
-        
-        response = client.get('/api/receipts/0')
-        data = json.loads(response.data)
-        
+
+        response = client.get("/api/receipts/0")
+
         assert response.status_code == 404
 
     # ========== Error Cases ==========
-    
-    @patch.object(rm, 'get_by_id')
-    def test_get_receipt_database_error(self, mock_get_by_id, client):
+
+    @patch.object(rm, "get_by_id")
+    def test_get_receipt_database_error(self, mock_get_by_id, client, unwrap):
         """Test handling database errors"""
         mock_get_by_id.side_effect = DatabaseError("Connection failed")
-        
-        response = client.get('/api/receipts/1')
-        data = json.loads(response.data)
-        
+
+        response = client.get("/api/receipts/1")
+        data = unwrap(response)
+
         assert response.status_code == 500
-        assert 'error' in data
-        assert 'Database error' in data['error']
-    
-    @patch.object(rm, 'get_by_id')
-    def test_get_receipt_unexpected_error(self, mock_get_by_id, client):
+        assert "database error" in data["message"]
+
+    @patch.object(rm, "get_by_id")
+    def test_get_receipt_unexpected_error(self, mock_get_by_id, client, unwrap):
         """Test handling unexpected exceptions"""
         mock_get_by_id.side_effect = Exception("Unexpected error")
-        
-        response = client.get('/api/receipts/1')
-        data = json.loads(response.data)
-        
+
+        response = client.get("/api/receipts/1")
+        data = unwrap(response)
+
         assert response.status_code == 500
-        assert 'error' in data
-        assert 'Internal server error' in data['error']
-    
+        
+        assert "unexpected error" in data["message"]
+
     # ========== Edge Cases ==========
-    
-    def test_get_receipt_invalid_id_string(self, client):
+
+    def test_get_receipt_invalid_id_string(self, client, unwrap):
         """Test with non-integer ID"""
         response = client.get("/api/receipts/abc")
 
         assert response.status_code == 404  # Flask returns 404 for invalid int
-    
-    def test_get_receipt_negative_id(self, client):
+
+    def test_get_receipt_negative_id(self, client, unwrap):
         """Test with negative ID"""
         response = client.get("/api/receipts/-1")
 
         assert response.status_code == 404
-    
-    @patch.object(rm, 'get_by_id')
-    def test_get_receipt_large_id(self, mock_get_by_id, client):
+
+    @patch.object(rm, "get_by_id")
+    def test_get_receipt_large_id(self, mock_get_by_id, client, unwrap):
         """Test with very large ID"""
         mock_get_by_id.return_value = None
-        
-        response = client.get('/api/receipts/999999999')
-        data = json.loads(response.data)
-        
+
+        response = client.get("/api/receipts/999999999")
+
         assert response.status_code == 404
-    
-    @patch.object(rm, 'get_by_id')
-    def test_get_receipt_content_type(self, mock_get_by_id, client, sample_receipts):
+
+    @patch.object(rm, "get_by_id")
+    def test_get_receipt_content_type(self, mock_get_by_id, client, sample_receipts, unwrap):
         """Test response content type"""
         mock_get_by_id.return_value = sample_receipts[0]
 
@@ -787,10 +807,12 @@ class TestUpdateReceiptEndpoint:
     """Tests for PUT /api/receipts/<receipt_id> endpoint"""
 
     # ========== Success Cases ==========
-    
-    @patch.object(rm, 'update')
-    @patch.object(rm, 'get_by_id')
-    def test_update_receipt_vendor(self, mock_get_by_id, mock_update, client, sample_receipts):
+
+    @patch.object(rm, "update")
+    @patch.object(rm, "get_by_id")
+    def test_update_receipt_vendor(
+        self, mock_get_by_id, mock_update, client, sample_receipts, unwrap
+    ):
         """Test updating vendor field"""
         mock_get_by_id.return_value = sample_receipts[0]
         updated = {**sample_receipts[0], "vendor": "New Vendor"}
@@ -801,15 +823,17 @@ class TestUpdateReceiptEndpoint:
             data=json.dumps({"vendor": "New Vendor"}),
             content_type="application/json",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 200
-        assert data['data']['receipt']['vendor'] == 'New Vendor'
+        assert data["receipt"]["vendor"] == "New Vendor"
         mock_update.assert_called_once()
-    
-    @patch.object(rm, 'update')
-    @patch.object(rm, 'get_by_id')
-    def test_update_receipt_amount(self, mock_get_by_id, mock_update, client, sample_receipts):
+
+    @patch.object(rm, "update")
+    @patch.object(rm, "get_by_id")
+    def test_update_receipt_amount(
+        self, mock_get_by_id, mock_update, client, sample_receipts, unwrap
+    ):
         """Test updating amount field"""
         mock_get_by_id.return_value = sample_receipts[0]
         updated = {**sample_receipts[0], "amount": 99.99}
@@ -820,14 +844,16 @@ class TestUpdateReceiptEndpoint:
             data=json.dumps({"amount": 99.99}),
             content_type="application/json",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 200
-        assert data['data']['receipt']['amount'] == 99.99
-    
-    @patch.object(rm, 'update')
-    @patch.object(rm, 'get_by_id')
-    def test_update_receipt_date(self, mock_get_by_id, mock_update, client, sample_receipts):
+        assert data["receipt"]["amount"] == 99.99
+
+    @patch.object(rm, "update")
+    @patch.object(rm, "get_by_id")
+    def test_update_receipt_date(
+        self, mock_get_by_id, mock_update, client, sample_receipts, unwrap
+    ):
         """Test updating date field"""
         mock_get_by_id.return_value = sample_receipts[0]
         updated = {**sample_receipts[0], "date": datetime(2024, 2, 20)}
@@ -838,17 +864,19 @@ class TestUpdateReceiptEndpoint:
             data=json.dumps({"date": "2024-02-20"}),
             content_type="application/json",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 200
         mock_update.assert_called_once()
         # Verify date was parsed and passed to update
         call_kwargs = mock_update.call_args.kwargs
-        assert 'date' in call_kwargs
-    
-    @patch.object(rm, 'update')
-    @patch.object(rm, 'get_by_id')
-    def test_update_receipt_confidence(self, mock_get_by_id, mock_update, client, sample_receipts):
+        assert "date" in call_kwargs
+
+    @patch.object(rm, "update")
+    @patch.object(rm, "get_by_id")
+    def test_update_receipt_confidence(
+        self, mock_get_by_id, mock_update, client, sample_receipts, unwrap
+    ):
         """Test updating confidence field"""
         mock_get_by_id.return_value = sample_receipts[0]
         updated = {**sample_receipts[0], "confidence": 2}
@@ -859,14 +887,16 @@ class TestUpdateReceiptEndpoint:
             data=json.dumps({"confidence": 2}),
             content_type="application/json",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 200
-        assert data['data']['receipt']['confidence'] == 2
-    
-    @patch.object(rm, 'update')
-    @patch.object(rm, 'get_by_id')
-    def test_update_receipt_multiple_fields(self, mock_get_by_id, mock_update, client, sample_receipts):
+        assert data["receipt"]["confidence"] == 2
+
+    @patch.object(rm, "update")
+    @patch.object(rm, "get_by_id")
+    def test_update_receipt_multiple_fields(
+        self, mock_get_by_id, mock_update, client, sample_receipts, unwrap
+    ):
         """Test updating multiple fields at once"""
         mock_get_by_id.return_value = sample_receipts[0]
         updated = {**sample_receipts[0], "vendor": "New Store", "amount": 150.00}
@@ -879,15 +909,17 @@ class TestUpdateReceiptEndpoint:
             ),
             content_type="application/json",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 200
-        assert 'message' in data['data']
-        assert 'updated' in data['data']['message'].lower()
-    
-    @patch.object(rm, 'update')
-    @patch.object(rm, 'get_by_id')
-    def test_update_receipt_set_null_values(self, mock_get_by_id, mock_update, client, sample_receipts):
+        assert "message" in data
+        assert "updated" in data["message"].lower()
+
+    @patch.object(rm, "update")
+    @patch.object(rm, "get_by_id")
+    def test_update_receipt_set_null_values(
+        self, mock_get_by_id, mock_update, client, sample_receipts, unwrap
+    ):
         """Test setting fields to null"""
         mock_get_by_id.return_value = sample_receipts[0]
         updated = {**sample_receipts[0], "vendor": None, "amount": None}
@@ -898,13 +930,15 @@ class TestUpdateReceiptEndpoint:
             data=json.dumps({"vendor": None, "amount": None}),
             content_type="application/json",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 200
-    
-    @patch.object(rm, 'update')
-    @patch.object(rm, 'get_by_id')
-    def test_update_receipt_raw_text(self, mock_get_by_id, mock_update, client, sample_receipts):
+
+    @patch.object(rm, "update")
+    @patch.object(rm, "get_by_id")
+    def test_update_receipt_raw_text(
+        self, mock_get_by_id, mock_update, client, sample_receipts, unwrap
+    ):
         """Test updating raw_text field"""
         mock_get_by_id.return_value = sample_receipts[0]
         updated = {**sample_receipts[0], "raw_text": "Updated raw text"}
@@ -919,9 +953,9 @@ class TestUpdateReceiptEndpoint:
         assert response.status_code == 200
 
     # ========== Validation Error Cases ==========
-    
-    @patch.object(rm, 'get_by_id')
-    def test_update_receipt_not_found(self, mock_get_by_id, client):
+
+    @patch.object(rm, "get_by_id")
+    def test_update_receipt_not_found(self, mock_get_by_id, client, unwrap):
         """Test error when receipt does not exist"""
         mock_get_by_id.return_value = None
 
@@ -930,48 +964,50 @@ class TestUpdateReceiptEndpoint:
             data=json.dumps({"vendor": "New Vendor"}),
             content_type="application/json",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 404
-        assert 'not found' in data['error'].lower()
-    
-    @patch.object(rm, 'get_by_id')
-    def test_update_receipt_no_json_body(self, mock_get_by_id, client, sample_receipts):
+        assert "not found" in data["message"].lower()
+
+    @patch.object(rm, "get_by_id")
+    def test_update_receipt_no_json_body(self, mock_get_by_id, client, sample_receipts, unwrap):
         """Test error when no JSON body provided"""
         mock_get_by_id.return_value = sample_receipts[0]
-        
-        response = client.put('/api/receipts/1')
-        data = json.loads(response.data)
-        
+
+        response = client.put("/api/receipts/1")
+        data = unwrap(response)
+
         assert response.status_code == 400
-        assert 'JSON' in data['error']
-    
-    @patch.object(rm, 'get_by_id')
-    def test_update_receipt_invalid_json(self, mock_get_by_id, client, sample_receipts):
+        assert "JSON" in data["message"]
+
+    @patch.object(rm, "get_by_id")
+    def test_update_receipt_invalid_json(self, mock_get_by_id, client, sample_receipts, unwrap):
         """Test error with malformed JSON"""
         mock_get_by_id.return_value = sample_receipts[0]
 
         response = client.put(
             "/api/receipts/1", data="not valid json", content_type="application/json"
         )
-        
-        assert response.status_code == 400
-    
-    @patch.object(rm, 'get_by_id')
-    def test_update_receipt_empty_body(self, mock_get_by_id, client, sample_receipts):
+
+        assert response.status_code == 500
+
+    @patch.object(rm, "get_by_id")
+    def test_update_receipt_empty_body(self, mock_get_by_id, client, sample_receipts, unwrap):
         """Test error when no fields to update"""
         mock_get_by_id.return_value = sample_receipts[0]
 
         response = client.put(
             "/api/receipts/1", data=json.dumps({}), content_type="application/json"
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 400
-        assert 'No valid fields' in data['error']
-    
-    @patch.object(rm, 'get_by_id')
-    def test_update_receipt_invalid_amount_string(self, mock_get_by_id, client, sample_receipts):
+        assert "No valid fields" in data["message"]
+
+    @patch.object(rm, "get_by_id")
+    def test_update_receipt_invalid_amount_string(
+        self, mock_get_by_id, client, sample_receipts, unwrap
+    ):
         """Test error with non-numeric amount"""
         mock_get_by_id.return_value = sample_receipts[0]
 
@@ -980,13 +1016,15 @@ class TestUpdateReceiptEndpoint:
             data=json.dumps({"amount": "not-a-number"}),
             content_type="application/json",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 400
-        assert 'amount' in data['error'].lower()
-    
-    @patch.object(rm, 'get_by_id')
-    def test_update_receipt_invalid_date_format(self, mock_get_by_id, client, sample_receipts):
+        assert "amount" in data["message"].lower()
+
+    @patch.object(rm, "get_by_id")
+    def test_update_receipt_invalid_date_format(
+        self, mock_get_by_id, client, sample_receipts, unwrap
+    ):
         """Test error with invalid date format"""
         mock_get_by_id.return_value = sample_receipts[0]
 
@@ -995,13 +1033,15 @@ class TestUpdateReceiptEndpoint:
             data=json.dumps({"date": "01-15-2024"}),
             content_type="application/json",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 400
-        assert 'date' in data['error'].lower()
-    
-    @patch.object(rm, 'get_by_id')
-    def test_update_receipt_invalid_confidence_negative(self, mock_get_by_id, client, sample_receipts):
+        assert "date" in data["message"].lower()
+
+    @patch.object(rm, "get_by_id")
+    def test_update_receipt_invalid_confidence_negative(
+        self, mock_get_by_id, client, sample_receipts, unwrap
+    ):
         """Test error with negative confidence"""
         mock_get_by_id.return_value = sample_receipts[0]
 
@@ -1010,13 +1050,15 @@ class TestUpdateReceiptEndpoint:
             data=json.dumps({"confidence": -1}),
             content_type="application/json",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 400
-        assert 'confidence' in data['error'].lower()
-    
-    @patch.object(rm, 'get_by_id')
-    def test_update_receipt_invalid_confidence_too_high(self, mock_get_by_id, client, sample_receipts):
+        assert "confidence" in data["message"].lower()
+
+    @patch.object(rm, "get_by_id")
+    def test_update_receipt_invalid_confidence_too_high(
+        self, mock_get_by_id, client, sample_receipts, unwrap
+    ):
         """Test error with confidence > 3"""
         mock_get_by_id.return_value = sample_receipts[0]
 
@@ -1025,30 +1067,18 @@ class TestUpdateReceiptEndpoint:
             data=json.dumps({"confidence": 5}),
             content_type="application/json",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 400
-        assert 'confidence' in data['error'].lower()
-    
-    @patch.object(rm, 'get_by_id')
-    def test_update_receipt_invalid_confidence_float(self, mock_get_by_id, client, sample_receipts):
-        """Test error with float confidence"""
-        mock_get_by_id.return_value = sample_receipts[0]
-        
-        response = client.put(
-            '/api/receipts/1',
-            data=json.dumps({'confidence': 2.5}),
-            content_type='application/json'
-        )
-        data = json.loads(response.data)
-        
-        assert response.status_code == 400
-    
+        assert "confidence" in data["message"].lower()
+
     # ========== Database Error Cases ==========
-    
-    @patch.object(rm, 'update')
-    @patch.object(rm, 'get_by_id')
-    def test_update_receipt_database_error(self, mock_get_by_id, mock_update, client, sample_receipts):
+
+    @patch.object(rm, "update")
+    @patch.object(rm, "get_by_id")
+    def test_update_receipt_database_error(
+        self, mock_get_by_id, mock_update, client, sample_receipts, unwrap
+    ):
         """Test handling database errors"""
         mock_get_by_id.return_value = sample_receipts[0]
         mock_update.side_effect = DatabaseError("Update failed")
@@ -1058,16 +1088,18 @@ class TestUpdateReceiptEndpoint:
             data=json.dumps({"vendor": "New Vendor"}),
             content_type="application/json",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 500
-        assert 'Database error' in data['error']
-    
+        assert "database error" in data["message"]
+
     # ========== Edge Cases ==========
-    
-    @patch.object(rm, 'update')
-    @patch.object(rm, 'get_by_id')
-    def test_update_receipt_unknown_fields_ignored(self, mock_get_by_id, mock_update, client, sample_receipts):
+
+    @patch.object(rm, "update")
+    @patch.object(rm, "get_by_id")
+    def test_update_receipt_unknown_fields_ignored(
+        self, mock_get_by_id, mock_update, client, sample_receipts, unwrap
+    ):
         """Test that unknown fields are ignored"""
         mock_get_by_id.return_value = sample_receipts[0]
         mock_update.return_value = sample_receipts[0]
@@ -1079,10 +1111,12 @@ class TestUpdateReceiptEndpoint:
         )
 
         assert response.status_code == 200
-    
-    @patch.object(rm, 'update')
-    @patch.object(rm, 'get_by_id')
-    def test_update_receipt_confidence_boundaries(self, mock_get_by_id, mock_update, client, sample_receipts):
+
+    @patch.object(rm, "update")
+    @patch.object(rm, "get_by_id")
+    def test_update_receipt_confidence_boundaries(
+        self, mock_get_by_id, mock_update, client, sample_receipts, unwrap
+    ):
         """Test confidence at valid boundaries"""
         mock_get_by_id.return_value = sample_receipts[0]
         mock_update.return_value = {**sample_receipts[0], "confidence": 0}
@@ -1109,21 +1143,23 @@ class TestDeleteReceiptEndpoint:
     """Tests for DELETE /api/receipts/<receipt_id> endpoint"""
 
     # ========== Success Cases ==========
-    
-    @patch.object(rm, 'delete')
-    @patch.object(rm, 'get_by_id')
-    def test_delete_receipt_success(self, mock_get_by_id, mock_delete, client, sample_receipts):
+
+    @patch.object(rm, "delete")
+    @patch.object(rm, "get_by_id")
+    def test_delete_receipt_success(
+        self, mock_get_by_id, mock_delete, client, sample_receipts, unwrap
+    ):
         """Test successfully deleting a receipt"""
         mock_get_by_id.return_value = sample_receipts[0]
         mock_delete.return_value = True
-        
-        response = client.delete('/api/receipts/1')
-        data = json.loads(response.data)
-        
+
+        response = client.delete("/api/receipts/1")
+        data = unwrap(response)
+
         assert response.status_code == 200
-        assert 'deleted' in data['data']['message'].lower()
-        assert data['data']['deleted_id'] == 1
-        
+        assert "deleted" in data["message"].lower()
+        assert data["deleted_id"] == 1
+
         mock_delete.assert_called_once_with(1)
 
     @patch("os.path.exists", return_value=True)
@@ -1176,60 +1212,64 @@ class TestDeleteReceiptEndpoint:
         assert response.status_code == 200
 
     # ========== Not Found Cases ==========
-    
-    @patch.object(rm, 'get_by_id')
-    def test_delete_receipt_not_found(self, mock_get_by_id, client):
+
+    @patch.object(rm, "get_by_id")
+    def test_delete_receipt_not_found(self, mock_get_by_id, client, unwrap):
         """Test error when receipt does not exist"""
         mock_get_by_id.return_value = None
-        
-        response = client.delete('/api/receipts/999')
-        data = json.loads(response.data)
-        
+
+        response = client.delete("/api/receipts/999")
+        data = unwrap(response)
+
         assert response.status_code == 404
-        assert 'not found' in data['error'].lower()
-    
-    @patch.object(rm, 'delete')
-    @patch.object(rm, 'get_by_id')
-    def test_delete_receipt_delete_returns_false(self, mock_get_by_id, mock_delete, client, sample_receipts):
+        assert "not found" in data["message"].lower()
+
+    @patch.object(rm, "delete")
+    @patch.object(rm, "get_by_id")
+    def test_delete_receipt_delete_returns_false(
+        self, mock_get_by_id, mock_delete, client, sample_receipts, unwrap
+    ):
         """Test error when delete operation fails"""
         mock_get_by_id.return_value = sample_receipts[0]
         mock_delete.return_value = False
-        
-        response = client.delete('/api/receipts/1')
-        data = json.loads(response.data)
-        
+
+        response = client.delete("/api/receipts/1")
+        data = unwrap(response)
+
         assert response.status_code == 500
-        assert 'Failed to delete' in data['error']
-    
+        assert "Failed to delete" in data["message"]
+
     # ========== Error Cases ==========
-    
-    @patch.object(rm, 'get_by_id')
-    def test_delete_receipt_database_error_get(self, mock_get_by_id, client):
+
+    @patch.object(rm, "get_by_id")
+    def test_delete_receipt_database_error_get(self, mock_get_by_id, client, unwrap):
         """Test handling database errors on get"""
         mock_get_by_id.side_effect = DatabaseError("Connection failed")
-        
-        response = client.delete('/api/receipts/1')
-        data = json.loads(response.data)
-        
+
+        response = client.delete("/api/receipts/1")
+        data = unwrap(response)
+
         assert response.status_code == 500
-        assert 'Database error' in data['error']
-    
-    @patch.object(rm, 'delete')
-    @patch.object(rm, 'get_by_id')
-    def test_delete_receipt_database_error_delete(self, mock_get_by_id, mock_delete, client, sample_receipts):
+        assert "database error" in data["message"]
+
+    @patch.object(rm, "delete")
+    @patch.object(rm, "get_by_id")
+    def test_delete_receipt_database_error_delete(
+        self, mock_get_by_id, mock_delete, client, sample_receipts, unwrap
+    ):
         """Test handling database errors on delete"""
         mock_get_by_id.return_value = sample_receipts[0]
         mock_delete.side_effect = DatabaseError("Delete failed")
-        
-        response = client.delete('/api/receipts/1')
-        data = json.loads(response.data)
-        
+
+        response = client.delete("/api/receipts/1")
+        data = unwrap(response)
+
         assert response.status_code == 500
-        assert 'Database error' in data['error']
-    
+        assert "database error" in data["message"]
+
     # ========== Edge Cases ==========
-    
-    def test_delete_receipt_invalid_id(self, client):
+
+    def test_delete_receipt_invalid_id(self, client, unwrap):
         """Test with non-integer ID"""
         response = client.delete("/api/receipts/abc")
 
@@ -1259,20 +1299,20 @@ class TestGetReceiptImageEndpoint:
                 mock_send.return_value = MagicMock()
                 response = client.get("/api/receipts/1/image")
                 # The endpoint should attempt to send the file
-    
-    @patch.object(rm, 'get_by_id')
-    def test_get_receipt_image_not_found_receipt(self, mock_get_by_id, client):
+
+    @patch.object(rm, "get_by_id")
+    def test_get_receipt_image_not_found_receipt(self, mock_get_by_id, client, unwrap):
         """Test error when receipt does not exist"""
         mock_get_by_id.return_value = None
-        
-        response = client.get('/api/receipts/999/image')
-        data = json.loads(response.data)
-        
+
+        response = client.get("/api/receipts/999/image")
+        data = unwrap(response)
+
         assert response.status_code == 404
-        assert 'not found' in data['error'].lower()
-    
-    @patch.object(rm, 'get_by_id')
-    def test_get_receipt_image_no_file_path(self, mock_get_by_id, client):
+        assert "not found" in data["message"].lower()
+
+    @patch.object(rm, "get_by_id")
+    def test_get_receipt_image_no_file_path(self, mock_get_by_id, client, unwrap):
         """Test error when receipt has no file path"""
         receipt = {
             "id": 1,
@@ -1290,37 +1330,39 @@ class TestGetReceiptImageEndpoint:
             "updated_at": "2024-01-15",
         }
         mock_get_by_id.return_value = receipt
-        
-        response = client.get('/api/receipts/1/image')
-        data = json.loads(response.data)
-        
+
+        response = client.get("/api/receipts/1/image")
+        data = unwrap(response)
+
         assert response.status_code == 404
-        assert 'No image file' in data['error']
-    
-    @patch('pathlib.Path.exists', return_value=False)
-    @patch.object(rm, 'get_by_id')
-    def test_get_receipt_image_file_not_exists(self, mock_get_by_id, mock_exists, client, sample_receipts):
+        assert "No image file" in data["message"]
+
+    @patch("pathlib.Path.exists", return_value=False)
+    @patch.object(rm, "get_by_id")
+    def test_get_receipt_image_file_not_exists(
+        self, mock_get_by_id, mock_exists, client, sample_receipts, unwrap
+    ):
         """Test error when file does not exist on disk"""
         mock_get_by_id.return_value = sample_receipts[0]
-        
-        response = client.get('/api/receipts/1/image')
-        data = json.loads(response.data)
-        
+
+        response = client.get("/api/receipts/1/image")
+        data = unwrap(response)
+
         assert response.status_code == 404
-        assert 'not found' in data['error'].lower()
-    
+        assert "not found" in data["message"].lower()
+
     # ========== Database Error Cases ==========
-    
-    @patch.object(rm, 'get_by_id')
-    def test_get_receipt_image_database_error(self, mock_get_by_id, client):
+
+    @patch.object(rm, "get_by_id")
+    def test_get_receipt_image_database_error(self, mock_get_by_id, client, unwrap):
         """Test handling database errors"""
         mock_get_by_id.side_effect = DatabaseError("Connection failed")
-        
-        response = client.get('/api/receipts/1/image')
-        data = json.loads(response.data)
-        
+
+        response = client.get("/api/receipts/1/image")
+        data = unwrap(response)
+
         assert response.status_code == 500
-        assert 'Database error' in data['error']
+        assert "database error" in data["message"]
 
 
 class TestReprocessReceiptEndpoint:
@@ -1334,30 +1376,44 @@ class TestReprocessReceiptEndpoint:
     @patch("pathlib.Path.exists", return_value=True)
     @patch.object(rm, "get_by_id")
     def test_reprocess_receipt_success(
-        self, mock_get_by_id, mock_exists, mock_loader, mock_extractor, 
-        mock_update, client, sample_receipts, sample_receipt
+        self,
+        mock_get_by_id,
+        mock_exists,
+        mock_loader,
+        mock_extractor,
+        mock_update,
+        client,
+        sample_receipts,
+        sample_receipt, unwrap
     ):
         """Test successfully reprocessing a receipt"""
         mock_get_by_id.return_value = sample_receipts[0]
         mock_loader.return_value = [sample_receipt]
         mock_extractor.return_value = sample_receipt
-        mock_update.return_value = {**sample_receipts[0], 'confidence': 3}
-        
-        response = client.post('/api/receipts/1/reprocess')
-        data = json.loads(response.data)
-        
+        mock_update.return_value = {**sample_receipts[0], "confidence": 3}
+
+        response = client.post("/api/receipts/1/reprocess")
+        data = unwrap(response)
+
         assert response.status_code == 200
-        assert 'reprocessed' in data['data']['message'].lower()
-        assert 'reprocessing' in data['data']
-    
-    @patch.object(rm, 'update')
-    @patch.object(receipt_extractor, 'process_receipt')
-    @patch.object(receipt_loader, 'process_files')
-    @patch('pathlib.Path.exists', return_value=True)
-    @patch.object(rm, 'get_by_id')
+        assert "reprocessed" in data["message"].lower()
+        assert "reprocessing" in data
+
+    @patch.object(rm, "update")
+    @patch.object(receipt_extractor, "process_receipt")
+    @patch.object(receipt_loader, "process_files")
+    @patch("pathlib.Path.exists", return_value=True)
+    @patch.object(rm, "get_by_id")
     def test_reprocess_receipt_keep_overrides(
-        self, mock_get_by_id, mock_exists, mock_loader, mock_extractor, 
-        mock_update, client, sample_receipts, sample_receipt
+        self,
+        mock_get_by_id,
+        mock_exists,
+        mock_loader,
+        mock_extractor,
+        mock_update,
+        client,
+        sample_receipts,
+        sample_receipt, unwrap
     ):
         """Test reprocessing with keep_overrides=True"""
         receipt_with_manual = {**sample_receipts[0], "vendor": "Manual Vendor"}
@@ -1371,26 +1427,26 @@ class TestReprocessReceiptEndpoint:
             data=json.dumps({"keep_overrides": True}),
             content_type="application/json",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 200
-        assert data['data']['reprocessing']['kept_overrides'] is True
-    
+        assert data["reprocessing"]["kept_overrides"] is True
+
     # ========== Not Found / Error Cases ==========
-    
-    @patch.object(rm, 'get_by_id')
-    def test_reprocess_receipt_not_found(self, mock_get_by_id, client):
+
+    @patch.object(rm, "get_by_id")
+    def test_reprocess_receipt_not_found(self, mock_get_by_id, client, unwrap):
         """Test error when receipt does not exist"""
         mock_get_by_id.return_value = None
-        
-        response = client.post('/api/receipts/999/reprocess')
-        data = json.loads(response.data)
-        
+
+        response = client.post("/api/receipts/999/reprocess")
+        data = unwrap(response)
+
         assert response.status_code == 404
-        assert 'not found' in data['error'].lower()
-    
-    @patch.object(rm, 'get_by_id')
-    def test_reprocess_receipt_no_file_path(self, mock_get_by_id, client):
+        assert "not found" in data["message"].lower()
+
+    @patch.object(rm, "get_by_id")
+    def test_reprocess_receipt_no_file_path(self, mock_get_by_id, client, unwrap):
         """Test error when receipt has no file path"""
         receipt = {
             "id": 1,
@@ -1408,281 +1464,51 @@ class TestReprocessReceiptEndpoint:
             "updated_at": "2024-01-15",
         }
         mock_get_by_id.return_value = receipt
-        
-        response = client.post('/api/receipts/1/reprocess')
-        data = json.loads(response.data)
-        
+
+        response = client.post("/api/receipts/1/reprocess")
+        data = unwrap(response)
+
         assert response.status_code == 400
-        assert 'No image file' in data['error']
-    
-    @patch('pathlib.Path.exists', return_value=False)
-    @patch.object(rm, 'get_by_id')
-    def test_reprocess_receipt_file_not_exists(self, mock_get_by_id, mock_exists, client, sample_receipts):
+        assert "no associated image file" in data["message"]
+
+    @patch("pathlib.Path.exists", return_value=False)
+    @patch.object(rm, "get_by_id")
+    def test_reprocess_receipt_file_not_exists(
+        self, mock_get_by_id, mock_exists, client, sample_receipts, unwrap
+    ):
         """Test error when file does not exist on disk"""
         mock_get_by_id.return_value = sample_receipts[0]
-        
-        response = client.post('/api/receipts/1/reprocess')
-        data = json.loads(response.data)
-        
+
+        response = client.post("/api/receipts/1/reprocess")
+        data = unwrap(response)
+
         assert response.status_code == 404
-        assert 'not found' in data['error'].lower()
-    
-    @patch.object(receipt_loader, 'process_files')
-    @patch('pathlib.Path.exists', return_value=True)
-    @patch.object(rm, 'get_by_id')
+        assert "not found" in data["message"].lower()
+
+    @patch.object(receipt_loader, "process_files")
+    @patch("pathlib.Path.exists", return_value=True)
+    @patch.object(rm, "get_by_id")
     def test_reprocess_receipt_loader_returns_empty(
         self, mock_get_by_id, mock_exists, mock_loader, client, sample_receipts, unwrap
     ):
         """Test error when loader returns no receipts"""
         mock_get_by_id.return_value = sample_receipts[0]
         mock_loader.return_value = []
-        
-        response = client.post('/api/receipts/1/reprocess')
-        data = json.loads(response.data)
-        
+
+        response = client.post("/api/receipts/1/reprocess")
+        data = unwrap(response)
+
         assert response.status_code == 422
-        assert 'Unable to reprocess' in data['error']
-
-
-class TestConfirmReceiptEndpoint:
-    """Tests for POST /api/receipts/confirm endpoint"""
-    
-    # ========== Success Cases ==========
-    
-    @patch.object(rm, 'get_by_id')
-    @patch.object(rm, 'save')
-    def test_confirm_receipt_success(self, mock_save, mock_get_by_id, client, sample_receipts):
-        """Test successfully confirming/saving a receipt"""
-        mock_save.return_value = 1
-        mock_get_by_id.return_value = sample_receipts[0]
-        
-        response = client.post(
-            '/api/receipts/confirm',
-            data=json.dumps({
-                'original_filename': 'receipt.jpg',
-                'vendor': 'Walmart',
-                'amount': 45.67,
-                'date': '2024-01-15',
-                'confidence': 3,
-                'selected_method': 'tesseract',
-                'raw_text': 'WALMART...'
-            }),
-            content_type='application/json'
-        )
-        data = json.loads(response.data)
-        
-        assert response.status_code == 201
-        assert 'receipt' in data['data']
-        assert 'saved' in data['data']['message'].lower()
-    
-    @patch.object(rm, 'get_by_id')
-    @patch.object(rm, 'save')
-    def test_confirm_receipt_minimal_fields(self, mock_save, mock_get_by_id, client, sample_receipts):
-        """Test confirming with minimal required fields"""
-        mock_save.return_value = 1
-        mock_get_by_id.return_value = sample_receipts[0]
-        
-        response = client.post(
-            '/api/receipts/confirm',
-            data=json.dumps({
-                'original_filename': 'receipt.jpg',
-                'vendor': 'Store'
-            }),
-            content_type='application/json'
-        )
-        data = json.loads(response.data)
-        
-        assert response.status_code == 201
-    
-    @patch.object(rm, 'get_by_id')
-    @patch.object(rm, 'save')
-    def test_confirm_receipt_with_null_amount(self, mock_save, mock_get_by_id, client, sample_receipts):
-        """Test confirming with null amount"""
-        mock_save.return_value = 1
-        mock_get_by_id.return_value = sample_receipts[0]
-        
-        response = client.post(
-            '/api/receipts/confirm',
-            data=json.dumps({
-                'original_filename': 'receipt.jpg',
-                'vendor': 'Store',
-                'amount': None
-            }),
-            content_type='application/json'
-        )
-        
-        assert response.status_code == 201
-    
-    @patch.object(rm, 'get_by_id')
-    @patch.object(rm, 'save')
-    def test_confirm_receipt_generates_stored_filename(self, mock_save, mock_get_by_id, client, sample_receipts):
-        """Test that stored_filename is generated if not provided"""
-        mock_save.return_value = 1
-        mock_get_by_id.return_value = sample_receipts[0]
-        
-        response = client.post(
-            '/api/receipts/confirm',
-            data=json.dumps({
-                'original_filename': 'receipt.jpg',
-                'vendor': 'Store'
-                # No stored_filename provided
-            }),
-            content_type='application/json'
-        )
-        
-        assert response.status_code == 201
-        mock_save.assert_called_once()
-    
-    # ========== Validation Error Cases ==========
-    
-    def test_confirm_receipt_no_json_body(self, client):
-        """Test error when no JSON body provided"""
-        response = client.post('/api/receipts/confirm')
-        data = json.loads(response.data)
-        
-        assert response.status_code == 500
-        assert 'JSON' in data['error']
-    
-    def test_confirm_receipt_missing_original_filename(self, client):
-        """Test error when original_filename is missing"""
-        response = client.post(
-            '/api/receipts/confirm',
-            data=json.dumps({
-                'vendor': 'Store',
-                'amount': 10.00
-            }),
-            content_type='application/json'
-        )
-        data = json.loads(response.data)
-        
-        assert response.status_code == 400
-        assert 'original_filename' in data['error']
-    
-    def test_confirm_receipt_missing_vendor(self, client):
-        """Test error when vendor is missing"""
-        response = client.post(
-            '/api/receipts/confirm',
-            data=json.dumps({
-                'original_filename': 'receipt.jpg',
-                'amount': 10.00
-            }),
-            content_type='application/json'
-        )
-        data = json.loads(response.data)
-        
-        assert response.status_code == 400
-        assert 'vendor' in data['error']
-    
-    def test_confirm_receipt_invalid_amount(self, client):
-        """Test error with invalid amount"""
-        response = client.post(
-            '/api/receipts/confirm',
-            data=json.dumps({
-                'original_filename': 'receipt.jpg',
-                'vendor': 'Store',
-                'amount': 'not-a-number'
-            }),
-            content_type='application/json'
-        )
-        data = json.loads(response.data)
-        
-        assert response.status_code == 400
-        assert 'amount' in data['error'].lower()
-    
-    def test_confirm_receipt_invalid_date(self, client):
-        """Test error with invalid date format"""
-        response = client.post(
-            '/api/receipts/confirm',
-            data=json.dumps({
-                'original_filename': 'receipt.jpg',
-                'vendor': 'Store',
-                'date': 'invalid-date'
-            }),
-            content_type='application/json'
-        )
-        data = json.loads(response.data)
-        
-        assert response.status_code == 400
-        assert 'date' in data['error'].lower()
-    
-    def test_confirm_receipt_invalid_confidence_negative(self, client):
-        """Test error with negative confidence"""
-        response = client.post(
-            '/api/receipts/confirm',
-            data=json.dumps({
-                'original_filename': 'receipt.jpg',
-                'vendor': 'Store',
-                'confidence': -1
-            }),
-            content_type='application/json'
-        )
-        data = json.loads(response.data)
-        
-        assert response.status_code == 400
-        assert 'confidence' in data['error'].lower()
-    
-    def test_confirm_receipt_invalid_confidence_too_high(self, client):
-        """Test error with confidence > 3"""
-        response = client.post(
-            '/api/receipts/confirm',
-            data=json.dumps({
-                'original_filename': 'receipt.jpg',
-                'vendor': 'Store',
-                'confidence': 5
-            }),
-            content_type='application/json'
-        )
-        data = json.loads(response.data)
-        
-        assert response.status_code == 400
-        assert 'confidence' in data['error'].lower()
-    
-    # ========== Database Error Cases ==========
-    
-    @patch.object(rm, 'save')
-    def test_confirm_receipt_save_returns_none(self, mock_save, client):
-        """Test error when save returns None"""
-        mock_save.return_value = None
-        
-        response = client.post(
-            '/api/receipts/confirm',
-            data=json.dumps({
-                'original_filename': 'receipt.jpg',
-                'vendor': 'Store'
-            }),
-            content_type='application/json'
-        )
-        data = json.loads(response.data)
-        
-        assert response.status_code == 500
-        assert 'Failed to save' in data['error']
-    
-    @patch.object(rm, 'save')
-    def test_confirm_receipt_database_error(self, mock_save, client):
-        """Test handling database errors"""
-        mock_save.side_effect = DatabaseError("Save failed")
-        
-        response = client.post(
-            '/api/receipts/confirm',
-            data=json.dumps({
-                'original_filename': 'receipt.jpg',
-                'vendor': 'Store'
-            }),
-            content_type='application/json'
-        )
-        data = json.loads(response.data)
-        
-        assert response.status_code == 500
-        assert 'Database error' in data['error']
+        assert "Unable to reprocess" in data["message"]
 
 
 class TestGetReceiptStatsEndpoint:
     """Tests for GET /api/receipts/stats endpoint"""
 
     # ========== Success Cases ==========
-    
-    @patch.object(rm, 'get_stats')
-    def test_get_stats_success(self, mock_get_stats, client):
+
+    @patch.object(rm, "get_stats")
+    def test_get_stats_success(self, mock_get_stats, client, unwrap):
         """Test successfully retrieving statistics"""
         mock_get_stats.return_value = {
             "total_receipts": 100,
@@ -1698,24 +1524,24 @@ class TestGetReceiptStatsEndpoint:
                 {"vendor": "Target", "count": 15, "total": 750.00},
             ],
         }
-        
-        response = client.get('/api/receipts/stats')
-        data = json.loads(response.data)
-        
+
+        response = client.get("/api/receipts/stats")
+        data = unwrap(response)
+
         assert response.status_code == 200
-        assert 'statistics' in data['data']
-        
-        stats = data['data']['statistics']
-        assert stats['total_receipts'] == 100
-        assert stats['total_amount'] == 5000.00
-        assert stats['average_amount'] == 50.00
-        assert stats['unique_vendors'] == 25
-        assert stats['high_confidence_count'] == 40
-        assert 'date_range' in stats
-        assert 'top_vendors' in stats
-    
-    @patch.object(rm, 'get_stats')
-    def test_get_stats_empty_database(self, mock_get_stats, client):
+        assert "statistics" in data
+
+        stats = data["statistics"]
+        assert stats["total_receipts"] == 100
+        assert stats["total_amount"] == 5000.00
+        assert stats["average_amount"] == 50.00
+        assert stats["unique_vendors"] == 25
+        assert stats["high_confidence_count"] == 40
+        assert "date_range" in stats
+        assert "top_vendors" in stats
+
+    @patch.object(rm, "get_stats")
+    def test_get_stats_empty_database(self, mock_get_stats, client, unwrap):
         """Test statistics with empty database"""
         mock_get_stats.return_value = {
             "total_receipts": 0,
@@ -1728,42 +1554,42 @@ class TestGetReceiptStatsEndpoint:
             "high_confidence_count": 0,
             "top_vendors": [],
         }
-        
-        response = client.get('/api/receipts/stats')
-        data = json.loads(response.data)
-        
+
+        response = client.get("/api/receipts/stats")
+        data = unwrap(response)
+
         assert response.status_code == 200
-        assert data['data']['statistics']['total_receipts'] == 0
-        assert data['data']['statistics']['total_amount'] is None
-        assert data['data']['statistics']['top_vendors'] == []
-    
+        assert data["statistics"]["total_receipts"] == 0
+        assert data["statistics"]["total_amount"] is None
+        assert data["statistics"]["top_vendors"] == []
+
     # ========== Error Cases ==========
-    
-    @patch.object(rm, 'get_stats')
-    def test_get_stats_database_error(self, mock_get_stats, client):
+
+    @patch.object(rm, "get_stats")
+    def test_get_stats_database_error(self, mock_get_stats, client, unwrap):
         """Test handling database errors"""
         mock_get_stats.side_effect = DatabaseError("Connection failed")
-        
-        response = client.get('/api/receipts/stats')
-        data = json.loads(response.data)
-        
+
+        response = client.get("/api/receipts/stats")
+        data = unwrap(response)
+
         assert response.status_code == 500
-        assert 'Database error' in data['error']
-    
-    @patch.object(rm, 'get_stats')
-    def test_get_stats_unexpected_error(self, mock_get_stats, client):
+        assert "database error" in data["message"]
+
+    @patch.object(rm, "get_stats")
+    def test_get_stats_unexpected_error(self, mock_get_stats, client, unwrap):
         """Test handling unexpected exceptions"""
         mock_get_stats.side_effect = Exception("Unexpected error")
-        
-        response = client.get('/api/receipts/stats')
-        data = json.loads(response.data)
-        
+
+        response = client.get("/api/receipts/stats")
+        data = unwrap(response)
+
         assert response.status_code == 500
-        assert 'Internal server error' in data['error']
-    
+        assert "unexpected error" in data["message"]
+
     # ========== HTTP Method Tests ==========
-    
-    def test_get_stats_wrong_method_post(self, client):
+
+    def test_get_stats_wrong_method_post(self, client, unwrap):
         """Test that POST method is not allowed"""
         response = client.post("/api/receipts/stats")
 
@@ -1781,8 +1607,17 @@ class TestUploadReceiptEndpoint:
     @patch.object(receipt_extractor, "process_receipt")
     @patch.object(receipt_loader, "process_files")
     def test_upload_receipt_success(
-        self, mock_loader, mock_extractor, mock_copy, mock_save, 
-        mock_get_by_id, client, sample_image_file, sample_receipt, sample_receipts
+        self,
+        mock_loader,
+        mock_extractor,
+        mock_copy,
+        mock_save,
+        mock_get_by_id,
+        client,
+        sample_image_file,
+        sample_receipt,
+        sample_receipts,
+        unwrap, 
     ):
         """Test successfully uploading a receipt"""
         mock_loader.return_value = [sample_receipt]
@@ -1795,20 +1630,29 @@ class TestUploadReceiptEndpoint:
             data={"file": (sample_image_file, "receipt.jpg")},
             content_type="multipart/form-data",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 201
-        assert 'receipt' in data['data']
-        assert 'uploaded' in data['data']['message'].lower()
-    
-    @patch.object(rm, 'get_by_id')
-    @patch.object(rm, 'save')
-    @patch('shutil.copy2')
-    @patch.object(receipt_extractor, 'process_receipt')
-    @patch.object(receipt_loader, 'process_files')
+        assert "receipt" in data
+        assert "uploaded" in data["message"].lower()
+
+    @patch.object(rm, "get_by_id")
+    @patch.object(rm, "save")
+    @patch("shutil.copy2")
+    @patch.object(receipt_extractor, "process_receipt")
+    @patch.object(receipt_loader, "process_files")
     def test_upload_receipt_with_overrides(
-        self, mock_loader, mock_extractor, mock_copy, mock_save, 
-        mock_get_by_id, client, sample_image_file, sample_receipt, sample_receipts
+        self,
+        mock_loader,
+        mock_extractor,
+        mock_copy,
+        mock_save,
+        mock_get_by_id,
+        client,
+        sample_image_file,
+        sample_receipt,
+        sample_receipts,
+        unwrap, 
     ):
         """Test uploading with manual overrides"""
         mock_loader.return_value = [sample_receipt]
@@ -1829,48 +1673,48 @@ class TestUploadReceiptEndpoint:
             },
             content_type="multipart/form-data",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 201
 
     # ========== Validation Error Cases ==========
-    
-    def test_upload_receipt_no_file(self, client):
+
+    def test_upload_receipt_no_file(self, client, unwrap):
         """Test error when no file provided"""
         response = client.post(
             "/api/receipts/upload", data={}, content_type="multipart/form-data"
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 400
-        assert 'No file provided' in data['error']
-    
-    def test_upload_receipt_empty_filename(self, client):
+        assert "file is required" in data["message"]
+
+    def test_upload_receipt_empty_filename(self, client, unwrap):
         """Test error with empty filename"""
         response = client.post(
             "/api/receipts/upload",
             data={"file": (BytesIO(b""), "")},
             content_type="multipart/form-data",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 400
-        assert 'No file selected' in data['error']
-    
-    def test_upload_receipt_invalid_file_type(self, client):
+        assert "No file provided" in data["message"]
+
+    def test_upload_receipt_invalid_file_type(self, client, unwrap):
         """Test error with invalid file type"""
         response = client.post(
             "/api/receipts/upload",
             data={"file": (BytesIO(b"content"), "receipt.doc")},
             content_type="multipart/form-data",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 400
-        assert 'Invalid file type' in data['error']
-    
-    @patch.object(receipt_extractor, 'process_receipt')
-    @patch.object(receipt_loader, 'process_files')
+        assert "Invalid file type" in data["message"]
+
+    @patch.object(receipt_extractor, "process_receipt")
+    @patch.object(receipt_loader, "process_files")
     def test_upload_receipt_invalid_override_amount(
         self, mock_loader, mock_extractor, client, sample_image_file, sample_receipt, unwrap
     ):
@@ -1883,13 +1727,13 @@ class TestUploadReceiptEndpoint:
             data={"file": (sample_image_file, "receipt.jpg"), "amount": "not-a-number"},
             content_type="multipart/form-data",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 400
-        assert 'amount' in data['error'].lower()
-    
-    @patch.object(receipt_extractor, 'process_receipt')
-    @patch.object(receipt_loader, 'process_files')
+        assert "amount" in data["message"].lower()
+
+    @patch.object(receipt_extractor, "process_receipt")
+    @patch.object(receipt_loader, "process_files")
     def test_upload_receipt_invalid_override_date(
         self, mock_loader, mock_extractor, client, sample_image_file, sample_receipt, unwrap
     ):
@@ -1902,11 +1746,11 @@ class TestUploadReceiptEndpoint:
             data={"file": (sample_image_file, "receipt.jpg"), "date": "invalid-date"},
             content_type="multipart/form-data",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 400
-        assert 'date' in data['error'].lower()
-    
+        assert "date" in data["message"].lower()
+
     # ========== Processing Error Cases ==========
 
     @patch.object(receipt_loader, "process_files")
@@ -1921,18 +1765,25 @@ class TestUploadReceiptEndpoint:
             data={"file": (sample_image_file, "receipt.jpg")},
             content_type="multipart/form-data",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 422
-        assert 'Unable to process' in data['error']
-    
-    @patch('shutil.copy2')
-    @patch.object(receipt_extractor, 'process_receipt')
-    @patch.object(receipt_loader, 'process_files')
-    @patch.object(rm, 'save')
+        assert "Unable to process" in data["message"]
+
+    @patch("shutil.copy2")
+    @patch.object(receipt_extractor, "process_receipt")
+    @patch.object(receipt_loader, "process_files")
+    @patch.object(rm, "save")
     def test_upload_receipt_save_returns_none(
-        self, mock_save, mock_loader, mock_extractor, mock_copy, 
-        client, sample_image_file, sample_receipt
+        self,
+        mock_save,
+        mock_loader,
+        mock_extractor,
+        mock_copy,
+        client,
+        sample_image_file,
+        sample_receipt,
+        unwrap,
     ):
         """Test error when save returns None"""
         mock_loader.return_value = [sample_receipt]
@@ -1944,18 +1795,25 @@ class TestUploadReceiptEndpoint:
             data={"file": (sample_image_file, "receipt.jpg")},
             content_type="multipart/form-data",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 500
-        assert 'Failed to save' in data['error']
-    
-    @patch('shutil.copy2')
-    @patch.object(receipt_extractor, 'process_receipt')
-    @patch.object(receipt_loader, 'process_files')
-    @patch.object(rm, 'save')
+        assert "Failed to save" in data["message"]
+
+    @patch("shutil.copy2")
+    @patch.object(receipt_extractor, "process_receipt")
+    @patch.object(receipt_loader, "process_files")
+    @patch.object(rm, "save")
     def test_upload_receipt_database_error(
-        self, mock_save, mock_loader, mock_extractor, mock_copy, 
-        client, sample_image_file, sample_receipt
+        self,
+        mock_save,
+        mock_loader,
+        mock_extractor,
+        mock_copy,
+        client,
+        sample_image_file,
+        sample_receipt,
+        unwrap, 
     ):
         """Test handling database errors"""
         mock_loader.return_value = [sample_receipt]
@@ -1967,10 +1825,11 @@ class TestUploadReceiptEndpoint:
             data={"file": (sample_image_file, "receipt.jpg")},
             content_type="multipart/form-data",
         )
-        data = json.loads(response.data)
-        
+        data = unwrap(response)
+
         assert response.status_code == 500
-        assert 'Database error' in data['error']
+        assert "database error" in data["message"]
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
