@@ -18,7 +18,6 @@ Typical usage:
 from typing import Optional, Dict, List, Any
 import sqlite3
 
-from src.database.connection import get_manager
 from src.database.errors import DatabaseError
 from src.database.repositories.base import BaseRepository
 from src.utils.logging import ContextLogger
@@ -26,7 +25,7 @@ from src.utils.logging import ContextLogger
 logger = ContextLogger(__name__)
 
 
-class AccountRepository:
+class AccountRepository(BaseRepository):
     """Repository for account CRUD operations.
 
     Wraps all database access for the `accounts` table behind a clean
@@ -40,15 +39,6 @@ class AccountRepository:
         db: The `ConnectionManager` used for database access.
         br: A `BaseRepository` instance providing shared query helpers.
     """
-
-    def __init__(self):
-        """Initialize the repository.
-
-        Retrieves the module-level `ConnectionManager` via `get_manager()`.
-        Must be called after `connection.init()` or `connection.init_app()`.
-        """
-        self.db = get_manager()
-        self.br = BaseRepository()
 
     # ========== Create ==========
 
@@ -121,7 +111,7 @@ class AccountRepository:
             DatabaseError: If the query fails.
         """
         try:
-            row = self.br.select_query(
+            row = self.select_query(
                 "SELECT * FROM accounts WHERE id = ?",
                 params=(account_id,),
             )
