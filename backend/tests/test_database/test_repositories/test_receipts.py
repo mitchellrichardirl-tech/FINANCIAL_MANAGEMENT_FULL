@@ -11,29 +11,17 @@ from src.database.schema import initialize_schema
 from src.database.migrations import migrate
 from src.database.repositories.receipts import ReceiptRepository
 from src.models.receipt import Receipt
-
+ 
 
 @pytest.fixture
 def temp_db_path(tmp_path):
     """Create a temporary database path"""
     return tmp_path / "test.db"
 
-
 @pytest.fixture
-def connection_manager(temp_db_path):
-    """Create and initialize connection manager (base schema + migrations)."""
-    manager = ConnectionManager(temp_db_path)
-    init_connection(temp_db_path)  # Set as default manager
-    initialize_schema(manager)
-    migrate(str(temp_db_path))
-    return manager
-
-
-@pytest.fixture
-def repo(connection_manager):
+def repo(db_manager):
     """Create a receipt repository"""
     return ReceiptRepository()
-
 
 @pytest.fixture
 def sample_receipt():
@@ -573,12 +561,12 @@ class TestRowToDict:
         assert isinstance(receipt['metadata'], dict)
         assert 'selected_method' in receipt['metadata']
     
-    def test_row_to_dict_with_invalid_metadata(self, repo, sample_receipt, connection_manager):
+    def test_row_to_dict_with_invalid_metadata(self, repo, sample_receipt, db_manager):
         """Test handling of invalid JSON in metadata"""
         receipt_id = repo.save(sample_receipt)
         
         # Corrupt the metadata
-        with connection_manager.get_connection() as conn:
+        with db_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "UPDATE receipts SET metadata = ? WHERE id = ?",
