@@ -668,7 +668,7 @@ def delete_receipt(receipt_id: int):
             status_code=500,
         )
 
-    file_path = receipt.get('file_path')
+    file_path = file_handler.resolve_receipt_path(receipt)
     if file_path:
         if file_handler.delete_file(file_path):
             logger.debug(f"Deleted receipt file: {file_path}")
@@ -709,7 +709,20 @@ def get_receipt_image(receipt_id: int):
             entity='Receipt image',
         )
 
-    path = Path(file_path)
+    path = file_handler.resolve_receipt_path(receipt)
+
+    if path is None:
+        logger.error(
+            f"Image file missing for receipt {receipt_id}: "
+            f"stored_filename={receipt.get('stored_filename')!r}, "
+            f"file_path={receipt.get('file_path')!r}"
+        )
+        raise AppError(
+            code=ErrorCode.NOT_FOUND,
+            message=f'Image file not found for receipt {receipt_id}',
+            status_code=404,
+            entity='Receipt image'
+        )
 
     if not path.exists():
         logger.error(f"Image file missing from disk: {file_path}")
@@ -1015,7 +1028,7 @@ def confirm_receipt():
     existing = receipt_repository.get_by_id(receipt_id)
     if existing is None:
         raise not_found('Receipt', receipt_id)
-    file_path = validated.get('file_path') or existing.get('file_path')
+    file_path = FileHandler.from_app_config().resolve_receipt_path(existing)
     if not file_path or not Path(file_path).exists():
         logger.warning(f"File not found at: {file_path}")
         raise invalid_value(f'Receipt file not found at {file_path}', field='file_path')
