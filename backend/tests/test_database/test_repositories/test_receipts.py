@@ -8,30 +8,20 @@ import numpy as np
 
 from src.database.connection import ConnectionManager, DatabaseError, init as init_connection
 from src.database.schema import initialize_schema
+from src.database.migrations import migrate
 from src.database.repositories.receipts import ReceiptRepository
 from src.models.receipt import Receipt
-
+ 
 
 @pytest.fixture
 def temp_db_path(tmp_path):
     """Create a temporary database path"""
     return tmp_path / "test.db"
 
-
 @pytest.fixture
-def connection_manager(temp_db_path):
-    """Create and initialize connection manager"""
-    manager = ConnectionManager(temp_db_path)
-    init_connection(temp_db_path)  # Set as default manager
-    initialize_schema(manager)
-    return manager
-
-
-@pytest.fixture
-def repo(connection_manager):
+def repo(db_manager):
     """Create a receipt repository"""
     return ReceiptRepository()
-
 
 @pytest.fixture
 def sample_receipt():
@@ -424,7 +414,9 @@ class TestDeleteReceipt:
         
         deleted = repo.delete(receipt_id)
         
+        assert deleted is not None
         assert deleted['id'] == receipt_id
+        assert deleted['vendor'] == sample_receipt.vendor
         assert repo.get_by_id(receipt_id) is None
     
     def test_delete_not_exists(self, repo):
@@ -446,6 +438,24 @@ class TestDeleteReceipt:
         
         assert ids[2] not in remaining_ids
         assert len(receipts) == len(multiple_receipts) - 1
+
+    def test_delete_linked_receipt_cascades_link_and_clears_mirror(
+        self, repo, sample_receipt, app_with_db, make_transaction
+    ):
+        """Deleting a receipt removes its link row and nulls transactions.receipt_id."""
+        from src.services.receipt_links import ReceiptLinkService
+        receipt_id = repo.save(sample_receipt)
+        txn_id = make_transaction()
+        with app_with_db.app_context():
+            ReceiptLinkService().link(receipt_id, txn_id)
+        repo.delete(receipt_id)
+        with repo.db.get_connection() as conn:
+            assert conn.execute(
+                "SELECT COUNT(*) FROM receipt_links WHERE receipt_id = ?", (receipt_id,)
+            ).fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT receipt_id FROM transactions WHERE id = ?", (txn_id,)
+            ).fetchone()[0] is None
 
 
 class TestGetReceiptStats:
@@ -551,12 +561,12 @@ class TestRowToDict:
         assert isinstance(receipt['metadata'], dict)
         assert 'selected_method' in receipt['metadata']
     
-    def test_row_to_dict_with_invalid_metadata(self, repo, sample_receipt, connection_manager):
+    def test_row_to_dict_with_invalid_metadata(self, repo, sample_receipt, db_manager):
         """Test handling of invalid JSON in metadata"""
         receipt_id = repo.save(sample_receipt)
         
         # Corrupt the metadata
-        with connection_manager.get_connection() as conn:
+        with db_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "UPDATE receipts SET metadata = ? WHERE id = ?",

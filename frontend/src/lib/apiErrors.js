@@ -42,7 +42,9 @@ export const ErrorCode = {
   PARENT_NOT_FOUND: 'PARENT_NOT_FOUND',
   DATABASE_ERROR: 'DATABASE_ERROR',
   INTERNAL_ERROR: 'INTERNAL_ERROR',
-  INSUFFICIENT_CAPACITY: 'INSUFFICIENT_CAPACITY'
+  CONFLICT: 'CONFLICT',
+  UNSUPPORTED_FILE_TYPE: 'UNSUPPORTED_FILE_TYPE',
+  INSUFFICIENT_CAPACITY: 'INSUFFICIENT_CAPACITY',
 };
 
 /**
@@ -88,6 +90,20 @@ const ERROR_MESSAGES = {
 
   [ErrorCode.INTERNAL_ERROR]: () =>
     'Something went wrong. Please try again later.',
+
+  [ErrorCode.CONFLICT]: (err) => {
+    if (err.entity === 'Receipt' && err.details?.transaction_id) {
+      return `This receipt is already linked to transaction #${err.details.transaction_id}.`;
+    }
+    if (err.entity === 'Transaction' && err.details?.receipt_id) {
+      return `That transaction already has a receipt attached (#${err.details.receipt_id}).`;
+    }
+    return err.message || 'This conflicts with existing data. Refresh and try again.';
+  },
+
+  [ErrorCode.UNSUPPORTED_FILE_TYPE]: (err) => err.message || 'Unsupported file type.',
+  
+  [ErrorCode.INSUFFICIENT_CAPACITY]: (err) => err.message || 'Too many files in one batch.',
 };
 
 /**

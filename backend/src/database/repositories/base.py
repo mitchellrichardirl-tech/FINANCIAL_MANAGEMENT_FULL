@@ -29,7 +29,11 @@ class BaseRepository:
     """
 
     def __init__(self):
-        self.db = get_manager()
+        pass
+
+    @property
+    def db(self):
+        return get_manager()
 
     def insert_query(self, query: str, values: Tuple) -> int:
         """

@@ -48,6 +48,7 @@ def create_app(config=None):
     if config:
         logger.info(f"Applying config overrides: {list(config.keys())}")
         app.config.update(config)
+        _validate_receipt_match_config(app)
 
     os.makedirs(app.config["DATA_DIR"], exist_ok=True)
 
@@ -56,7 +57,10 @@ def create_app(config=None):
         f"db_path={app.config['DATABASE_PATH']}, "
         f"max_content_length={app.config['MAX_CONTENT_LENGTH']}, "
         f"allowed_extensions={app.config['ALLOWED_EXTENSIONS']}, "
-        f"max_workers={app.config['MAX_WORKERS']}"
+        f"max_workers={app.config['MAX_WORKERS']}, "
+        f"receipt_match_date_tolerance_days={app.config['RECEIPT_MATCH_DATE_TOLERANCE_DAYS']}, "
+        f"receipt_match_amount_tolerance={app.config['RECEIPT_MATCH_AMOUNT_TOLERANCE']}, "
+        f"receipt_auto_link_threshold={app.config['RECEIPT_AUTO_LINK_THRESHOLD']}"
     )
 
     # Enable CORS
@@ -79,7 +83,7 @@ def create_app(config=None):
     _register_blueprints(app)
 
     for rule in sorted(app.url_map.iter_rules(), key=lambda r: r.rule):
-        print(f"{rule.rule:50s} {sorted(rule.methods)}")
+        logger.debug(f"{rule.rule:50s} {sorted(rule.methods)}")
         
     # Register error handlers
     register_error_handlers(app)
@@ -136,6 +140,23 @@ def _register_blueprints(app):
 
     logger.info(f"Registered {len(blueprints)} blueprints")
 
+def _validate_receipt_match_config(app):
+    """Fail fast on nonsensical receipt-matching settings."""
+    days = app.config["RECEIPT_MATCH_DATE_TOLERANCE_DAYS"]
+    if not isinstance(days, int) or days < 0:
+        raise ValueError(
+            f"RECEIPT_MATCH_DATE_TOLERANCE_DAYS must be a non-negative integer, got {days!r}"
+        )
+    amount = app.config["RECEIPT_MATCH_AMOUNT_TOLERANCE"]
+    if amount < 0:
+        raise ValueError(
+            f"RECEIPT_MATCH_AMOUNT_TOLERANCE must be non-negative, got {amount!r}"
+        )
+    threshold = app.config["RECEIPT_AUTO_LINK_THRESHOLD"]
+    if not 0.0 <= threshold <= 1.01:
+        raise ValueError(
+            f"RECEIPT_AUTO_LINK_THRESHOLD must be in [0, 1.01], got {threshold!r}"
+        )
 
 def _init_database(app):
     """Initialize database for the application."""

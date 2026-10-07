@@ -384,3 +384,4 @@ def validate_single_field(
         validator.in_range(min_val, max_val)
 
     return validator.get_result()
+
