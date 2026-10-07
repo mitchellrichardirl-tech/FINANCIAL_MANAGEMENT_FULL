@@ -28,6 +28,7 @@ import {
   getCandidateTransactions,
   matchParty,
   createCashTransactionFromReceipt,
+  linkReceipt,
 } from './api';
 import {
   getCategories,
@@ -447,7 +448,8 @@ function ProcessReceipts() {
         selectedReceipt.receipt_id;
       if (!receiptId) throw new Error('Failed to get receipt ID from save response');
       logger.debug(`Linking transaction ${transaction.id} to receipt ${receiptId}`);
-      await updateTransaction(transaction.id, { receipt_id: receiptId });
+      logger.debug(`Linking transaction ${transaction.id} to receipt ${receiptId}`);
+      await linkReceipt(receiptId, transaction.id);
       setReceipts((prev) =>
         prev.map((r) =>
           r.receipt_id === selectedReceiptId
@@ -470,8 +472,16 @@ function ProcessReceipts() {
       setEditTransaction(transaction);
     } catch (err) {
       logger.error('Failed to link receipt to transaction:', err);
-      if (err.code === ErrorCode.NOT_FOUND && err.entity === 'Transaction') {
-        addToast({ message: 'That transaction no longer exists. Refreshing candidates…', type: 'info' });
+      if (
+        (err.code === ErrorCode.NOT_FOUND && err.entity === 'Transaction') ||
+        err.code == ErrorCode.CONFLICT
+      ) {
+        addToast({
+          message: err.code === ErrorCode.CONFLICT
+            ? `${err.userMessage} Refreshing candidates…`
+            : 'That transaction no longer exists. Refreshing candidates…',
+          type: 'info',
+        });
         setCandidateRefreshKey((k) => k + 1);
       } else {
         routeError(err, 'Failed to link receipt');
