@@ -3,34 +3,29 @@
  * Top-level page for the receipt-processing workflow.
  *
  * Three-column layout:
- *  - **Left**  — upload dropzone + list of receipts in this session.
+ *  - **Left**  — upload dropzone + receipt list with two tabs:
+ *      *Session*  — receipts uploaded in this browser session.
+ *      *Unlinked* — server-backed list of receipts awaiting a link
+ *                   (pending + saved), from any session.
  *  - **Middle** — image/PDF preview of the selected receipt.
- *  - **Right** — editable OCR-extracted fields (vendor / date / amount)
- *    and a list of candidate bank transactions the receipt can be
- *    linked to.
+ *  - **Right** — editable fields (vendor / date / amount) and candidate
+ *    bank transactions the receipt can be linked to.
  *
- * Each uploaded receipt moves through states:
- *   `'pending'` → `'saved'` (confirmed, no txn) or `'linked'`
- *   (confirmed + attached to a transaction).
+ * Receipt status is server-authoritative (see ./model.js):
+ *   'pending'  → uploaded, not yet confirmed
+ *   'unlinked' → confirmed, no transaction   (editable + linkable)
+ *   'linked'   → attached to a transaction   (read-only; can Unlink)
  *
  * Error surfacing:
- *  - Validation errors targeting a known form field → inline under
- *    that input (see {@link FIELD_MAP} / `fieldErrors`).
+ *  - Validation errors targeting a known form field → inline under that
+ *    input (see {@link FIELD_MAP} / `fieldErrors`).
  *  - Other validation errors → inline banner (`fieldErrors._general`).
  *  - Everything else → toast.
  */
 
-import { useState, useEffect, useRef } from 'react';
-import { updateTransaction } from '@/features/transactions/api';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  confirmReceipt,
-  deleteReceipt,
-  getCandidateTransactions,
-  matchParty,
-  createCashTransactionFromReceipt,
-  linkReceipt,
-} from './api';
-import {
+  updateTransaction,
   getCategories,
   getSubCategories,
   getTypes,
@@ -40,17 +35,41 @@ import {
   createType,
   createParty,
 } from '@/features/transactions/api';
+import {
+  confirmReceipt,
+  updateReceipt,
+  getReceipt,
+  cancelReceipt,
+  deleteReceipt,
+  getCandidateTransactions,
+  linkReceipt,
+  unlinkReceipt,
+  matchParty,
+  createCashTransactionFromReceipt,
+} from './api';
+import {
+  RECEIPT_STATUS,
+  fromStreamEvent,
+  fromServer,
+  isEditable,
+  isLinked,
+  emitReceiptsChanged,
+} from './model';
+import { useUnlinkedReceipts } from './useUnlinkedReceipts';
 import GenerateCashFromReceiptModal from './GenerateCashFromReceiptModal';
 import BulkEditModal from '../transactions/BulkEditModal';
-import { ErrorCode, parseApiError } from '@/lib/apiErrors';
+import { ErrorCode } from '@/lib/apiErrors';
 import { useToast } from '@/components/ToastContext';
 import BulkUploadReceipts from './BulkUploadReceipts';
 import SelectableReceiptTable from './SelectableReceiptTable';
+import UnlinkedReceiptsPanel from './UnlinkedReceiptsPanel';
 import ImagePreview from './ImagePreview';
 import CandidateTransactions from './CandidateTransactions';
 import { createLogger } from '@/lib/logger';
+
 /** @type {import('@/lib/logger').Logger} */
 const logger = createLogger('ProcessReceipts');
+
 const FIELD_MAP = {
   vendor: 'vendor',
   date: 'date',
@@ -58,17 +77,17 @@ const FIELD_MAP = {
   original_filename: null,
 };
 
+const TAB = { SESSION: 'session', UNLINKED: 'unlinked' };
+
 /* ── Batch summary helpers ─────────────────────────────────────────── */
 const MAX_NAMES_IN_TOAST = 3;
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
-/** "a.pdf, b.jpg, c.png and 4 more" */
 const listFilenames = (items) => {
   const names = items.map((i) => i.filename ?? `file ${i.file_index + 1}`);
   if (names.length <= MAX_NAMES_IN_TOAST) return names.join(', ');
   const shown = names.slice(0, MAX_NAMES_IN_TOAST).join(', ');
   return `${shown} and ${names.length - MAX_NAMES_IN_TOAST} more`;
 };
-/** "5 processed, 2 failed, 3 not processed" */
 const summariseCounts = ({ succeeded, failed, cancelled }) => {
   const parts = [];
   if (succeeded) parts.push(`${succeeded} processed`);
@@ -97,34 +116,53 @@ const INPUT_CLS = [
   'disabled:bg-gray-100 disabled:cursor-not-allowed disabled:text-gray-400',
 ].join(' ');
 const BTN_DIS = 'disabled:cursor-not-allowed disabled:bg-gray-300';
+const TAB_BTN = 'cursor-pointer rounded-t-md border-b-2 px-3 py-1.5 text-sm font-semibold transition-colors';
+const TAB_ACTIVE = `${TAB_BTN} border-[#007bff] text-[#007bff]`;
+const TAB_INACTIVE = `${TAB_BTN} border-transparent text-gray-500 hover:text-gray-800`;
 const SCROLLBAR = [
   '[&::-webkit-scrollbar]:w-2',
   '[&::-webkit-scrollbar-track]:rounded [&::-webkit-scrollbar-track]:bg-gray-100',
   '[&::-webkit-scrollbar-thumb]:rounded [&::-webkit-scrollbar-thumb]:bg-gray-400',
   '[&::-webkit-scrollbar-thumb:hover]:bg-gray-500',
 ].join(' ');
+
+/** Extract the receipt object from a confirm/update response. */
+const receiptFromResponse = (res) => res?.data?.receipt ?? res?.receipt ?? res;
+
 /* ─────────────────────────────────────────────────────────────────── */
 function ProcessReceipts() {
   const { addToast } = useToast();
-  // ── State, effects, handlers ────────────────────────────────────
-  // (all identical to original — only the render JSX changes)
-  const [receipts, setReceipts] = useState([]);
+
+  // ── Receipt lists ────────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState(TAB.SESSION);
+  const [sessionReceipts, setSessionReceipts] = useState([]);
+  const unlinked = useUnlinkedReceipts({ enabled: activeTab === TAB.UNLINKED });
+
   const [selectedReceiptId, setSelectedReceiptId] = useState(null);
   const hasAutoSelectedRef = useRef(false);
+
+  // The selected row can live in either list (a session upload is also a
+  // server 'pending' row). Session wins so in-flight edits are consistent.
+  const selectedReceipt =
+    sessionReceipts.find((r) => r.receipt_id === selectedReceiptId) ??
+    unlinked.rows.find((r) => r.receipt_id === selectedReceiptId) ??
+    null;
+  const activeList = activeTab === TAB.SESSION ? sessionReceipts : unlinked.rows;
+
+  // ── Busy flags / form ────────────────────────────────────────────
   const [isUploading, setIsUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isLinking, setIsLinking] = useState(false);
+  const [isHydrating, setIsHydrating] = useState(false);
   const [fieldErrors, setFieldErrors] = useState({});
-  const [editableData, setEditableData] = useState({
-    vendor: '',
-    date: '',
-    amount: '',
-  });
+  const [editableData, setEditableData] = useState({ vendor: '', date: '', amount: '' });
+
   const [candidateTransactions, setCandidateTransactions] = useState([]);
   const [isLoadingCandidates, setIsLoadingCandidates] = useState(false);
   const [linkedTransactionId, setLinkedTransactionId] = useState(null);
   const [candidateRefreshKey, setCandidateRefreshKey] = useState(0);
-  const selectedReceipt = receipts.find((r) => r.receipt_id === selectedReceiptId);
+
+  // ── Taxonomy / modals ────────────────────────────────────────────
   const [categories, setCategories] = useState([]);
   const [subCategories, setSubCategories] = useState([]);
   const [types, setTypes] = useState([]);
@@ -133,45 +171,88 @@ function ProcessReceipts() {
   const [suggestedPartyId, setSuggestedPartyId] = useState(null);
   const [isGeneratingCash, setIsGeneratingCash] = useState(false);
   const [editTransaction, setEditTransaction] = useState(null);
-  useEffect(() => {
-    if (selectedReceipt) {
-      const extracted = selectedReceipt.extracted_data || {};
-      setEditableData({
-        vendor: extracted.vendor || '',
-        date: extracted.date ? extracted.date.split('T')[0] : '',
-        amount: extracted.amount?.toString() || '',
-      });
-      setLinkedTransactionId(null);
-      setFieldErrors({});
-    } else {
-      setEditableData({ vendor: '', date: '', amount: '' });
-      setCandidateTransactions([]);
-      setFieldErrors({});
-    }
-  }, [selectedReceiptId, selectedReceipt]);
+
+  const busy = isSaving || isLinking || isHydrating;
+  const editable = isEditable(selectedReceipt);
+
+  // ── Shared row mutation: keeps both lists in sync ────────────────
+  const patchReceipt = useCallback(
+    (id, patch) => {
+      const apply = (r) => (typeof patch === 'function' ? patch(r) : { ...r, ...patch });
+      setSessionReceipts((prev) => prev.map((r) => (r.receipt_id === id ? apply(r) : r)));
+      unlinked.patchRow(id, patch);
+    },
+    [unlinked.patchRow],
+  );
+
+  /** Replace a row's server-derived fields, keeping its `source`. */
+  const absorbServerReceipt = useCallback(
+    (serverReceipt) => {
+      const fresh = fromServer(serverReceipt);
+      patchReceipt(fresh.receipt_id, (r) => ({ ...fresh, source: r.source, hydrated: true }));
+      emitReceiptsChanged();
+    },
+    [patchReceipt],
+  );
+
+  // ── Effects ──────────────────────────────────────────────────────
+
+  // Populate the form when selection changes; hydrate server rows with detail.
   useEffect(() => {
     if (!selectedReceipt) {
+      setEditableData({ vendor: '', date: '', amount: '' });
       setCandidateTransactions([]);
+      setLinkedTransactionId(null);
+      setFieldErrors({});
       return;
+    }
+    const ex = selectedReceipt.extracted_data || {};
+    setEditableData({ vendor: ex.vendor || '', date: ex.date || '', amount: ex.amount || '' });
+    setLinkedTransactionId(selectedReceipt.linked_transaction_id ?? null);
+    setFieldErrors({});
+
+    // Summary rows from the list endpoint lack raw_text etc.; fetch detail once.
+    if (selectedReceipt.source === 'server' && !selectedReceipt.hydrated) {
+      let cancelled = false;
+      setIsHydrating(true);
+      getReceipt(selectedReceipt.receipt_id)
+        .then((detail) => { if (!cancelled) absorbServerReceipt(detail); })
+        .catch((err) => {
+          logger.error('Failed to hydrate receipt:', err);
+          if (err.code === ErrorCode.NOT_FOUND) {
+            addToast({ message: 'That receipt no longer exists', type: 'info' });
+            unlinked.removeRow(selectedReceipt.receipt_id);
+            setSelectedReceiptId(null);
+          }
+        })
+        .finally(() => setIsHydrating(false));
+      return () => { cancelled = true; };
+    }
+    return undefined;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedReceiptId]);
+
+  // Candidate search while editing (debounced). Only for linkable receipts.
+  useEffect(() => {
+    if (!selectedReceipt || !editable) {
+      setCandidateTransactions([]);
+      return undefined;
     }
     if (!editableData.date && !editableData.amount) {
       setCandidateTransactions([]);
-      return;
+      return undefined;
     }
     const fetchCandidates = async () => {
       setIsLoadingCandidates(true);
       try {
-        const params = {
+        const response = await getCandidateTransactions({
           date: editableData.date || null,
           amount: editableData.amount ? parseFloat(editableData.amount) : null,
           vendor: editableData.vendor || null,
-        };
-        const response = await getCandidateTransactions(params);
-        if (response.success && response.data?.transactions) {
-          setCandidateTransactions(response.data.transactions);
-        } else {
-          setCandidateTransactions([]);
-        }
+        });
+        setCandidateTransactions(
+          response.success && response.data?.transactions ? response.data.transactions : [],
+        );
       } catch (err) {
         logger.error('Failed to fetch candidate transactions:', err);
         setCandidateTransactions([]);
@@ -181,108 +262,75 @@ function ProcessReceipts() {
     };
     const timeoutId = setTimeout(fetchCandidates, 500);
     return () => clearTimeout(timeoutId);
-  }, [
-    editableData.date,
-    editableData.amount,
-    editableData.vendor,
-    selectedReceipt,
-    candidateRefreshKey,
-  ]);
+  }, [editableData.date, editableData.amount, editableData.vendor, selectedReceiptId, editable, candidateRefreshKey]);
+
   useEffect(() => {
     (async () => {
       try {
         const [cats, subs, ts, ps] = await Promise.all([
-          getCategories(),
-          getSubCategories(),
-          getTypes(),
-          getParties(),
+          getCategories(), getSubCategories(), getTypes(), getParties(),
         ]);
-        setCategories(cats);
-        setSubCategories(subs);
-        setTypes(ts);
-        setParties(ps);
+        setCategories(cats); setSubCategories(subs); setTypes(ts); setParties(ps);
       } catch (err) {
         logger.error('Failed to load taxonomy:', err);
       }
     })();
   }, []);
+
+  // ── Error routing ────────────────────────────────────────────────
   const routeError = (err, fallbackMessage) => {
     const message = err.userMessage || err.message || fallbackMessage;
     const mappedField = err.field ? FIELD_MAP[err.field] : null;
-    if (mappedField) {
-      setFieldErrors({ [mappedField]: message });
-      return;
-    }
+    if (mappedField) { setFieldErrors({ [mappedField]: message }); return; }
     if (err.code === ErrorCode.INVALID_VALUE || err.code === ErrorCode.REQUIRED_FIELD) {
-      setFieldErrors({ _general: message });
-      return;
+      setFieldErrors({ _general: message }); return;
     }
     addToast({ message, type: 'error' });
   };
+
+  // ── Upload callbacks ─────────────────────────────────────────────
   const handleReceiptProcessed = (result) => {
-    const newReceipt = {
-      ...result,
-      receipt_id: result.receipt_id,
-      filename: result.filename,
-      extracted_data: result.extracted_data || {},
-      status: 'pending',
-    };
-    setReceipts((prev) => [...prev, newReceipt]);
+    const row = fromStreamEvent(result);
+    setSessionReceipts((prev) => [...prev, row]);
+    emitReceiptsChanged();
     if (!hasAutoSelectedRef.current) {
       hasAutoSelectedRef.current = true;
-      setSelectedReceiptId(result.receipt_id);
+      setActiveTab(TAB.SESSION);
+      setSelectedReceiptId(row.receipt_id);
     }
   };
+
   const handleProcessingStart = () => {
     setIsUploading(true);
     hasAutoSelectedRef.current = false;
   };
-  
+
   const handleProcessingComplete = ({
-    outcome,
-    succeeded = 0,
-    failed = 0,
-    cancelled = 0,
-    failures = [],
-    cancellations = [],
-    error = null,
+    outcome, succeeded = 0, failed = 0, cancelled = 0, failures = [], cancellations = [], error = null,
   }) => {
     setIsUploading(false);
-    // Log the full lists. The toast only has room for a few names.
     if (failures.length) logger.warn('Receipts that failed:', failures);
     if (cancellations.length) logger.info('Receipts not processed:', cancellations);
     const counts = summariseCounts({ succeeded, failed, cancelled });
     const failedNames = failed ? ` Failed: ${listFilenames(failures)}.` : '';
     switch (outcome) {
       case 'rejected':
-        // onError already showed the reason.
         return;
       case 'completed':
         if (failed === 0) {
-          addToast({
-            message: `${plural(succeeded, 'receipt')} processed`,
-            type: 'success',
-          });
+          addToast({ message: `${plural(succeeded, 'receipt')} processed`, type: 'success' });
         } else {
-          addToast({
-            message: `${counts}.${failedNames}`,
-            type: succeeded > 0 ? 'info' : 'error',
-            duration: 8000,
-          });
+          addToast({ message: `${counts}.${failedNames}`, type: succeeded > 0 ? 'info' : 'error', duration: 8000 });
         }
         return;
       case 'aborted':
-        addToast({
-          message: succeeded + failed > 0 ? `Upload cancelled: ${counts}.` : 'Upload cancelled',
-          type: 'info',
-        });
+        addToast({ message: succeeded + failed > 0 ? `Upload cancelled: ${counts}.` : 'Upload cancelled', type: 'info' });
         return;
       case 'fatal':
       case 'disconnected':
         addToast({
           message: `${error ?? 'Processing stopped unexpectedly'}: ${counts}.${failedNames}`,
-          type: 'error',
-          duration: 10000,
+          type: 'error', duration: 10000,
         });
         return;
       default:
@@ -291,6 +339,7 @@ function ProcessReceipts() {
     }
   };
 
+  // ── Taxonomy create handlers ─────────────────────────────────────
   const makeCreateHandler =
     (label, createFn, refetchFn, setFn, findFn) =>
     async (...args) => {
@@ -300,130 +349,72 @@ function ProcessReceipts() {
       addToast({ message: `${label} "${args[0]}" created`, type: 'success', duration: 2500 });
       return findFn(fresh, ...args) || response;
     };
-  const handleCategoryCreated = makeCreateHandler(
-    'Category', createCategory, getCategories, setCategories,
-    (list, name) => list.find((c) => c.category === name),
-  );
-  const handleSubCategoryCreated = makeCreateHandler(
-    'Sub-category', createSubCategory, getSubCategories, setSubCategories,
-    (list, name, catId) => list.find((s) => s.sub_category === name && s.category_id === catId),
-  );
-  const handleTypeCreated = makeCreateHandler(
-    'Type', createType, getTypes, setTypes,
-    (list, name, subId) => list.find((t) => t.type === name && t.sub_category_id === subId),
-  );
-  const handlePartyCreated = makeCreateHandler(
-    'Party', createParty, getParties, setParties,
-    (list, name, typeId) => list.find((p) => p.name === name && p.type_id === typeId),
-  );
-  const handleSelectReceipt = (receiptId) => {
-    setSelectedReceiptId(receiptId);
-  };
+  const handleCategoryCreated = makeCreateHandler('Category', createCategory, getCategories, setCategories,
+    (list, name) => list.find((c) => c.category === name));
+  const handleSubCategoryCreated = makeCreateHandler('Sub-category', createSubCategory, getSubCategories, setSubCategories,
+    (list, name, catId) => list.find((s) => s.sub_category === name && s.category_id === catId));
+  const handleTypeCreated = makeCreateHandler('Type', createType, getTypes, setTypes,
+    (list, name, subId) => list.find((t) => t.type === name && t.sub_category_id === subId));
+  const handlePartyCreated = makeCreateHandler('Party', createParty, getParties, setParties,
+    (list, name, typeId) => list.find((p) => p.name === name && p.type_id === typeId));
+
+  // ── Selection / form ─────────────────────────────────────────────
+  const handleSelectReceipt = (receiptId) => setSelectedReceiptId(receiptId);
+
   const handleInputChange = (field, value) => {
     setEditableData((prev) => ({ ...prev, [field]: value }));
     if (fieldErrors[field]) {
-      setFieldErrors((prev) => {
-        const next = { ...prev };
-        delete next[field];
-        return next;
-      });
+      setFieldErrors((prev) => { const next = { ...prev }; delete next[field]; return next; });
     }
   };
-  const buildReceiptData = () => {
-    if (!selectedReceipt) return null;
-    return {
-      id: selectedReceipt.receipt_id,
-      original_filename: selectedReceipt.filename,
+
+  /** Move to the next actionable receipt in the active list. */
+  const selectNextReceipt = () => {
+    const list = activeList;
+    const currentIndex = list.findIndex((r) => r.receipt_id === selectedReceiptId);
+    const actionable = list.filter((r) => isEditable(r) && r.receipt_id !== selectedReceiptId);
+    if (actionable.length === 0) return;
+    const nextAfter = actionable.find((r) => list.indexOf(r) > currentIndex);
+    setSelectedReceiptId(nextAfter?.receipt_id ?? actionable[0].receipt_id);
+  };
+
+  // ── Persistence primitives ───────────────────────────────────────
+  const buildConfirmPayload = () => ({
+    id: selectedReceipt.receipt_id,
+    original_filename: selectedReceipt.filename,
+    vendor: editableData.vendor,
+    amount: editableData.amount ? parseFloat(editableData.amount) : null,
+    date: editableData.date || null,
+    stored_filename: selectedReceipt.stored_filename ?? undefined,
+    confidence: selectedReceipt.extracted_data?.confidence ?? 0,
+    selected_method: selectedReceipt.extracted_data?.selected_method || 'manual',
+    raw_text: selectedReceipt.extracted_data?.raw_text ?? undefined,
+  });
+
+  /**
+   * Persist the form. pending → confirm (promotes to 'unlinked');
+   * unlinked/linked → plain field update. Returns the server receipt.
+   */
+  const persistEdits = async () => {
+    if (selectedReceipt.status === RECEIPT_STATUS.PENDING) {
+      const res = await confirmReceipt(buildConfirmPayload());
+      return receiptFromResponse(res);
+    }
+    return updateReceipt(selectedReceipt.receipt_id, {
       vendor: editableData.vendor,
       amount: editableData.amount ? parseFloat(editableData.amount) : null,
       date: editableData.date || null,
-      stored_filename: selectedReceipt.stored_filename,
-      file_path: selectedReceipt.file_path,
-      confidence: selectedReceipt.extracted_data?.confidence || 0,
-      selected_method: selectedReceipt.extracted_data?.selected_method || 'manual',
-      raw_text: selectedReceipt.extracted_data?.raw_text,
-      page_number: selectedReceipt.page_number || 1,
-    };
+    });
   };
-  const handleOpenCashModal = async () => {
-    setSuggestedPartyId(null);
-    try {
-      const match = await matchParty(editableData.vendor);
-      if (match?.party_id) setSuggestedPartyId(match.party_id);
-    } catch (err) {
-      logger.warn('Party match failed (non-fatal):', err);
-    }
-    setIsCashModalOpen(true);
-  };
-  const handleGenerateCash = async ({ partyId, isWithdrawal, isCredit, isKids, isOneOff }) => {
-    if (!selectedReceipt) return;
-    setFieldErrors({});
-    setIsGeneratingCash(true);
-    try {
-      const receiptData = buildReceiptData();
-      const saveResult = await confirmReceipt(receiptData);
-      const receiptId =
-        saveResult.data?.receipt?.id ||
-        saveResult.receipt?.id ||
-        saveResult.id ||
-        selectedReceipt.receipt_id;
-      if (!receiptId) throw new Error('Failed to get receipt ID from save response');
-      const result = await createCashTransactionFromReceipt({
-        receiptId, partyId, isWithdrawal, isCredit, isKids, isOneOff,
-      });
-      const txn = result?.data?.transaction ?? result?.transaction;
-      setReceipts((prev) =>
-        prev.map((r) =>
-          r.receipt_id === selectedReceiptId
-            ? {
-                ...r,
-                status: 'linked',
-                linked_transaction_id: txn?.id,
-                extracted_data: {
-                  ...r.extracted_data,
-                  vendor: editableData.vendor,
-                  date: editableData.date,
-                  amount: editableData.amount,
-                },
-              }
-            : r,
-        ),
-      );
-      setIsCashModalOpen(false);
-      addToast({ message: 'Cash transaction created from receipt', type: 'success', duration: 2500 });
-      setTimeout(selectNextReceipt, 1000);
-    } catch (err) {
-      logger.error('Failed to generate cash transaction:', err);
-      routeError(err, 'Failed to generate cash transaction');
-      throw err;
-    } finally {
-      setIsGeneratingCash(false);
-    }
-  };
+
+  // ── Actions ──────────────────────────────────────────────────────
   const handleSave = async () => {
     if (!selectedReceipt) return;
     setFieldErrors({});
     setIsSaving(true);
     try {
-      const receiptData = buildReceiptData();
-      logger.debug('Saving receipt data:', receiptData);
-      await confirmReceipt(receiptData);
-      setReceipts((prev) =>
-        prev.map((r) =>
-          r.receipt_id === selectedReceiptId
-            ? {
-                ...r,
-                status: 'saved',
-                extracted_data: {
-                  ...r.extracted_data,
-                  vendor: editableData.vendor,
-                  date: editableData.date,
-                  amount: editableData.amount,
-                },
-              }
-            : r,
-        ),
-      );
+      const saved = await persistEdits();
+      absorbServerReceipt(saved);
       addToast({ message: 'Receipt saved', type: 'success', duration: 2000 });
       setTimeout(selectNextReceipt, 800);
     } catch (err) {
@@ -433,49 +424,21 @@ function ProcessReceipts() {
       setIsSaving(false);
     }
   };
+
   const handleSelectTransaction = async (transaction) => {
     if (!selectedReceipt) return;
     setFieldErrors({});
     setIsLinking(true);
     try {
-      const receiptData = buildReceiptData();
-      logger.debug('Saving receipt before linking:', receiptData);
-      const saveResult = await confirmReceipt(receiptData);
-      const receiptId =
-        saveResult.data?.receipt?.id ||
-        saveResult.receipt?.id ||
-        saveResult.id ||
-        selectedReceipt.receipt_id;
-      if (!receiptId) throw new Error('Failed to get receipt ID from save response');
-      logger.debug(`Linking transaction ${transaction.id} to receipt ${receiptId}`);
-      logger.debug(`Linking transaction ${transaction.id} to receipt ${receiptId}`);
-      await linkReceipt(receiptId, transaction.id);
-      setReceipts((prev) =>
-        prev.map((r) =>
-          r.receipt_id === selectedReceiptId
-            ? {
-                ...r,
-                status: 'linked',
-                linked_transaction_id: transaction.id,
-                extracted_data: {
-                  ...r.extracted_data,
-                  vendor: editableData.vendor,
-                  date: editableData.date,
-                  amount: editableData.amount,
-                },
-              }
-            : r,
-        ),
-      );
+      await persistEdits();
+      const { receipt } = await linkReceipt(selectedReceipt.receipt_id, transaction.id);
+      absorbServerReceipt(receipt);
       setLinkedTransactionId(transaction.id);
       addToast({ message: 'Receipt linked to transaction', type: 'success', duration: 2500 });
       setEditTransaction(transaction);
     } catch (err) {
       logger.error('Failed to link receipt to transaction:', err);
-      if (
-        (err.code === ErrorCode.NOT_FOUND && err.entity === 'Transaction') ||
-        err.code == ErrorCode.CONFLICT
-      ) {
+      if ((err.code === ErrorCode.NOT_FOUND && err.entity === 'Transaction') || err.code === ErrorCode.CONFLICT) {
         addToast({
           message: err.code === ErrorCode.CONFLICT
             ? `${err.userMessage} Refreshing candidates…`
@@ -490,6 +453,64 @@ function ProcessReceipts() {
       setIsLinking(false);
     }
   };
+
+  const handleUnlink = async () => {
+    if (!selectedReceipt || !isLinked(selectedReceipt)) return;
+    setIsLinking(true);
+    try {
+      const { receipt } = await unlinkReceipt(selectedReceipt.receipt_id);
+      absorbServerReceipt(receipt);
+      setLinkedTransactionId(null);
+      setCandidateRefreshKey((k) => k + 1);
+      addToast({ message: 'Receipt unlinked', type: 'success', duration: 2000 });
+    } catch (err) {
+      logger.error('Failed to unlink receipt:', err);
+      addToast({ message: err.userMessage || 'Failed to unlink receipt', type: 'error' });
+    } finally {
+      setIsLinking(false);
+    }
+  };
+
+  const handleOpenCashModal = async () => {
+    setSuggestedPartyId(null);
+    try {
+      const match = await matchParty(editableData.vendor);
+      if (match?.party_id) setSuggestedPartyId(match.party_id);
+    } catch (err) {
+      logger.warn('Party match failed (non-fatal):', err);
+    }
+    setIsCashModalOpen(true);
+  };
+
+  const handleGenerateCash = async ({ partyId, isWithdrawal, isCredit, isKids, isOneOff }) => {
+    if (!selectedReceipt) return;
+    setFieldErrors({});
+    setIsGeneratingCash(true);
+    try {
+      await persistEdits();
+      const result = await createCashTransactionFromReceipt({
+        receiptId: selectedReceipt.receipt_id, partyId, isWithdrawal, isCredit, isKids, isOneOff,
+      });
+      const txn = result?.data?.transaction ?? result?.transaction;
+      // from-receipt links server-side; reflect it locally and refresh detail.
+      patchReceipt(selectedReceipt.receipt_id, {
+        status: RECEIPT_STATUS.LINKED,
+        linked_transaction_id: txn?.id ?? null,
+        extracted_data: { ...selectedReceipt.extracted_data, ...editableData },
+      });
+      emitReceiptsChanged();
+      setIsCashModalOpen(false);
+      addToast({ message: 'Cash transaction created from receipt', type: 'success', duration: 2500 });
+      setTimeout(selectNextReceipt, 1000);
+    } catch (err) {
+      logger.error('Failed to generate cash transaction:', err);
+      routeError(err, 'Failed to generate cash transaction');
+      throw err;
+    } finally {
+      setIsGeneratingCash(false);
+    }
+  };
+
   const handleRecategorize = async (updates) => {
     if (!editTransaction) return;
     try {
@@ -498,40 +519,48 @@ function ProcessReceipts() {
       handleCloseRecategorize();
     } catch (err) {
       logger.error('Failed to update transaction:', err);
-      addToast({
-        message: `Failed to update transaction: ${err.userMessage || err.message}`,
-        type: 'error',
-      });
-      throw err;   // keeps the modal open; BulkEditModal resets isSaving in its catch
+      addToast({ message: `Failed to update transaction: ${err.userMessage || err.message}`, type: 'error' });
+      throw err;
     }
   };
+
   const handleCloseRecategorize = () => {
     setEditTransaction(null);
-    setTimeout(selectNextReceipt, 300);   // advance only once the modal is dealt with
+    setTimeout(selectNextReceipt, 300);
   };
+
+  /** Remove a row from whichever lists hold it and pick a neighbour. */
+  const dropReceipt = (receiptId) => {
+    const list = activeList;
+    const currentIndex = list.findIndex((r) => r.receipt_id === receiptId);
+    setSessionReceipts((prev) => prev.filter((r) => r.receipt_id !== receiptId));
+    unlinked.removeRow(receiptId);
+    if (selectedReceiptId === receiptId) {
+      const remaining = list.filter((r) => r.receipt_id !== receiptId);
+      setSelectedReceiptId(remaining.length ? remaining[Math.min(currentIndex, remaining.length - 1)].receipt_id : null);
+    }
+  };
+
   const handleDelete = async () => {
     if (!selectedReceipt) return;
+    const linked = isLinked(selectedReceipt);
+    if (linked && !window.confirm('This receipt is linked to a transaction. Unlink and delete it?')) return;
     setFieldErrors({});
     setIsSaving(true);
     try {
-      logger.debug('Deleting receipt:', selectedReceipt.receipt_id);
-      await deleteReceipt(selectedReceipt.receipt_id);
-      const currentIndex = receipts.findIndex((r) => r.receipt_id === selectedReceiptId);
-      const remaining = receipts.filter((r) => r.receipt_id !== selectedReceiptId);
-      setReceipts(remaining);
-      if (remaining.length > 0) {
-        const nextIndex = Math.min(currentIndex, remaining.length - 1);
-        setSelectedReceiptId(remaining[nextIndex].receipt_id);
+      if (selectedReceipt.status === RECEIPT_STATUS.PENDING) {
+        await cancelReceipt(selectedReceipt.receipt_id);
       } else {
-        setSelectedReceiptId(null);
+        await deleteReceipt(selectedReceipt.receipt_id, { force: linked });
       }
+      dropReceipt(selectedReceipt.receipt_id);
+      emitReceiptsChanged();
       addToast({ message: 'Receipt deleted', type: 'success', duration: 1500 });
     } catch (err) {
       logger.error('Failed to delete receipt:', err);
       if (err.code === ErrorCode.NOT_FOUND) {
         addToast({ message: 'Receipt was already deleted', type: 'info' });
-        setReceipts((prev) => prev.filter((r) => r.receipt_id !== selectedReceiptId));
-        setSelectedReceiptId(null);
+        dropReceipt(selectedReceipt.receipt_id);
       } else {
         addToast({ message: err.userMessage || 'Failed to delete receipt', type: 'error' });
       }
@@ -539,71 +568,57 @@ function ProcessReceipts() {
       setIsSaving(false);
     }
   };
+
+  /** Session-list only: forget a row locally (the server still has it). */
   const handleRemoveFromList = (receiptId) => {
-    const currentIndex = receipts.findIndex((r) => r.receipt_id === receiptId);
-    const remaining = receipts.filter((r) => r.receipt_id !== receiptId);
-    setReceipts(remaining);
+    const currentIndex = sessionReceipts.findIndex((r) => r.receipt_id === receiptId);
+    const remaining = sessionReceipts.filter((r) => r.receipt_id !== receiptId);
+    setSessionReceipts(remaining);
     if (selectedReceiptId === receiptId) {
-      if (remaining.length > 0) {
-        const nextIndex = Math.min(currentIndex, remaining.length - 1);
-        setSelectedReceiptId(remaining[nextIndex].receipt_id);
-      } else {
-        setSelectedReceiptId(null);
-      }
+      setSelectedReceiptId(remaining.length ? remaining[Math.min(currentIndex, remaining.length - 1)].receipt_id : null);
     }
   };
-  const selectNextReceipt = () => {
-    const currentIndex = receipts.findIndex((r) => r.receipt_id === selectedReceiptId);
-    const pending = receipts.filter(
-      (r) => r.status === 'pending' && r.receipt_id !== selectedReceiptId,
-    );
-    if (pending.length > 0) {
-      const nextAfter = pending.find((r) => receipts.indexOf(r) > currentIndex);
-      setSelectedReceiptId(nextAfter?.receipt_id || pending[0].receipt_id);
-    }
-  };
-  const handleClearAll = () => {
-    setReceipts([]);
-    setSelectedReceiptId(null);
-    setEditableData({ vendor: '', date: '', amount: '' });
-    setCandidateTransactions([]);
-    setFieldErrors({});
+
+  const handleClearSession = () => {
+    setSessionReceipts([]);
+    if (activeTab === TAB.SESSION) setSelectedReceiptId(null);
     hasAutoSelectedRef.current = false;
   };
-  const canSave =
-    selectedReceipt &&
-    selectedReceipt.status === 'pending' &&
-    editableData.vendor.trim() !== '' &&
-    !isSaving &&
-    !isLinking;
-  const canDelete =
-    selectedReceipt && selectedReceipt.status === 'pending' && !isSaving && !isLinking;
+
+  const handleTabChange = (tab) => {
+    setActiveTab(tab);
+    // Keep the selection if it exists in the target list; else clear.
+    const target = tab === TAB.SESSION ? sessionReceipts : unlinked.rows;
+    if (!target.some((r) => r.receipt_id === selectedReceiptId)) setSelectedReceiptId(null);
+  };
+
+  // ── Derived flags ────────────────────────────────────────────────
+  const canSave = editable && editableData.vendor.trim() !== '' && !busy;
+  const canDelete = !!selectedReceipt && !busy;
+  const canUnlink = isLinked(selectedReceipt) && !busy;
   const canGenerateCash =
-    selectedReceipt &&
-    selectedReceipt.status === 'pending' &&
-    editableData.vendor.trim() !== '' &&
-    editableData.date !== '' &&
-    editableData.amount !== '' &&
-    !isSaving &&
-    !isLinking &&
-    !isGeneratingCash;
-  const pendingCount = receipts.filter((r) => r.status === 'pending').length;
-  const processedCount = receipts.filter((r) => r.status !== 'pending').length;
-  // ── Render ────────────────────────────────────────────────────────
+    editable && editableData.vendor.trim() !== '' && editableData.date !== '' &&
+    editableData.amount !== '' && !busy && !isGeneratingCash;
+
+  const pendingCount = sessionReceipts.filter((r) => r.status === RECEIPT_STATUS.PENDING).length;
+  const processedCount = sessionReceipts.length - pendingCount;
+
+  // ── Render ───────────────────────────────────────────────────────
   return (
     <div className="mx-auto flex h-full max-w-[calc(100vw-4rem)] flex-1 flex-col px-8 py-6">
       <div className="shrink-0">
         <h1 className="text-2xl font-bold">Process Receipts</h1>
         <div className="flex items-center gap-4">
-          {receipts.length > 0 && (
+          {sessionReceipts.length > 0 && (
             <span className="rounded-full bg-[#f0f0f0] px-4 py-2 text-sm text-gray-500">
-              {pendingCount} pending, {processedCount} processed
+              This session: {pendingCount} pending, {processedCount} processed
             </span>
           )}
         </div>
       </div>
+
       <div className={GRID}>
-        {/* ── Left: upload + session list ── */}
+        {/* ── Left: upload + lists ── */}
         <div className={`${COLUMN} min-[1200px]:min-w-[420px] min-[1400px]:min-w-[500px]`}>
           <div className={`${CARD} shrink-0`}>
             <h3 className={SECTION_H3}>Upload Receipts</h3>
@@ -615,30 +630,59 @@ function ProcessReceipts() {
               compact={true}
             />
           </div>
-          <div className={`${CARD} min-h-0 flex-1 overflow-y-auto`}>
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-[1.1rem] font-semibold text-gray-800">
-                Receipts ({receipts.length})
-              </h3>
-              {receipts.length > 0 && (
+
+          <div className={`${CARD} flex min-h-0 flex-1 flex-col`}>
+            <div className="mb-3 flex items-center justify-between border-b border-gray-200">
+              <div className="flex gap-1">
                 <button
-                  onClick={handleClearAll}
-                  className="cursor-pointer rounded border border-[#dc3545] bg-transparent px-3 py-1.5 text-[0.8rem] text-[#dc3545] transition-all hover:bg-[#dc3545] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={isUploading || isSaving || isLinking}
+                  className={activeTab === TAB.SESSION ? TAB_ACTIVE : TAB_INACTIVE}
+                  onClick={() => handleTabChange(TAB.SESSION)}
+                  disabled={busy}
                 >
-                  Clear All
+                  This session ({sessionReceipts.length})
+                </button>
+                <button
+                  className={activeTab === TAB.UNLINKED ? TAB_ACTIVE : TAB_INACTIVE}
+                  onClick={() => handleTabChange(TAB.UNLINKED)}
+                  disabled={busy}
+                  title="Receipts saved or left unprocessed in any session"
+                >
+                  Unlinked{activeTab === TAB.UNLINKED ? ` (${unlinked.total})` : ''}
+                </button>
+              </div>
+              {activeTab === TAB.SESSION && sessionReceipts.length > 0 && (
+                <button
+                  onClick={handleClearSession}
+                  className="mb-1 cursor-pointer rounded border border-gray-400 bg-transparent px-3 py-1 text-[0.75rem] text-gray-600 transition-all hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={isUploading || busy}
+                  title="Clear this list. Receipts stay on the server and remain available under Unlinked."
+                >
+                  Clear session
                 </button>
               )}
             </div>
-            <SelectableReceiptTable
-              receipts={receipts}
-              selectedReceiptId={selectedReceiptId}
-              onSelectReceipt={handleSelectReceipt}
-              onRemoveReceipt={handleRemoveFromList}
-              disabled={isSaving || isLinking}
-            />
+
+            {activeTab === TAB.SESSION ? (
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                <SelectableReceiptTable
+                  receipts={sessionReceipts}
+                  selectedReceiptId={selectedReceiptId}
+                  onSelectReceipt={handleSelectReceipt}
+                  onRemoveReceipt={handleRemoveFromList}
+                  disabled={busy}
+                />
+              </div>
+            ) : (
+              <UnlinkedReceiptsPanel
+                list={unlinked}
+                selectedReceiptId={selectedReceiptId}
+                onSelectReceipt={handleSelectReceipt}
+                disabled={busy}
+              />
+            )}
           </div>
         </div>
+
         {/* ── Middle: image preview ── */}
         <div className={`${COLUMN} min-[1200px]:min-w-[350px]`}>
           <div className={`${CARD} flex flex-1 flex-col`}>
@@ -651,91 +695,50 @@ function ProcessReceipts() {
               />
             ) : (
               <div className="flex flex-1 items-center justify-center min-h-[300px] rounded-lg border-2 border-dashed border-[#e0e0e0] bg-gray-50 text-base text-gray-400">
-                {receipts.length === 0
-                  ? 'Upload receipts to get started'
-                  : 'Select a receipt to view'}
+                {activeList.length === 0 ? 'Upload receipts to get started' : 'Select a receipt to view'}
               </div>
             )}
           </div>
         </div>
-        {/* ── Right: details form + candidate transactions ── */}
+
+        {/* ── Right: details form + candidates ── */}
         <div className={`${COLUMN} min-[1200px]:min-w-[420px] min-[1400px]:min-w-[580px]`}>
           <div className={`${CARD} shrink-0`}>
             <h3 className={SECTION_H3}>Receipt Details</h3>
             {selectedReceipt ? (
               <div className="flex flex-col gap-5">
                 {fieldErrors._general && (
-                  <div
-                    className="rounded border border-danger-border bg-danger-bg px-3 py-2.5 text-sm text-danger-text"
-                    role="alert"
-                  >
+                  <div className="rounded border border-danger-border bg-danger-bg px-3 py-2.5 text-sm text-danger-text" role="alert">
                     {fieldErrors._general}
                   </div>
                 )}
-                <div className="flex flex-col gap-1.5">
-                  <label htmlFor="vendor" className="text-sm font-semibold text-[#444]">
-                    Vendor: <span className="text-[#dc3545]">*</span>
-                  </label>
-                  <input
-                    id="vendor"
-                    type="text"
-                    value={editableData.vendor}
-                    onChange={(e) => handleInputChange('vendor', e.target.value)}
-                    placeholder="Enter vendor name"
-                    required
-                    disabled={isLinking || isSaving || selectedReceipt.status !== 'pending'}
-                    aria-invalid={!!fieldErrors.vendor}
-                    aria-describedby={fieldErrors.vendor ? 'vendor-error' : undefined}
-                    className={INPUT_CLS}
-                  />
-                  {fieldErrors.vendor && (
-                    <span id="vendor-error" className="text-sm text-red-600">
-                      {fieldErrors.vendor}
-                    </span>
-                  )}
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <label htmlFor="date" className="text-sm font-semibold text-[#444]">
-                    Date:
-                  </label>
-                  <input
-                    id="date"
-                    type="date"
-                    value={editableData.date}
-                    onChange={(e) => handleInputChange('date', e.target.value)}
-                    disabled={isLinking || isSaving || selectedReceipt.status !== 'pending'}
-                    aria-invalid={!!fieldErrors.date}
-                    aria-describedby={fieldErrors.date ? 'date-error' : undefined}
-                    className={INPUT_CLS}
-                  />
-                  {fieldErrors.date && (
-                    <span id="date-error" className="text-sm text-red-600">
-                      {fieldErrors.date}
-                    </span>
-                  )}
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <label htmlFor="amount" className="text-sm font-semibold text-[#444]">
-                    Amount:
-                  </label>
-                  <input
-                    id="amount"
-                    type="number"
-                    step="0.01"
-                    value={editableData.amount}
-                    onChange={(e) => handleInputChange('amount', e.target.value)}
-                    placeholder="Enter amount"
-                    disabled={isLinking || isSaving || selectedReceipt.status !== 'pending'}
-                    aria-invalid={!!fieldErrors.amount}
-                    aria-describedby={fieldErrors.amount ? 'amount-error' : undefined}
-                    className={INPUT_CLS}
-                  />
-                  {fieldErrors.amount && (
-                    <span id="amount-error" className="text-sm text-red-600">
-                      {fieldErrors.amount}
-                    </span>
-                  )}
-                </div>
+
+                {[
+                  { id: 'vendor', label: 'Vendor', type: 'text', required: true, placeholder: 'Enter vendor name' },
+                  { id: 'date', label: 'Date', type: 'date' },
+                  { id: 'amount', label: 'Amount', type: 'number', step: '0.01', placeholder: 'Enter amount' },
+                ].map(({ id, label, required, ...inputProps }) => (
+                  <div key={id} className="flex flex-col gap-1.5">
+                    <label htmlFor={id} className="text-sm font-semibold text-[#444]">
+                      {label}: {required && <span className="text-[#dc3545]">*</span>}
+                    </label>
+                    <input
+                      id={id}
+                      {...inputProps}
+                      value={editableData[id]}
+                      onChange={(e) => handleInputChange(id, e.target.value)}
+                      required={required}
+                      disabled={busy || !editable}
+                      aria-invalid={!!fieldErrors[id]}
+                      aria-describedby={fieldErrors[id] ? `${id}-error` : undefined}
+                      className={INPUT_CLS}
+                    />
+                    {fieldErrors[id] && (
+                      <span id={`${id}-error`} className="text-sm text-red-600">{fieldErrors[id]}</span>
+                    )}
+                  </div>
+                ))}
+
                 <div className="mt-2 flex gap-3">
                   <button
                     onClick={handleSave}
@@ -753,6 +756,16 @@ function ProcessReceipts() {
                   >
                     Generate Cash
                   </button>
+                  {isLinked(selectedReceipt) && (
+                    <button
+                      onClick={handleUnlink}
+                      className="cursor-pointer rounded-md border border-[#007bff] bg-transparent px-5 py-2.5 font-medium text-[#007bff] transition-colors hover:bg-[#e7f1ff] disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={!canUnlink}
+                      title="Detach from its transaction; the receipt stays saved"
+                    >
+                      {isLinking ? 'Unlinking...' : 'Unlink'}
+                    </button>
+                  )}
                   <button
                     onClick={handleDelete}
                     className={`cursor-pointer rounded-md bg-[#dc3545] px-5 py-2.5 font-medium text-white transition-colors hover:bg-[#c82333] ${BTN_DIS}`}
@@ -761,16 +774,18 @@ function ProcessReceipts() {
                     {isSaving ? 'Deleting...' : 'Delete'}
                   </button>
                 </div>
-                {selectedReceipt.status !== 'pending' && (
+
+                {selectedReceipt.status !== RECEIPT_STATUS.PENDING && (
                   <div
                     className={`mt-3 rounded-md p-2.5 text-center text-sm font-semibold ${
-                      selectedReceipt.status === 'saved'
-                        ? 'bg-[#d4edda] text-[#155724]'
+                      selectedReceipt.status === RECEIPT_STATUS.UNLINKED
+                        ? 'bg-[#fff3cd] text-[#856404]'
                         : 'bg-[#cce5ff] text-[#004085]'
                     }`}
                   >
-                    {selectedReceipt.status === 'saved' && '✓ Saved'}
-                    {selectedReceipt.status === 'linked' && '✓ Linked to Transaction'}
+                    {selectedReceipt.status === RECEIPT_STATUS.UNLINKED && '◐ Saved — not yet linked to a transaction'}
+                    {selectedReceipt.status === RECEIPT_STATUS.LINKED &&
+                      `🔗 Linked to transaction${selectedReceipt.linked_transaction_id ? ` #${selectedReceipt.linked_transaction_id}` : ''}`}
                   </div>
                 )}
               </div>
@@ -778,31 +793,29 @@ function ProcessReceipts() {
               <div className={EMPTY}>Select a receipt to edit details</div>
             )}
           </div>
+
           <div className={`${CARD} flex min-h-0 flex-1 flex-col`}>
             <h3 className={SECTION_H3}>Link to Transaction</h3>
             <div className={`min-h-0 flex-1 overflow-y-auto ${SCROLLBAR}`}>
-              {selectedReceipt ? (
-                selectedReceipt.status !== 'pending' ? (
-                  <div className={EMPTY}>This receipt has already been processed</div>
-                ) : isLoadingCandidates ? (
-                  <div className="py-6 text-center text-sm text-gray-500">
-                    Loading candidate transactions...
-                  </div>
-                ) : (
-                  <CandidateTransactions
-                    transactions={candidateTransactions}
-                    onSelectTransaction={handleSelectTransaction}
-                    linkedTransactionId={linkedTransactionId}
-                    disabled={isLinking || isSaving || selectedReceipt.status !== 'pending'}
-                  />
-                )
-              ) : (
+              {!selectedReceipt ? (
                 <div className={EMPTY}>Select a receipt to find matching transactions</div>
+              ) : isLinked(selectedReceipt) ? (
+                <div className={EMPTY}>This receipt is linked. Use Unlink to choose a different transaction.</div>
+              ) : isHydrating || isLoadingCandidates ? (
+                <div className="py-6 text-center text-sm text-gray-500">Loading candidate transactions...</div>
+              ) : (
+                <CandidateTransactions
+                  transactions={candidateTransactions}
+                  onSelectTransaction={handleSelectTransaction}
+                  linkedTransactionId={linkedTransactionId}
+                  disabled={busy || !editable}
+                />
               )}
             </div>
           </div>
         </div>
       </div>
+
       <GenerateCashFromReceiptModal
         isOpen={isCashModalOpen}
         onClose={() => setIsCashModalOpen(false)}
@@ -837,8 +850,9 @@ function ProcessReceipts() {
         onSubCategoryCreated={handleSubCategoryCreated}
         onTypeCreated={handleTypeCreated}
         onPartyCreated={handlePartyCreated}
-      />      
+      />
     </div>
   );
 }
+
 export default ProcessReceipts;
