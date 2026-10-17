@@ -1007,3 +1007,48 @@ Not a bug — no test is xfailed for this — but it surfaced while writing
   configs use split or signed amounts), so the exposure today is entirely via
   user-defined formats loaded through `from_dict()` — which is also the path
   with no review step.
+
+## 12. `get("user:abc")` raises a bare `ValueError` instead of an `AppError`
+- **Where:** `src/statements/registry.py`, `StatementFormatRegistry.get()`.
+- **Symptom:** the user branch is
+  `return self._get_user(int(identifier[len(self.USER_PREFIX):]))` with no
+  guard. Any non-numeric suffix (`"user:abc"`, `"user:"`, `"user:1.5"`)
+  escapes as `ValueError: invalid literal for int() with base 10: 'abc'`.
+  Every other lookup failure in this class raises a structured `AppError` with
+  a status code, which the API layer surfaces directly — so a malformed
+  identifier becomes an unhandled 500 rather than a 404/400 with a useful
+  message.
+- **How it gets in:** `accounts.statement_format` is a free-form TEXT column
+  (see item 7), so a typo or hand-edited row reaches `get()` unvalidated. The
+  upload route calls `get_processor(identifier=account['statement_format'], …)`
+  with whatever is stored.
+- **Fix:** wrap the parse and raise `AppError(NOT_FOUND, …)` — or `BAD_REQUEST`
+  if you'd rather distinguish "malformed identifier" from "no such format".
+  The bare-key fall-through below it already produces exactly the right error
+  for unrecognised input, so the simplest fix is to let a non-numeric suffix
+  fall through to it.
+- **Tests:** `tests/test_statements/test_registry.py`, marker
+  `NON_NUMERIC_USER_ID` (2 tests). They assert `AppError` with a 400 or 404, so
+  either choice passes.
+- **Risk:** low.
+
+## 13. Injected empty dicts are silently replaced by the module defaults
+- **Where:** `src/statements/registry.py`,
+  `StatementFormatRegistry.__init__()`.
+- **Symptom:** all three dependencies use `or` for their defaults:
+  `self._builtin = builtin_configs or STATEMENT_CONFIGS`. An empty dict is
+  falsy, so `StatementFormatRegistry(builtin_configs={})` — "I want no
+  built-ins" — silently gets the real `STATEMENT_CONFIGS` instead. Same for
+  `custom_processors={}`.
+- **Why it matters:** the class docstring advertises all three as injectable
+  for testing, and this is the one injection that silently does the opposite
+  of what's asked. A test that registers no built-ins to check empty-state
+  behaviour would pass against the real configs and prove nothing. It's also
+  a live footgun if a caller ever wants a deliberately empty registry.
+- **Fix:** use an explicit None check:
+  `self._builtin = STATEMENT_CONFIGS if builtin_configs is None else builtin_configs`.
+  `statement_format_repo` has the same shape but no practical failure mode —
+  worth changing all three for consistency.
+- **Test:** `tests/test_statements/test_registry.py`, marker
+  `EMPTY_INJECTION_IGNORED` (1 test).
+- **Risk:** very low. Nothing in `src/` passes an empty dict today.
