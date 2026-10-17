@@ -903,3 +903,107 @@ Not a bug — no test is xfailed for this — but it surfaced while writing
   `TestUpdateFormat::test_no_fields_on_missing_format_raises_not_found` pin
   current behaviour, so they'll fail loudly if it changes. Update them with
   the fix.
+
+# Statement pipeline bugs found while adding tests for `statements/base.py`
+
+## 8. A statement with zero surviving rows crashes the pipeline
+- **Where:** `src/statements/base.py`, `StatementProcessor._categorize()`.
+- **Symptom:** if every row is removed by `exclude_patterns`, or every row is
+  dropped for an unparseable date, `_categorize()` is still called with an
+  empty frame. `pd.DataFrame([])` has no columns, so
+  `df[['cleaned_description', 'party_id', 'confidence']] = ...` raises
+  `ValueError: Columns must be same length as key`. The user sees a 500 rather
+  than "0 transactions imported".
+  The real `TransactionCategorizer.categorize()` also raises
+  `ValueError("No transactions data provided")` on an empty list, so the live
+  path fails slightly earlier but just as hard.
+- **Repro:** a statement containing only rows matching an exclude pattern
+  (e.g. an AIB export with nothing but an OPENING BALANCE line), or a file
+  where the date column is entirely blank.
+- **Fix:** short-circuit in `_categorize()` when `df.empty` — assign the three
+  columns as empty/NA and return — then let `_finalize_columns()` produce a
+  correctly-shaped empty DataFrame. Worth also deciding whether "file parsed
+  but produced 0 transactions" should be a `ProcessingWarning` so the user
+  isn't left wondering why nothing imported.
+- **Tests:** `tests/test_statements/test_base.py`, marker
+  `EMPTY_AFTER_FILTERING` (2 tests).
+- **Risk:** low to fix, and it's a plausible real-world file.
+
+## 9. Date fallbacks can return timezone-aware timestamps
+- **Where:** `src/statements/base.py`, `_attempt_date_parse()`.
+- **Symptom:** the `ISO8601` and `%Y-%m-%dT%H:%M:%S%z` candidates preserve the
+  UTC offset, so `transaction_date` comes back tz-aware
+  (`Timestamp('2022-10-13 01:02:03+0000', tz='UTC')`) while every other
+  candidate yields tz-naive values. Those then go into a SQLite `TEXT` column
+  via `bulk_add_transactions`, so the stored string gains a `+00:00` suffix for
+  some files and not others — which breaks `transaction_date >= ?` range
+  filters comparing against plain `YYYY-MM-DD`.
+- **Fix:** normalise at the end of `_attempt_date_parse()` — if the result is
+  tz-aware, convert to UTC and drop the tz, or `.dt.date` it, since the rest of
+  the system only ever uses the date part.
+- **Test:** `test_base.py::TestDateParsing::test_falls_back_when_configured_format_is_wrong`
+  currently asserts the tz-aware value, i.e. it documents present behaviour.
+  Update it with the fix.
+- **Risk:** low to fix; silently wrong query results if left.
+
+## 10. `amount_column=''` passes validation, then dies on `KeyError: ''`
+- **Where:** `src/statements/base.py`, `StatementConfig.__post_init__` and
+  `StatementConfig.required_columns`.
+- **Symptom:** the two branches of the amount check disagree. The split-column
+  branch uses truthiness (`amt.credit_column and amt.debit_column`), but the
+  single-column branch uses `amt.amount_column is not None`. So an empty
+  string satisfies `has_single` and the config is accepted.
+  It then fails open all the way down:
+  - `required_columns` filters on `if c` and silently drops the blank name, so
+    the column list is `['Date', 'Description']`;
+  - `_validate_required_columns` therefore finds nothing missing and passes;
+  - `_parse_single_amount` does `df['']` and the import dies on a bare
+    `KeyError: ''` with no context about which config is at fault.
+  A config with a blank amount column is always a configuration error — it
+  should never reach the parser.
+- **How it gets in:** `StatementConfig.from_dict()` is how user-defined formats
+  are loaded from `statement_formats.config_json`, so any UI or API path that
+  submits an empty string for the amount column persists a permanently broken
+  format that only fails at import time.
+- **Fix:** make both branches use the same test. Simplest is
+  `has_single = bool(amt.amount_column)`, which makes `''` behave like `None`
+  and raises the existing "must specify either credit_column/debit_column or
+  amount_column" message at construction. Worth doing the same for
+  `credit_indicator_column` and for `description_column` /
+  `date_config.column`, which have the same blank-name hazard and no
+  validation at all today.
+- **Tests:** `tests/test_statements/test_base.py`, marker
+  `BLANK_AMOUNT_COLUMN_ACCEPTED` (2 tests) — one asserts construction should
+  raise, one asserts the import shouldn't die on a raw `KeyError`.
+- **Risk:** low. Validation-only change. Check no builtin config in
+  `configs/` relies on a falsy column name first (none do today).
+
+## 11. Credit/debit indicator matching is case- and whitespace-sensitive
+- **Where:** `src/statements/base.py`, `_parse_single_amount()`.
+- **Symptom:** the indicator is compared with a bare `==`:
+  `df[cfg.credit_indicator_column] == cfg.credit_indicator_value`.
+  Any row whose indicator doesn't match exactly is treated as a **debit**, and
+  with the default `debit_is_negative=True` its amount is multiplied by `-1`.
+  So a file using `cr`/`dr` instead of `CR`/`DR`, or one with padded values
+  like `' CR '` (common in fixed-width exports converted to CSV), silently
+  flips the sign of every credit. No error, no warning — salary lands as a
+  -2000.00 expense and every report is wrong.
+- **Why it's worse than it looks:** the failure is silent and plausible-looking.
+  Unlike a missing column, nothing in the pipeline flags it, and the numbers
+  are only obviously wrong if someone reconciles against the bank.
+- **Fix:** normalise both sides before comparing — strip and casefold, e.g.
+  `df[col].astype(str).str.strip().str.casefold() == str(value).strip().casefold()`.
+  Then consider warning on values that match **neither** the credit indicator
+  nor an expected debit indicator, since "unrecognised indicator" currently
+  falls through to "debit" indistinguishably from a real debit. That would
+  need a `debit_indicator_value` on `AmountConfig` to do properly.
+- **Tests:** `tests/test_statements/test_base.py`, marker
+  `CREDIT_INDICATOR_CASE_SENSITIVE` (2 tests: lowercase `cr`, padded `' CR '`).
+  `test_unrecognised_indicator_treated_as_debit` is left passing and
+  unmarked — it pins the genuine fall-through behaviour, which is a separate
+  decision from the normalisation fix.
+- **Risk:** low to fix, high impact if left. No builtin config in `configs/`
+  currently sets `credit_indicator_column` (AIB uses split columns; both PTSB
+  configs use split or signed amounts), so the exposure today is entirely via
+  user-defined formats loaded through `from_dict()` — which is also the path
+  with no review step.
