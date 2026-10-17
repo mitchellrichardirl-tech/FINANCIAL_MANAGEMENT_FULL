@@ -776,3 +776,130 @@ These are deliberate decisions deferred to avoid blocking leaf migrations. Resol
 # Async processor
 - `self.max_concurrency = int(max_concurrency or cfg.get("GEMINI_MAX_CONCURRENCY") or DEFAULT_MAX_CONCURRENCY)` — the `int()` here papers over the un-cast env var we backlogged, but `GEMINI_MAX_CONCURRENCY="0"` would be falsy-after-int… actually `"0"` is truthy as a string, then `int("0")` → `Semaphore(0)` deadlocks until stream timeout. Degenerate config, but the config validator from our earlier work is the natural home for a `>= 1` check on it.
 - The worker thread runs `ReceiptRepository()` under `self.app.app_context()` — with the lazy `db` property this resolves the right manager per test. Worth confirming the *memory branch* didn't add its own `self.db = get_manager()`-style capture anywhere in `receipt_worker_async`'s dependencies; the test will catch it (writes would go to a previous test's DB and `fetch_one` would miss), which is another reason these tests are worth having.
+
+# Repository bugs found during the unit-test migration
+
+Found while moving `backend/tests/test_database/test_repositories/` onto the
+shared DB fixtures in `backend/tests/conftest.py`. Each one has a test already
+written and marked `xfail(strict=True)` with a matching reason string, so the
+test flips from xfail to a hard failure the moment the bug is fixed — remove
+the marker in the same commit as the fix.
+
+Source was left untouched; these are the fixes, not the diagnoses.
+
+## 1. `list()` never re-raises — silently returns `None`
+- **Where:** `src/database/repositories/receipts.py`, `ReceiptRepository.list()`.
+- **Symptom:** the `except` block ends after `logger.error(...)`, so any DB
+  failure returns `None` instead of raising. Callers do
+  `rows, total = repo.list(...)` and get `TypeError: cannot unpack
+  non-sequence NoneType` instead of a clean `DatabaseError`.
+- **Fix:** add `raise DatabaseError(f"Failed to list receipts: {e}") from e`
+  to match every other method on the class.
+- **Test:** `test_receipts.py::TestErrorWrapping::test_list_failure_surfaces_as_database_error`.
+- **Risk:** low. One line. The Unlinked-receipts route is the only caller.
+
+## 2. `delete_party()` guard disagrees with the FK constraint
+- **Where:** `src/database/repositories/categories.py`, `delete_party()`.
+- **Symptom:** the pre-delete count filters on `deleted_at IS NULL`, so a party
+  whose transactions are *all* soft-deleted passes the guard, then fails on
+  `ON DELETE RESTRICT` and surfaces as a generic
+  `DatabaseError: Failed to delete party: FOREIGN KEY constraint failed`
+  rather than the intended "has N associated transaction(s)" message.
+- **Fix:** decide the intended rule first, then make guard and schema agree:
+  - (a) soft-deleted transactions *should* block deletion → drop
+    `AND deleted_at IS NULL` from the count query, and the user gets the clear
+    message; or
+  - (b) they *shouldn't* → the rows have to be hard-deleted or re-pointed
+    inside the same transaction before the `DELETE`, since the FK counts them
+    regardless of `deleted_at`.
+  (a) is the smaller change and is consistent with `delete_category` /
+  `delete_sub_category` / `delete_type`, which all count children unfiltered.
+- **Test:** `test_categories.py::TestDeleteParty::test_soft_deleted_transactions_do_not_block_delete`
+  (currently asserts (b); flip the assertion if (a) is chosen).
+- **Risk:** low, but it's a product decision, not just a code fix.
+
+## 3–5. Three dead-and-broken methods on `TransactionRepository`
+All three raise on *every* call. None has a caller anywhere in `src/` — the
+listing route uses `get_transactions_with_hierarchy()` and the upload route
+uses the DataFrame variant — which is why this has gone unnoticed.
+
+**Decide delete-vs-fix before doing the work.** If they're genuinely dead,
+deleting them (plus their tests and xfail markers) is the better outcome;
+fixing unused code just creates more surface to maintain. Noted individually
+below in case any is wanted.
+
+### 3. `get_transactions()` / `get_transaction_by_id()` — model mismatch
+- **Where:** `src/database/repositories/transactions.py`.
+- **Symptom:** both `SELECT` `account_name`, `related_party_name` and
+  `receipt_filename`, then do `Transaction(**dict(row))`. The dataclass has no
+  such fields → `TypeError: unexpected keyword argument 'account_name'`, wrapped
+  as `DatabaseError`. Only the empty-result path works.
+- **Fix:** either drop the three joined columns from the projection, or add
+  them to `Transaction` as non-persisted display fields. Note this is the same
+  dataclass-vs-table drift already recorded at the top of this file for
+  `Receipt` — worth solving once, in the same style, for both.
+- **Tests:** `test_transactions.py`, marker `MODEL_MISMATCH` (7 tests).
+
+### 4. `find_receipt_match_candidates()` — unfinished SQL
+- **Where:** `src/database/repositories/transactions.py`.
+- **Symptom:** `base_query` starts with a literal `...` where the column list
+  should be, so every call raises `sqlite3.OperationalError: near ".": syntax
+  error`. Looks like an interrupted edit that was never completed.
+- **Fix:** restore the projection (the `t.*` + accounts/parties/receipts joins
+  used by `get_transactions()`). Same model-mismatch caveat as #3 applies —
+  it also builds `Transaction(**dict(row))`, so it needs #3 resolved to
+  actually work end-to-end.
+- **Tests:** `test_transactions.py`, marker `BROKEN_SQL` (7 tests).
+- **Note:** `find_matching_transactions()` is the live, working equivalent and
+  is a superset of this method's behaviour. Deleting this one and pointing any
+  future caller at that is probably the right call.
+
+### 5. `bulk_add_transactions_from_objects()` — `lastrowid` after `executemany()`
+- **Where:** `src/database/repositories/transactions.py`.
+- **Symptom:** derives the inserted IDs from `cursor.lastrowid` after
+  `executemany()`. That is `None` on Python 3.12+, so it raises
+  `TypeError: unsupported operand type(s) for -: 'NoneType' and 'int'` and the
+  whole batch rolls back. The project requires `>=3.11`, so this is live
+  breakage on any current interpreter.
+- **Fix:** stop inferring contiguous ID ranges. Either `RETURNING id` with
+  `executemany` (SQLite 3.35+ / Python 3.10+ supports `RETURNING`, but not
+  reliably via `executemany` — verify), or loop `execute()` and collect each
+  `lastrowid`, or re-`SELECT` by a batch marker. The sibling
+  `bulk_add_transactions()` (DataFrame) infers from `MAX(id)` instead — also
+  unsafe under concurrent inserts, per its own docstring note. Worth fixing
+  both with one approach.
+- **Tests:** `test_transactions.py`, marker `LASTROWID_AFTER_EXECUTEMANY` (1 test).
+- **Risk:** the DataFrame variant *is* live (upload route), so if you touch the
+  shared ID-inference approach, `tests/test_api` upload paths need a re-run.
+
+## 6. Related, not a bug: `bulk_add_transactions()` date parsing
+- **Where:** `src/database/repositories/transactions.py`, DataFrame variant.
+- **Symptom:** `pd.to_datetime(...)` with no `format`/`dayfirst` emits
+  `UserWarning: Parsing dates in %d/%m/%Y format when dayfirst=False ... was
+  specified` for UK/IE-style dates. It currently parses them correctly by
+  inference, but inference is per-column and can silently flip on an ambiguous
+  batch (e.g. a file where every day ≤ 12).
+- **Fix:** pass the format explicitly. The statement config already carries
+  `date_format` per bank — thread it through rather than guessing.
+- **Risk:** medium if left alone — a silent `05/06` month/day swap is the kind
+  of bug that only shows up in reports months later.
+
+## 7. `StatementFormatRepository` not-found inconsistency (no test marker)
+Not a bug — no test is xfailed for this — but it surfaced while writing
+`test_statement_format.py` and is cheap to tidy.
+
+- **Where:** `src/database/repositories/statement_format.py`.
+- **Symptom:** the class docstring claims "Not-found is signaled by returning
+  None (reads) or False (deletes), matching the `AccountRepository`
+  convention", but `get_format_by_id()` raises `RecordNotFound` instead. Worse,
+  `update_format(id)` with *no* fields delegates to `get_format_by_id()` and so
+  raises, while `update_format(id, bank_name=...)` returns `None` for the same
+  missing ID.
+- **Fix:** pick one convention per operation and make the docstring match.
+  `RecordNotFound` is arguably the better behaviour (it maps cleanly to a 404
+  and can't be ignored), in which case the other repositories are the ones out
+  of step — but at minimum the two `update_format` paths should agree.
+- **Tests:** `test_statement_format.py::TestGetFormatById` and
+  `TestUpdateFormat::test_no_fields_on_missing_format_raises_not_found` pin
+  current behaviour, so they'll fail loudly if it changes. Update them with
+  the fix.
