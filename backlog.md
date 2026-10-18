@@ -1123,3 +1123,35 @@ Not a bug — no test is xfailed for this — but it surfaced while writing
 - **Risk:** behavioural change for Revolut imports — multi-currency rows would
   start being dropped rather than imported at face value. Worth checking
   against a real export before flipping.
+
+## 17. `MAX_WORKERS` / `GEMINI_MAX_CONCURRENCY` aren't validated as >= 1
+- **Where:** `src/config.py` `_validate()`; surfaces in
+  `src/api/services/parallel_processor.py` and `async_processor.py`.
+- **Symptom:** `_validate()` checks the three receipt-matching settings but not
+  the concurrency ones. `MAX_WORKERS=0` passes config load, flows through
+  `get_optimal_workers()` unchanged (`0 is not None`, so the "calculate a
+  sensible default" branch is skipped), and finally dies inside
+  `ProcessPoolExecutor(max_workers=0)` with
+  `ValueError: max_workers must be greater than 0` — at upload time, mid-stream,
+  after the user has picked their files. A negative value does the same.
+  `GEMINI_MAX_CONCURRENCY=0` is the async equivalent already noted at the end
+  of the "Async processor" section: it yields `Semaphore(0)` and deadlocks
+  until the stream timeout, which is worse because it looks like a hang.
+- **Fix:** add to `_validate()`:
+  ```python
+  if s.max_workers < 1:
+      raise ConfigError("MAX_WORKERS must be >= 1")
+  if s.gemini_max_concurrency < 1:
+      raise ConfigError("GEMINI_MAX_CONCURRENCY must be >= 1")
+  ```
+  Failing at boot is the right behaviour for a misconfigured deployment.
+- **Related:** `src/api/constants.py` defines `MAX_WORKERS_LIMIT = 8` and
+  `DEFAULT_MAX_WORKERS = 2`, neither of which is referenced anywhere. Either
+  wire `MAX_WORKERS_LIMIT` into the same validation as an upper bound, or
+  delete both — `config.py` already hardcodes the default of 2 separately,
+  so today there are two sources of truth that nothing keeps in sync.
+- **Tests:** `tests/test_api/test_services/test_parallel_processor.py`:
+  `test_zero_is_treated_as_explicit` and
+  `test_zero_workers_blows_up_when_the_pool_is_built` pin current behaviour.
+  Update them to a config-level `ConfigError` test when fixed.
+- **Risk:** low. Deployment-config only, no runtime path change for valid values.
