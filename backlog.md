@@ -1052,3 +1052,74 @@ Not a bug — no test is xfailed for this — but it surfaced while writing
 - **Test:** `tests/test_statements/test_registry.py`, marker
   `EMPTY_INJECTION_IGNORED` (1 test).
 - **Risk:** very low. Nothing in `src/` passes an empty dict today.
+
+## 14. Revolut `_parse_description` — dead `fillna` that breaks in pandas 3.0
+- **Where:** `src/statements/processors/revolut.py`, `_parse_description()`.
+- **Symptom:** `df['Merchant'].fillna('', inplace=True)` is chained assignment
+  on a temporary Series. It already does nothing, and pandas says so:
+  > FutureWarning: A value is trying to be set on a copy of a DataFrame or
+  > Series through chained assignment using an inplace method. The behavior
+  > will change in pandas 3.0. This inplace method will never work because the
+  > intermediate object on which we are setting values always behaves as a copy.
+
+  The code is correct today only because the `lambda` below it re-checks with
+  `pd.notna(row.get('Merchant'))`, so the no-op `fillna` is never load-bearing.
+  The project pins `pandas>=2.3.3`, so a 3.0 bump would turn the warning into
+  an error.
+- **Fix:** delete the line — the `pd.notna` guard already covers nulls. If you
+  prefer to keep the normalisation, write it as
+  `df['Merchant'] = df['Merchant'].fillna('')`.
+  While in here, the `df.apply(..., axis=1)` is a row-wise Python loop over the
+  whole statement; a vectorised version would be both faster and simpler:
+  ```python
+  merchant = df['Merchant'].fillna('').astype(str).str.strip()
+  df['description'] = df['description'].where(
+      merchant == '', df['description'] + ' - ' + merchant
+  )
+  ```
+  That also fixes #15 and drops the trailing-whitespace oddity pinned in
+  `test_merchant_whitespace_is_not_stripped_from_the_output`.
+- **Tests:** none marked — current behaviour is correct, so this is a latent
+  failure. `tests/test_statements/test_processors_revolut.py` emits the
+  FutureWarning on every merchant test, which is the visible signal.
+- **Risk:** low now, breaks on a pandas major bump. Worth pairing with a
+  `filterwarnings = error::FutureWarning` entry in `pytest.ini` so the next
+  one of these is caught at write time rather than at upgrade time.
+
+## 15. Revolut merchant enrichment crashes on a numeric merchant value
+- **Where:** `src/statements/processors/revolut.py`, `_parse_description()`.
+- **Symptom:** the guard is
+  `pd.notna(row.get('Merchant')) and row.get('Merchant', '').strip()`.
+  `.strip()` is called on the raw cell value, so if pandas types the Merchant
+  column as numeric — a CSV where the merchant is something like `7874`, or a
+  column that is mostly blank with a few numeric-looking entries — the row
+  raises `AttributeError: 'int' object has no attribute 'strip'`.
+  Because this happens inside `df.apply`, one bad cell aborts the entire
+  import with a 500; the user loses the whole file over one row.
+- **Fix:** coerce before testing — `str(row.get('Merchant', '')).strip()` — or
+  adopt the vectorised rewrite in #14, which casts with `.astype(str)` and
+  fixes both at once.
+- **Tests:** `tests/test_statements/test_processors_revolut.py`, marker
+  `NUMERIC_MERCHANT` (2 tests: the value should be coerced, and one bad row
+  shouldn't take down the rest of the file).
+- **Risk:** low likelihood, total failure when hit. Untriggerable today because
+  `RevolutStatementProcessor` isn't wired up (see #16).
+
+## 16. Revolut custom processor is written but not registered
+- **Where:** `src/statements/registry.py`, `CUSTOM_PROCESSORS`.
+- **Symptom:** the dict is empty with `'revolut_current': RevolutStatementProcessor`
+  commented out, so `get_processor('builtin:revolut_current', …)` returns a
+  plain `ConfigurableStatementProcessor`. Revolut imports therefore get no
+  currency filtering and no merchant enrichment, and `list_all()` reports
+  `has_custom_processor: False` for Revolut in the UI picker.
+- **Decide:** if the processor is meant to be live, uncomment it (and import
+  the class) — but fix #15 first, since registering it is what makes that
+  crash reachable. If it was deliberately parked, say so in a comment, because
+  right now it reads as an oversight.
+- **Tests:** `tests/test_statements/test_processors_revolut.py` covers the
+  class directly, so it's tested either way.
+  `test_registry.py::TestListAll::test_has_custom_processor_flag` uses an
+  injected mapping, so it won't change when this is switched on.
+- **Risk:** behavioural change for Revolut imports — multi-currency rows would
+  start being dropped rather than imported at face value. Worth checking
+  against a real export before flipping.
