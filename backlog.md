@@ -1346,3 +1346,54 @@ Not a bug — no test is xfailed for this — but it surfaced while writing
   alongside.
 - **Risk:** low to fix; the silent-wrong-results behaviour is the worst of the
   three here.
+
+## 25. `paginated_response` infers `has_more` from the page size
+- **Where:** `src/api/utils/response_helpers.py`, `paginated_response()`.
+- **Symptom:** `'has_more': len(items) == limit`. Two wrong answers fall out:
+  1. **False positive on an exactly-full last page.** 100 transactions with
+     `limit=50, offset=50` returns `has_more=True`; the client fetches
+     `offset=100`, gets an empty page, and only then learns it was done. At
+     best a wasted round trip, at worst an infinite-scroll component that
+     renders a spinner for a page that will never arrive.
+  2. **`limit=0` reports `has_more=True` on an empty page**, since
+     `len([]) == 0` is true. Not reachable through the API today —
+     `validate_pagination` enforces `1 <= limit <= 500` — but
+     `paginated_response` is a public helper with no guard of its own.
+- **Callers:** `transactions.get_transactions`, `transactions` search, and
+  `tabular_files.get_uploads`.
+- **Fix:** pass the real total. Every caller already has a repository method
+  that can supply it (`count_uploads()`, and `TransactionRepository` would
+  need a matching `count_transactions()`), so:
+  ```python
+  def paginated_response(items, limit, offset, total=None, ...):
+      has_more = (offset + len(items)) < total if total is not None else len(items) == limit
+  ```
+  keeps the current behaviour for callers that don't pass a total, and makes
+  `total` available to the client for page counts — which the UI will want
+  anyway. `ReceiptRepository.list()` already returns `(rows, total)`, so the
+  pattern exists.
+- **Tests:** `tests/test_api/test_utils/test_response_helpers.py`, marker
+  `HAS_MORE_ON_EMPTY_PAGE` (the `limit=0` case).
+  `test_has_more_true_when_the_page_is_full` pins the current behaviour for
+  the exactly-full page and should be updated with the fix.
+- **Risk:** low to fix; needs a `count_transactions()` on the repository, plus
+  a frontend check that nothing depends on the current over-reporting.
+
+## 26. Echoed `search_parameters` are serialised as RFC 822, not ISO
+- **Where:** `src/api/utils/response_helpers.py`, `search_response()`, via
+  Flask's JSON encoder.
+- **Symptom:** `search_response` echoes the validated params straight back.
+  Those params have been through `parse_date`, so they're `datetime` objects
+  by then, and Flask renders them as `'Mon, 01 Jan 2024 00:00:00 GMT'`. The
+  client sent `'2024-01-01'` and gets a differently-formatted string back, so
+  naively re-submitting the echoed parameters would fail `parse_date`
+  validation.
+- **Caller:** `transactions.find_transactions` (POST /transactions/search),
+  which echoes `transaction_date`.
+- **Fix:** stringify dates before echoing (`.date().isoformat()`), or echo the
+  raw request payload rather than the validated one. The second is simpler and
+  probably what the client expects — it asked for these values.
+- **Test:** `test_response_helpers.py::TestSearchResponse::test_datetime_parameters_echo_back_as_http_dates_not_iso`
+  documents current behaviour.
+- **Risk:** low. Only matters if the frontend round-trips the echoed params;
+  worth a quick check of how the search view uses them.
