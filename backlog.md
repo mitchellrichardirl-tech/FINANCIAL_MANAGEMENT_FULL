@@ -1272,3 +1272,77 @@ Not a bug — no test is xfailed for this — but it surfaced while writing
 - **Tests:** `test_sse_batch_processor.py::TestProtocolDrift::test_result_data_can_clobber_the_event_envelope`
   documents the current behaviour.
 - **Risk:** low now, annoying to debug if it ever fires.
+
+# API validation-layer bugs (src/api/utils/validators.py)
+
+## 22. `in_range()` crashes on non-numeric input instead of rejecting it
+- **Where:** `src/api/utils/validators.py`, `FieldValidator.in_range()`.
+- **Symptom:** the bounds are applied with bare `<` / `>`:
+  ```python
+  if min_val is not None and self.value < min_val:
+  ```
+  With a non-numeric value that raises
+  `TypeError: '<' not supported between instances of 'str' and 'int'`, which
+  escapes the validator entirely. Every other check in the class turns bad
+  input into a `ValidationError`; this one turns it into a 500.
+- **Current exposure:** limited but not zero. Most callers transform first
+  (`.transform(parse_int).in_range(...)`), and `transform` stops the chain on
+  failure, so the common paths are safe. It is reachable wherever `in_range`
+  is used without a preceding `transform` or `is_type` —
+  `validate_single_field(..., min_val=...)` with no `transformer` is the
+  clearest route, and that's a public helper.
+- **Fix:** guard the comparison, e.g. reject non-`(int, float)` values with a
+  `type_error` before comparing, or wrap the comparison in try/except
+  `TypeError` and emit a validation error. Worth matching the other methods
+  and setting `_stopped` on failure — see #23.
+- **Test:** `tests/test_api/test_utils/test_validators.py`, marker
+  `IN_RANGE_TYPE_ERROR`.
+- **Risk:** low to fix.
+
+## 23. `in_range()` is the only check that doesn't stop the chain
+- **Where:** same method.
+- **Symptom:** every other check (`required`, `is_type`, `in_set`,
+  `transform`, `strip_string`) sets `self._stopped = True` on failure so later
+  checks are skipped. `in_range` doesn't, so a value can accumulate two errors
+  from one chain (`FieldValidator('n', 0).in_range(1, 10).is_type(str)` yields
+  two). Only the first error is ever surfaced — `get_result()` and
+  `first_error_message()` both read `errors[0]` — so the second is dead weight
+  rather than a visible bug.
+- **Note:** `in_range` also uses `elif` between the min and max checks, which
+  is fine given the bounds can't both fail, but reads as though it were
+  guarding against that.
+- **Fix:** set `_stopped` on failure for consistency. Behaviour-neutral for
+  callers today, so safe to fold into #22.
+- **Test:** `TestInRange::test_does_not_stop_the_chain` pins current
+  behaviour; update it with the fix.
+- **Risk:** very low. Cosmetic unless someone starts surfacing all errors.
+
+## 24. `validate_boolean_fields()` can't fail, so bad input becomes `False`
+- **Where:** `src/api/utils/validators.py`, `validate_boolean_fields()`.
+- **Symptom:** it bypasses the validator machinery entirely:
+  ```python
+  validator.validated[field] = parse_bool_from_string(data[field])
+  ```
+  No `ValidationError` is ever produced. `parse_bool_from_string` returns True
+  only for `'true'`, `'1'`, `'yes'` (case-insensitive) and False for anything
+  else, so `?is_kids=maybe`, `?is_kids=y`, `?is_kids=on` and a typo'd
+  `?is_kids=ture` all silently mean **False**.
+  For a filter that means the user gets the wrong rows back with no error.
+  This is used on the transaction list (`is_kids`, `is_one_off`, `is_credit`,
+  `has_receipt`, `include_deleted`, `deleted_only`) and on the receipts list.
+  `include_deleted` / `deleted_only` are the ones to care about: a typo there
+  quietly changes which records are visible.
+- **Fix:** have `parse_bool_from_string` distinguish "unrecognised" from
+  "false" — return None, or raise `ValueError` — and route the field through
+  `validator.validate_field(...)` so an unparseable value becomes a 400 with a
+  message naming the field. Accepting the usual extra spellings
+  (`on`/`off`, `y`/`n`, `t`/`f`) at the same time would be kind.
+  Careful: `parse_bool_from_string` is also used by `FieldValidator.as_bool()`
+  and directly in route code, so check all callers before changing its return
+  contract.
+- **Test:** `tests/test_api/test_utils/test_validators.py`, marker
+  `BOOLEAN_FIELDS_NEVER_FAIL`. `test_unrecognised_string_is_false_not_an_error`
+  pins the current `parse_bool_from_string` behaviour and should be updated
+  alongside.
+- **Risk:** low to fix; the silent-wrong-results behaviour is the worst of the
+  three here.
