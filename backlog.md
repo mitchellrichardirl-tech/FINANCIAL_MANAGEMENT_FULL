@@ -1155,3 +1155,120 @@ Not a bug — no test is xfailed for this — but it surfaced while writing
   `test_zero_workers_blows_up_when_the_pool_is_built` pin current behaviour.
   Update them to a config-level `ConfigError` test when fixed.
 - **Risk:** low. Deployment-config only, no runtime path change for valid values.
+
+# Cash transaction service bugs found while adding tests
+
+## 18. Generated counterparts are missing `source_relationship='generated'`
+- **Where:** `src/services/cash_transactions.py`,
+  `generate_cash_transactions()` — the bulk `executemany` INSERT.
+- **Symptom:** the batch insert sets `source_transaction_id` but **not**
+  `source_relationship`, so counterparts land with `source_relationship = NULL`.
+  Every soft-delete rule in `TransactionRepository` keys off that column:
+  - `_live_generated_children()` filters `source_relationship = 'generated'`,
+    so `delete_transaction(source)` reports `cascaded_ids: []` and leaves the
+    cash-side mirror live. The user deletes an ATM withdrawal and the Cash
+    account keeps a phantom +100.00, silently unbalancing the Cash balance.
+  - `bulk_delete_transactions()` has the same blind spot.
+  - `restore_transaction()` only restores children with
+    `deleted_reason='cascade'`, which these never get.
+  The sibling write path `_insert_cash_transaction()` (used by
+  `create_cash_transaction` and `generate_cash_transaction_from_receipt`)
+  *does* pass `'generated'` — so the two paths disagree, and the bulk path is
+  the one the Generate Cash flow actually uses.
+- **Fix:** add the column and a literal `'generated'` to the `executemany`
+  INSERT, matching `_insert_cash_transaction()`. Then decide on a backfill:
+  existing rows with `source_transaction_id IS NOT NULL AND
+  source_relationship IS NULL` are all from this path, so a one-line migration
+  can set them — worth doing, otherwise historic cash rows stay un-cascadeable.
+- **Tests:** `tests/test_services/test_cash_transactions.py`, marker
+  `GENERATED_MISSING_RELATIONSHIP` (2 tests: the column is set; deleting the
+  source cascades).
+- **Risk:** low to fix, and it closes a real data-integrity hole. The cascade
+  machinery and its tests already exist — this path just never opted in.
+
+## 19. `generate_cash_transactions()` ignores soft deletes entirely
+- **Where:** `src/services/cash_transactions.py`,
+  `generate_cash_transactions()` — the source `SELECT` and the
+  "already generated" `SELECT`.
+- **Symptom:** neither query filters `deleted_at IS NULL`, giving two wrong
+  behaviours:
+  1. **Deleted sources are mirrored.** Selecting a soft-deleted transaction
+     generates a live Cash counterpart for a transaction the user has already
+     deleted. (Reachable via any caller that passes stale IDs — the recycle-bin
+     view lists deleted transactions by design.)
+  2. **Deleted counterparts block regeneration forever.** The
+     `already_generated` check matches soft-deleted rows, so once a user
+     deletes a generated cash row, the source is permanently reported as
+     `skipped` and can never be regenerated. There is no UI path to undo that
+     short of restoring the deleted counterpart.
+  (2) is the more likely to be hit, and there's no workaround.
+- **Fix:** add `AND deleted_at IS NULL` to both queries. For (1), consider
+  whether a deleted source should be *rejected* (with its ID in
+  `rejected_ids`) rather than silently absent from the result — a caller
+  passing a deleted ID has a stale view and probably wants to be told.
+  Note the interaction with #18: once the cascade works, deleting a source
+  also deletes its counterpart, so a later "undelete and regenerate" flow
+  should go through `restore_transaction()` rather than regenerating.
+- **Tests:** `tests/test_services/test_cash_transactions.py`, marker
+  `SOFT_DELETE_IGNORED` (2 tests). They assert the desired behaviour, so
+  pick the rejection semantics before unmarking the first one.
+- **Risk:** low to fix. Fix alongside #18 — both are in the same method and
+  both are about the soft-delete contract.
+
+## 20. `BatchProcessor` (src/api/utils/sse.py) is dead code that has drifted
+- **Where:** `src/api/utils/sse.py`, `BatchProcessor`.
+- **Status:** no callers anywhere in `src/` (only a pdoc search-index hit in
+  `backend/docs/`). Every live streaming path goes through
+  `StreamEventReporter` plus `ParallelStreamProcessor` /
+  `AsyncReceiptStreamProcessor`.
+- **Why it's a liability rather than harmless:** it emits the same SSE
+  protocol as the live path, but has drifted from it, so anyone who revives it
+  for a new batch endpoint inherits subtly broken streaming:
+  - **`completed` omits the tally.** It calls
+    `SSEEventBuilder.completed(self.processed_count)` with no `successes` /
+    `errors`, while `StreamEventReporter.completed()` supplies both. A client
+    written against the receipts stream reads `undefined` for each.
+  - **No abort path.** Nothing reports files that were announced as
+    `processing` but never produced a result, so a failure mid-batch leaves
+    the UI with rows stuck on the spinner forever.
+  - **No heartbeat.** A long sequential batch sits silent until a proxy or
+    gunicorn kills the connection.
+  - **`max_workers` is accepted and ignored.** The constructor stores it;
+    `process_sequential()` always reports `workers=1` and runs serially. A
+    caller passing `max_workers=8` gets no parallelism and no warning.
+  - **Counters aren't thread-safe**, unlike `StreamEventReporter` — fine while
+    it's sequential, a trap if someone adds a `process_parallel()`.
+- **Recommended fix: delete the class.** If a second batch endpoint is ever
+  needed, `StreamEventReporter` already owns the protocol correctly and
+  `ParallelStreamProcessor` already does the execution; a sequential variant
+  would be a handful of lines on top of the reporter rather than a parallel
+  implementation of the same protocol.
+- **Tests:** `tests/test_api/test_utils/test_sse_batch_processor.py` pins
+  current behaviour (31 tests), including a `TestProtocolDrift` class that
+  asserts each divergence above. Delete the file alongside the class.
+- **Risk:** none to delete — nothing imports it. The only cost is if there's
+  an unmerged branch depending on it, worth checking before removal.
+
+## 21. `result_data` can overwrite the SSE event envelope
+- **Where:** `src/api/utils/sse.py`, `SSEEventBuilder.success()`.
+- **Symptom:** the payload is spread last:
+  ```python
+  {"status": "success", "file_index": ..., "filename": ..., **result_data, **extra}
+  ```
+  so a worker payload containing `status`, `file_index`, `filename`,
+  `progress` or `timestamp` silently overwrites the envelope. A payload with
+  `status` set turns a success event into something the client won't
+  recognise as a success at all.
+- **Current exposure:** none — `worker_common.success()` uses `receipt_id`,
+  `receipt_status`, `original_filename`, `stored_filename`, `extracted_data`,
+  and there's already a test pinning that it avoids the reserved keys
+  (`test_receipt_stream_processor.py::test_result_data_cannot_clobber_event_envelope`).
+  So this is a latent trap for the *next* worker payload, not a live bug.
+- **Fix:** make the envelope win, by spreading `result_data` first, or nest the
+  payload under a `result` key (a frontend change), or assert in
+  `_format_event()` that the payload and envelope keys don't intersect. The
+  nested option is cleanest but touches the client; the first is a one-line
+  reorder.
+- **Tests:** `test_sse_batch_processor.py::TestProtocolDrift::test_result_data_can_clobber_the_event_envelope`
+  documents the current behaviour.
+- **Risk:** low now, annoying to debug if it ever fires.
